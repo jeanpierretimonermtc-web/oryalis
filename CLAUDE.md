@@ -22,7 +22,7 @@
 | Navigation | Expo Router ~56.2.8 (file-based) |
 | Backend / DB | Supabase (PostgreSQL + Auth + RLS) |
 | i18n | i18next ^24 + react-i18next ^15 + expo-localization |
-| Déploiement web | Vercel (`npx vercel --prod`) |
+| Déploiement web | Vercel (auto-deploy sur push `main`) |
 | Migrations DB | Node.js + `pg` ^8 (scripts `migrate*.mjs`) |
 | Fonts | Inter via `@expo-google-fonts/inter` |
 
@@ -282,14 +282,15 @@ Pour ajouter une marque : `INSERT INTO catalogs` + `INSERT INTO catalog_products
 
 ## Déploiement
 
-Le webhook GitHub→Vercel n'est **pas actif**. Déploiement manuel :
+Le webhook GitHub→Vercel est **actif** (réparé le 2026-07-24 via `vercel git connect` après déconnexion/reconnexion). Chaque push sur `main` déclenche automatiquement un déploiement en production — plus besoin de lancer `vercel --prod` manuellement :
 
 ```bash
 git add <fichiers>
 git commit -m "message"
 git push origin main
-npx vercel --prod
 ```
+
+Déploiement manuel toujours possible si besoin (ex: tester avant de push) : `npx vercel --prod`.
 
 Build Vercel : `npx expo export --platform web` → dossier `dist/`.
 
