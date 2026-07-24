@@ -16,7 +16,12 @@ export async function fetchBusinessProfile(userId: string): Promise<UserBusiness
 
 export async function upsertBusinessProfile(
   userId: string,
-  patch: { activity_type?: ActivityType; custom_brand_name?: string | null; active_modules?: ModuleKey[] }
+  patch: {
+    activity_type?: ActivityType
+    custom_brand_name?: string | null
+    active_modules?: ModuleKey[]
+    automation_delays?: Record<string, number>
+  }
 ): Promise<UserBusinessProfile> {
   const { data, error } = await supabase
     .from('user_business_profiles')
@@ -26,6 +31,7 @@ export async function upsertBusinessProfile(
         activity_type: patch.activity_type ?? 'generic',
         custom_brand_name: patch.custom_brand_name ?? null,
         active_modules: patch.active_modules ?? DEFAULT_MODULES,
+        automation_delays: patch.automation_delays ?? {},
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' }

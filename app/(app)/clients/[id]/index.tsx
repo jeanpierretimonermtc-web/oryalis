@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Linking, Platform } from 'react-native'
 import { router, Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
@@ -12,17 +12,30 @@ import { useClientInteractions } from '@/features/interactions/useInteractions'
 import { useClientOrders } from '@/features/orders/useOrders'
 import { useDirectTeam } from '@/features/network/useNetwork'
 import { computeProspectScore } from '@/features/clients/clientService'
+import { callContact, completeNextAction, openWhatsApp, postponeNextAction } from '@/features/clients/nextActionService'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { MessageModal } from '@/shared/components/ui/MessageModal'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { ClientStatus, ContactRole } from '@/shared/lib/types'
+import { formatDate } from '@/shared/lib/dateFormat'
 
-type Tab = 'apercu' | 'rdv' | 'notes' | 'relances' | 'reco' | 'interactions' | 'orders' | 'team'
+type Tab = 'apercu' | 'chrono' | 'rdv' | 'notes' | 'relances' | 'reco' | 'interactions' | 'orders' | 'team'
+
+interface TimelineEntry {
+  id: string
+  date: string
+  icon: string
+  title: string
+  sub?: string
+  done?: boolean
+  onPress: () => void
+}
 
 const BASE_TABS: { key: Tab; labelKey: string }[] = [
   { key: 'apercu',       labelKey: 'clients.tab_overview' },
+  { key: 'chrono',       labelKey: 'clients.tab_timeline' },
   { key: 'rdv',          labelKey: 'clients.tab_rdv' },
   { key: 'notes',        labelKey: 'clients.tab_notes' },
   { key: 'relances',     labelKey: 'clients.tab_followups' },
@@ -51,7 +64,19 @@ function nameInitials(name: string) {
 
 function fmtShort(d: string | null | undefined, locale: string) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString(locale, { day: '2-digit', month: 'short' })
+  return formatDate(d, locale, { day: '2-digit', month: 'short' })
+}
+
+function openAddressInMaps(address: string) {
+  const query = encodeURIComponent(address)
+  const url = Platform.select({
+    ios:     `maps:0,0?q=${query}`,
+    android: `geo:0,0?q=${query}`,
+    default: `https://www.google.com/maps/search/?api=1&query=${query}`,
+  })!
+  Linking.openURL(url).catch(() => {
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`).catch(console.error)
+  })
 }
 
 export default function ClientDetailScreen() {
@@ -60,7 +85,7 @@ export default function ClientDetailScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { id } = useLocalSearchParams<{ id: string }>()
   const { session } = useAuth()
-  const { client, loading } = useClient(id)
+  const { client, loading, refresh } = useClient(id)
   const { appointments } = useClientAppointments(id)
   const { notes } = useNotes(id)
   const { followups } = useClientFollowups(id)
@@ -70,6 +95,7 @@ export default function ClientDetailScreen() {
   const { team } = useDirectTeam(id)
   const [activeTab, setActiveTab]       = useState<Tab>('apercu')
   const [messageOpen, setMessageOpen]   = useState(false)
+  const [actionBusy, setActionBusy]     = useState(false)
   const { getStatusLabel, isModuleActive } = useAppConfig()
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
 
@@ -102,8 +128,71 @@ export default function ClientDetailScreen() {
     .sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime())
   const future = appointments.filter(a => new Date(a.start_at) > now)
     .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime())
-  const lastDate = past[0]?.start_at
-  const nextDate = future[0]?.start_at
+  const lastDate = client.last_interaction_at
+  const nextDate = client.next_action_at
+
+  // ── Chronologie relationnelle : fusion de tous les événements par date ──────
+  const timelineEntries: TimelineEntry[] = [
+    ...appointments.map(appt => ({
+      id: `rdv-${appt.id}`,
+      date: appt.start_at,
+      icon: '📅',
+      title: appt.title,
+      sub: t(`appointment_statuses.${appt.status}` as any),
+      onPress: () => router.push(`/(app)/clients/${id}/appointments`),
+    })),
+    ...notes.map(note => ({
+      id: `note-${note.id}`,
+      date: note.created_at,
+      icon: '📝',
+      title: note.content,
+      onPress: () => router.push(`/(app)/clients/${id}/notes`),
+    })),
+    ...followups.map(f => ({
+      id: `relance-${f.id}`,
+      date: f.due_date,
+      icon: '🔔',
+      title: f.title ?? f.content ?? t('followups.title'),
+      sub: f.done ? t('followups.done') : undefined,
+      done: f.done,
+      onPress: () => router.push(`/(app)/clients/${id}/followups`),
+    })),
+    ...recommendations.map(r => ({
+      id: `reco-${r.id}`,
+      date: r.recommendation_date ?? r.created_at,
+      icon: '🌿',
+      title: r.product_name,
+      sub: r.reason ?? t(`recommendations.${r.status}`),
+      onPress: () => router.push(`/(app)/clients/${id}/recommendations`),
+    })),
+    ...orders.map(o => ({
+      id: `commande-${o.id}`,
+      date: o.order_date,
+      icon: '🛒',
+      title: o.product_name,
+      sub: o.amount != null ? `${o.amount.toFixed(0)}€` : undefined,
+      onPress: () => router.push(`/(app)/clients/${id}/orders`),
+    })),
+    ...interactions.map(item => ({
+      id: `interaction-${item.id}`,
+      date: item.scheduled_at ?? item.completed_at ?? item.created_at,
+      icon: '💬',
+      title: item.subject ?? t(`interaction_types.${item.interaction_type}`),
+      sub: t(`interaction_types.${item.interaction_type}`),
+      done: !!item.completed_at,
+      onPress: () => router.push(`/(app)/clients/${id}/interactions`),
+    })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+  async function runNextAction(action: () => Promise<void>) {
+    setActionBusy(true)
+    try {
+      await action()
+      await refresh()
+    } finally {
+      setActionBusy(false)
+    }
+  }
 
   const sc = statusColors[client.status as ClientStatus] ?? { bg: colors.surfaceContainerHigh, text: colors.textSecondary }
 
@@ -120,7 +209,7 @@ export default function ClientDetailScreen() {
     lastRdvDate: lastDate ?? null,
     totalRdv: appointments.length,
     followupTemperature: bestFollowup?.prospect_temperature ?? null,
-    pipelineStage: bestFollowup?.pipeline_stage ?? null,
+    pipelineStage: client.pipeline_stage,
   })
 
   const scoreBg   = prospectScore >= 70 ? colors.dangerLight  : prospectScore >= 40 ? colors.warningLight : colors.bgDim
@@ -212,6 +301,26 @@ export default function ClientDetailScreen() {
 
           {/* ── Quick actions ────────────────────────────────────── */}
           <View style={styles.quickActions}>
+            {client.next_action_source ? (
+              <>
+                <TouchableOpacity disabled={actionBusy} style={styles.qaBtn} onPress={() => runNextAction(() => completeNextAction(client))} activeOpacity={0.8}>
+                  <Text style={styles.qaIcon}>✓</Text><Text style={styles.qaLabel}>Terminer</Text>
+                </TouchableOpacity>
+                <TouchableOpacity disabled={actionBusy} style={styles.qaBtn} onPress={() => runNextAction(() => postponeNextAction(client))} activeOpacity={0.8}>
+                  <Text style={styles.qaIcon}>＋1</Text><Text style={styles.qaLabel}>Reporter</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+            {client.phone ? (
+              <>
+                <TouchableOpacity style={styles.qaBtn} onPress={() => callContact(client.phone!)} activeOpacity={0.8}>
+                  <Text style={styles.qaIcon}>☎</Text><Text style={styles.qaLabel}>Appeler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.qaBtn} onPress={() => openWhatsApp(client.phone!)} activeOpacity={0.8}>
+                  <Text style={styles.qaIcon}>WA</Text><Text style={styles.qaLabel}>WhatsApp</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
             <TouchableOpacity style={styles.qaBtn} onPress={() => setMessageOpen(true)} activeOpacity={0.8}>
               <Text style={styles.qaIcon}>💬</Text>
               <Text style={styles.qaLabel}>Message</Text>
@@ -256,39 +365,135 @@ export default function ClientDetailScreen() {
                       <Text style={styles.cardMenu}>⋮</Text>
                     </TouchableOpacity>
                   </View>
-                  {client.email ? (
-                    <View style={styles.fieldBlock}>
-                      <Text style={styles.fieldLabel}>{t('clients.fields.email').toUpperCase()}</Text>
-                      <Text style={styles.fieldValue}>{client.email}</Text>
-                    </View>
-                  ) : null}
-                  {client.phone ? (
-                    <View style={styles.fieldBlock}>
-                      <Text style={styles.fieldLabel}>{t('clients.fields.phone').toUpperCase()}</Text>
-                      <Text style={styles.fieldValue}>{client.phone}</Text>
-                    </View>
-                  ) : null}
-                  {client.birth_date ? (
-                    <View style={styles.fieldBlock}>
-                      <Text style={styles.fieldLabel}>{t('clients.fields.birth_date').toUpperCase()}</Text>
-                      <Text style={styles.fieldValue}>
-                        {new Date(client.birth_date).toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' })}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {client.profession ? (
-                    <View style={styles.fieldBlock}>
-                      <Text style={styles.fieldLabel}>{t('clients.fields.profession').toUpperCase()}</Text>
-                      <Text style={styles.fieldValue}>{client.profession}</Text>
-                    </View>
-                  ) : null}
-                  {client.children ? (
-                    <View style={styles.fieldBlock}>
-                      <Text style={styles.fieldLabel}>{t('clients.fields.children').toUpperCase()}</Text>
-                      <Text style={styles.fieldValue}>{client.children}</Text>
-                    </View>
+                  <View style={styles.fieldGrid}>
+                    {client.email ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>✉️</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.email').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>{client.email}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {client.phone ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>📞</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.phone').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>{client.phone}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {client.birth_date ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>🎂</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.birth_date').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>
+                            {formatDate(client.birth_date, locale, { day: '2-digit', month: 'long', year: 'numeric' })}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {client.profession ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>💼</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.profession').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>{client.profession}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {client.children ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>👶</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.children').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>{client.children}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {client.country ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>🌍</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.country').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>{client.country}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {client.source ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>🔗</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.source').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>{client.source}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {client.inscription_date ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>🗓</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.inscription_date').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>
+                            {formatDate(client.inscription_date, locale)}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {client.address ? (
+                    <TouchableOpacity
+                      style={styles.addressRow}
+                      onPress={() => openAddressInMaps(client.address!)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={styles.fieldIconBox}><Text style={styles.fieldIconEmoji}>📍</Text></View>
+                      <View style={styles.addressTextBlock}>
+                        <Text style={styles.fieldLabel}>{t('clients.fields.address').toUpperCase()}</Text>
+                        <Text style={styles.fieldValue}>{client.address}</Text>
+                      </View>
+                      <Text style={styles.addressChevron}>›</Text>
+                    </TouchableOpacity>
                   ) : null}
                 </View>
+
+                {/* Programme fidélité */}
+                {isModuleActive('renewals_lrp') && (client.doterra_id || client.loyalty_notes || client.next_lrp_date) ? (
+                  <View style={styles.card}>
+                    <View style={styles.cardHeader}>
+                      <View style={[styles.iconBox, { backgroundColor: colors.warningLight }]}>
+                        <Text style={styles.iconBoxEmoji}>⭐</Text>
+                      </View>
+                      <Text style={styles.cardTitle}>{t('clients.sections.doterra')}</Text>
+                    </View>
+                    <View style={styles.fieldGrid}>
+                      {client.doterra_id ? (
+                        <View style={styles.fieldGridItem}>
+                          <View style={styles.fieldBlock}>
+                            <Text style={styles.fieldLabel}>{t('clients.fields.doterra_id').toUpperCase()}</Text>
+                            <Text style={styles.fieldValue}>{client.doterra_id}</Text>
+                          </View>
+                        </View>
+                      ) : null}
+                      {client.next_lrp_date ? (
+                        <View style={styles.fieldGridItem}>
+                          <View style={styles.fieldBlock}>
+                            <Text style={styles.fieldLabel}>{t('clients.fields.next_lrp_date').toUpperCase()}</Text>
+                            <Text style={styles.fieldValue}>
+                              {formatDate(client.next_lrp_date, locale)}
+                            </Text>
+                          </View>
+                        </View>
+                      ) : null}
+                    </View>
+                    {client.loyalty_notes ? (
+                      <Text style={styles.bodyText}>{client.loyalty_notes}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
 
                 {/* Antécédents & Notes */}
                 {client.medical_notes ? (
@@ -341,7 +546,7 @@ export default function ClientDetailScreen() {
                 </View>
 
                 {/* Parcours */}
-                {(client.journey_stage || client.next_action_type || client.next_action_date) ? (
+                {(client.pipeline_stage || client.next_action_type || client.next_action_date) ? (
                   <View style={styles.card}>
                     <View style={styles.cardHeader}>
                       <View style={[styles.iconBox, { backgroundColor: colors.primaryLight }]}>
@@ -349,23 +554,21 @@ export default function ClientDetailScreen() {
                       </View>
                       <Text style={styles.cardTitle}>{t('clients.sections.journey')}</Text>
                     </View>
-                    {client.journey_stage ? (
-                      <View style={styles.fieldBlock}>
-                        <Text style={styles.fieldLabel}>{t('clients.fields.journey_stage').toUpperCase()}</Text>
-                        <Text style={styles.fieldValue}>{t(`journey_stages.${client.journey_stage}`)}</Text>
-                      </View>
-                    ) : null}
+                    <View style={styles.fieldBlock}>
+                      <Text style={styles.fieldLabel}>{t('clients.fields.pipeline_stage').toUpperCase()}</Text>
+                      <Text style={styles.fieldValue}>{t(`pipeline_stages.${client.pipeline_stage}`)}</Text>
+                    </View>
                     {client.next_action_type ? (
                       <View style={styles.fieldBlock}>
                         <Text style={styles.fieldLabel}>{t('clients.fields.next_action_type').toUpperCase()}</Text>
                         <Text style={styles.fieldValue}>{t(`next_action_types.${client.next_action_type}`)}</Text>
                       </View>
                     ) : null}
-                    {client.next_action_date ? (
+                    {client.next_action_at ? (
                       <View style={styles.fieldBlock}>
                         <Text style={styles.fieldLabel}>{t('clients.fields.next_action_date').toUpperCase()}</Text>
                         <Text style={styles.fieldValue}>
-                          {new Date(client.next_action_date).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {formatDate(client.next_action_at, locale)} · {client.next_action_source}
                         </Text>
                       </View>
                     ) : null}
@@ -398,6 +601,36 @@ export default function ClientDetailScreen() {
               </>
             )}
 
+            {/* ─ Chronologie ─ */}
+            {activeTab === 'chrono' && (
+              <View style={styles.listTab}>
+                {timelineEntries.length === 0
+                  ? <Text style={styles.emptyText}>{t('clients.timeline_empty')}</Text>
+                  : timelineEntries.map(entry => (
+                      <TouchableOpacity
+                        key={entry.id}
+                        style={[styles.listCard, entry.done && styles.listCardDone]}
+                        onPress={entry.onPress}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.timelineIcon}>{entry.icon}</Text>
+                        <View style={styles.listCardLeft}>
+                          <Text style={[styles.listCardDate, entry.done && styles.listCardDateStrike]}>
+                            {formatDate(entry.date, locale)}
+                          </Text>
+                          <Text style={styles.listCardSub} numberOfLines={2}>{entry.title}</Text>
+                        </View>
+                        {entry.sub ? (
+                          <View style={styles.listCardBadge}>
+                            <Text style={styles.listCardBadgeText} numberOfLines={1}>{entry.sub}</Text>
+                          </View>
+                        ) : null}
+                      </TouchableOpacity>
+                    ))
+                }
+              </View>
+            )}
+
             {/* ─ RDV ─ */}
             {activeTab === 'rdv' && (
               <View style={styles.listTab}>
@@ -415,7 +648,7 @@ export default function ClientDetailScreen() {
                         >
                           <View style={styles.listCardLeft}>
                             <Text style={styles.listCardDate}>
-                              {new Date(appt.start_at).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {formatDate(appt.start_at, locale)}
                             </Text>
                             <Text style={styles.listCardSub} numberOfLines={1}>{appt.title}</Text>
                           </View>
@@ -444,7 +677,7 @@ export default function ClientDetailScreen() {
                         activeOpacity={0.8}
                       >
                         <Text style={styles.listCardDate}>
-                          {new Date(note.created_at).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {formatDate(note.created_at, locale)}
                         </Text>
                         <Text style={styles.listCardSub} numberOfLines={4}>{note.content}</Text>
                       </TouchableOpacity>
@@ -473,7 +706,7 @@ export default function ClientDetailScreen() {
                         >
                           <View style={styles.listCardLeft}>
                             <Text style={[styles.listCardDate, f.done && styles.listCardDateStrike]}>
-                              {new Date(f.due_date).toLocaleDateString(locale, { day: '2-digit', month: 'short' })}
+                              {fmtShort(f.due_date, locale)}
                             </Text>
                             <Text style={styles.listCardSub} numberOfLines={2}>{f.title ?? f.content}</Text>
                           </View>
@@ -538,7 +771,7 @@ export default function ClientDetailScreen() {
                         >
                           <View style={styles.listCardLeft}>
                             <Text style={styles.listCardDate}>
-                              {new Date(o.order_date).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {formatDate(o.order_date, locale)}
                             </Text>
                             <Text style={styles.listCardSub} numberOfLines={1}>{o.product_name}</Text>
                           </View>
@@ -581,7 +814,7 @@ export default function ClientDetailScreen() {
                           <View style={styles.listCardLeft}>
                             <Text style={styles.listCardDate}>
                               {item.scheduled_at
-                                ? new Date(item.scheduled_at).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })
+                                ? formatDate(item.scheduled_at, locale)
                                 : '—'}
                             </Text>
                             {item.subject ? <Text style={styles.listCardSub} numberOfLines={2}>{item.subject}</Text> : null}
@@ -653,10 +886,7 @@ export default function ClientDetailScreen() {
 }
 
 const CARD_SHADOW = {
-  shadowColor: '#1c1a17' as string,
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.04,
-  shadowRadius: 12,
+  boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 12, color: 'rgba(28, 26, 23, 0.04)' }],
   elevation: 1,
 }
 
@@ -727,9 +957,20 @@ function makeStyles(colors: ThemeColors) {
   iconBoxEmoji: { fontSize: 14 },
 
   // Field rows
-  fieldBlock: { gap: 3 },
+  fieldBlock: { gap: 3, flex: 1 },
   fieldLabel: { fontSize: 10, fontFamily: fonts.bold, color: colors.textTertiary, letterSpacing: 0.8 },
   fieldValue: { fontSize: 14, fontFamily: fonts.body, color: colors.text, lineHeight: 20 },
+
+  // Field grid (2 columns, icon + label/value)
+  fieldGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  fieldGridItem:  { flexDirection: 'row', gap: 10, alignItems: 'flex-start', width: '44%', minWidth: 150 },
+  fieldIconBox:   { width: 30, height: 30, borderRadius: 9, backgroundColor: colors.surfaceContainer, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  fieldIconEmoji: { fontSize: 14 },
+
+  // Address row (tappable → opens maps)
+  addressRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4, padding: 10, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  addressTextBlock: { flex: 1, gap: 3 },
+  addressChevron:   { fontSize: 20, color: colors.textTertiary, lineHeight: 22 },
 
   // Body text
   bodyText: { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 22 },
@@ -755,6 +996,7 @@ function makeStyles(colors: ThemeColors) {
   listCard:       { backgroundColor: colors.card, borderRadius: 14, padding: 16, gap: 6, flexDirection: 'row', alignItems: 'flex-start', ...CARD_SHADOW },
   listCardDone:   { opacity: 0.55 },
   listCardLeft:   { flex: 1, gap: 4 },
+  timelineIcon:   { fontSize: 18, lineHeight: 22 },
   listCardTitle:  { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
   listCardDate:   { fontSize: 13, fontFamily: fonts.semibold, color: colors.primaryAction },
   listCardDateStrike: { textDecorationLine: 'line-through', color: colors.textTertiary },
@@ -780,10 +1022,7 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#1c1a17',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
+    boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 12, color: 'rgba(28, 26, 23, 0.25)' }],
     elevation: 6,
   },
   fabIcon: { fontSize: 22, color: colors.textInverse, lineHeight: 26 },

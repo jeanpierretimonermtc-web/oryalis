@@ -43,4 +43,7 @@ npx
 /ios
 /android
 
+# Supabase CLI local state
+supabase/.temp/
+
 .vercel

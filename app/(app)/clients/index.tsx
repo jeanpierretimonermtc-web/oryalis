@@ -5,13 +5,15 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useClients, useClientSearch } from '@/features/clients/useClients'
 import { useLastRdvMap } from '@/features/appointments/useAppointments'
-import { computeProspectScore, deleteClient } from '@/features/clients/clientService'
+import { archiveClient, computeProspectScore, deleteClient } from '@/features/clients/clientService'
+import { useContactQuota } from '@/features/clients/useContactQuota'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { useTheme } from '@/shared/theme/ThemeProvider'
-import type { ThemeColors } from '@/shared/theme/colors'
+import { hexToRgba, type ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { Client, ClientStatus } from '@/shared/lib/types'
+import type { ClientListItem, ClientStatus, PipelineStage } from '@/shared/lib/types'
+import { formatDate } from '@/shared/lib/dateFormat'
 
 const STATUS_FILTERS: (ClientStatus | 'all')[] = ['all', 'active', 'new_client', 'loyal', 'prospect', 'inactive', 'vip', 'advisor']
 
@@ -57,14 +59,14 @@ function ScoreBadge({ score }: { score: number }) {
   )
 }
 
-function ClientCard({ client, lastRdv, onMenuPress }: { client: Client; lastRdv?: string; onMenuPress: (c: Client) => void }) {
+function ClientCard({ client, lastRdv, onMenuPress }: { client: ClientListItem; lastRdv?: string; onMenuPress: (c: ClientListItem) => void }) {
   const { t, i18n } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
 
   const rdvText = lastRdv
-    ? `${t('clients.last_rdv')} : ${new Date(lastRdv).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })}`
+    ? `${t('clients.last_rdv')} : ${formatDate(lastRdv, locale)}`
     : t('clients.no_rdv')
 
   const score = computeProspectScore({ client, lastRdvDate: lastRdv })
@@ -78,6 +80,9 @@ function ClientCard({ client, lastRdv, onMenuPress }: { client: Client; lastRdv?
           <Text style={styles.cardName}>{client.full_name}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <StatusPill status={client.status} />
+            <View style={styles.pipelineMiniPill}>
+              <Text style={styles.pipelineMiniText}>{t(`pipeline_stages.${client.pipeline_stage}`)}</Text>
+            </View>
             <ScoreBadge score={score} />
           </View>
         </View>
@@ -134,23 +139,40 @@ export default function ClientsScreen() {
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
-  const { status: statusParam } = useLocalSearchParams<{ status?: ClientStatus }>()
+  const { status: statusParam, pipeline: pipelineParam } = useLocalSearchParams<{ status?: ClientStatus; pipeline?: PipelineStage }>()
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<ClientStatus | 'all'>(
     statusParam && STATUS_FILTERS.includes(statusParam) ? statusParam : 'all'
   )
+  const [pipelineFilter, setPipelineFilter] = useState<PipelineStage | null>(pipelineParam ?? null)
   const { clients, loading, refresh } = useClients()
+  const { quota, refresh: refreshQuota } = useContactQuota()
   const { results, search } = useClientSearch()
   const { labels: statusLabels, getStatusLabel } = useAppConfig()
   const { lastRdvMap } = useLastRdvMap(session?.user?.id)
   const { width } = useWindowDimensions()
   const isWide = width >= 768
 
-  const [menuClient, setMenuClient]       = useState<Client | null>(null)
+  const [menuClient, setMenuClient]       = useState<ClientListItem | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState(false)
   const [deleting, setDeleting]           = useState(false)
 
-  function closeMenu() { setMenuClient(null); setConfirmDelete(false) }
+  function closeMenu() { setMenuClient(null); setConfirmDelete(false); setConfirmArchive(false) }
+
+  async function handleArchive() {
+    if (!menuClient) return
+    setDeleting(true)
+    try {
+      await archiveClient(menuClient.id)
+      closeMenu()
+      await Promise.all([refresh(), refreshQuota()])
+    } catch (e) {
+      console.error('[archiveClient]', e)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   async function handleDelete() {
     if (!menuClient) return
@@ -174,14 +196,17 @@ export default function ClientsScreen() {
     }
   }, [statusParam])
 
+  useEffect(() => { setPipelineFilter(pipelineParam ?? null) }, [pipelineParam])
+
   useEffect(() => {
     if (query.length > 0) search(query, statusFilter === 'all' ? undefined : statusFilter)
   }, [query, statusFilter])
 
 
-  const displayed: Client[] = query.length > 0
+  const baseDisplayed: ClientListItem[] = query.length > 0
     ? results
     : statusFilter === 'all' ? clients : clients.filter(c => c.status === statusFilter)
+  const displayed = pipelineFilter ? baseDisplayed.filter(c => c.pipeline_stage === pipelineFilter) : baseDisplayed
 
   return (
     <>
@@ -197,7 +222,28 @@ export default function ClientsScreen() {
               <Text style={styles.countText}>{clients.length}</Text>
             </View>
           )}
+          <TouchableOpacity style={styles.archiveLink} onPress={() => router.push('/(app)/clients/archived' as any)}>
+            <Text style={styles.archiveLinkText}>{t('clients.archived_title')}</Text>
+          </TouchableOpacity>
         </View>
+
+        {quota?.limit != null && (
+          <TouchableOpacity
+            style={[styles.quotaBanner, quota.reached && styles.quotaBannerReached]}
+            onPress={() => quota.reached && router.push('/(app)/settings-display')}
+            activeOpacity={quota.reached ? 0.8 : 1}
+          >
+            <Text style={styles.quotaBannerText}>{t('clients.quota_count', { count: quota.activeCount, limit: quota.limit })}</Text>
+            {quota.reached && <Text style={styles.quotaBannerAction}>{t('clients.quota_upgrade')}</Text>}
+          </TouchableOpacity>
+        )}
+
+        {pipelineFilter && (
+          <TouchableOpacity style={styles.pipelineFilterBanner} onPress={() => setPipelineFilter(null)}>
+            <Text style={styles.pipelineFilterText}>{t('clients.pipeline_filter', { stage: t(`pipeline_stages.${pipelineFilter}`) })}</Text>
+            <Text style={styles.pipelineFilterClear}>×</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Search */}
         <View style={styles.searchWrap}>
@@ -235,7 +281,7 @@ export default function ClientsScreen() {
             return (
               <TouchableOpacity
                 style={[styles.chip, { backgroundColor: bg, borderColor: border }]}
-                onPress={() => setStatusFilter(s)}
+                onPress={() => { setStatusFilter(s); setPipelineFilter(null) }}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.chipText, { color: txtClr, fontFamily: active ? fonts.bold : fonts.medium }]}>
@@ -282,7 +328,7 @@ export default function ClientsScreen() {
         {/* FAB */}
         <TouchableOpacity
           style={styles.fab}
-          onPress={() => router.push('/(app)/clients/new')}
+          onPress={() => router.push(quota?.reached ? '/(app)/settings-display' : '/(app)/clients/new')}
           activeOpacity={0.85}
         >
           <Text style={styles.fabIcon}>+</Text>
@@ -301,7 +347,7 @@ export default function ClientsScreen() {
             <View style={styles.menuPill} />
             <Text style={styles.menuSheetName} numberOfLines={1}>{menuClient?.full_name}</Text>
 
-            {!confirmDelete ? (
+            {!confirmDelete && !confirmArchive ? (
               <>
                 <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => { closeMenu(); router.push(`/(app)/clients/${menuClient?.id}` as any) }}>
                   <Text style={styles.menuItemIcon}>👁</Text>
@@ -316,9 +362,23 @@ export default function ClientsScreen() {
                   <Text style={styles.menuItemText}>{t('clients.menu_new_rdv')}</Text>
                 </TouchableOpacity>
                 <View style={styles.menuDivider} />
+                <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => setConfirmArchive(true)}>
+                  <Text style={styles.menuItemIcon}>📦</Text>
+                  <Text style={styles.menuItemText}>{t('clients.menu_archive')}</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => setConfirmDelete(true)}>
                   <Text style={styles.menuItemIcon}>🗑️</Text>
                   <Text style={[styles.menuItemText, { color: colors.danger }]}>{t('clients.menu_delete')}</Text>
+                </TouchableOpacity>
+              </>
+            ) : confirmArchive ? (
+              <>
+                <Text style={styles.menuConfirmText}>{t('clients.archive_confirm', { name: menuClient?.full_name })}</Text>
+                <TouchableOpacity style={[styles.menuDangerBtn, { backgroundColor: colors.primary }, deleting && { opacity: 0.6 }]} onPress={handleArchive} disabled={deleting}>
+                  {deleting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.menuDangerBtnText}>{t('clients.menu_archive')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.menuItem} onPress={() => setConfirmArchive(false)}>
+                  <Text style={[styles.menuItemText, { textAlign: 'center', color: colors.textSecondary }]}>{t('clients.menu_cancel')}</Text>
                 </TouchableOpacity>
               </>
             ) : (
@@ -360,6 +420,15 @@ function makeStyles(colors: ThemeColors) {
   pageTitle:  { fontSize: 28, fontFamily: fonts.display, color: colors.text },
   countPill:  { backgroundColor: colors.primaryLight, borderRadius: 9999, paddingHorizontal: 10, paddingVertical: 3 },
   countText:  { fontSize: 13, fontFamily: fonts.bold, color: colors.primaryAction },
+  archiveLink: { marginLeft: 'auto', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 7 },
+  archiveLinkText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.textSecondary },
+  quotaBanner: { marginHorizontal: 16, marginBottom: 10, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  quotaBannerReached: { borderColor: colors.warning, backgroundColor: colors.warningLight },
+  quotaBannerText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
+  quotaBannerAction: { fontSize: 12, fontFamily: fonts.bold, color: colors.primary },
+  pipelineFilterBanner: { marginHorizontal: 16, marginBottom: 10, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: colors.tertiaryLight, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pipelineFilterText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.tertiary },
+  pipelineFilterClear: { fontSize: 18, color: colors.tertiary },
 
   // ── Search ─────────────────────────────────────────────────────────────────
   searchWrap:  { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 12, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12 },
@@ -386,15 +455,14 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: 16,
     padding: 16,
     gap: 10,
-    shadowColor: '#1c1a17',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 20,
+    boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 20, color: 'rgba(28, 26, 23, 0.04)' }],
     elevation: 2,
   },
   cardTop:   { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   cardTitle: { flex: 1, gap: 5 },
   cardName:  { fontSize: 16, fontFamily: fonts.semibold, color: colors.text, lineHeight: 20 },
+  pipelineMiniPill: { backgroundColor: colors.bgDim, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  pipelineMiniText: { fontSize: 10, fontFamily: fonts.medium, color: colors.textSecondary },
 
   // ── Avatar ─────────────────────────────────────────────────────────────────
   avatar:     { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
@@ -435,10 +503,7 @@ function makeStyles(colors: ThemeColors) {
     paddingBottom: 32,
     paddingTop: 12,
     gap: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
+    boxShadow: [{ offsetX: 0, offsetY: -4, blurRadius: 16, color: 'rgba(0, 0, 0, 0.08)' }],
     elevation: 16,
   },
   menuPill: {
@@ -494,10 +559,7 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.primaryAction,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: colors.primaryAction,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
+    boxShadow: [{ offsetX: 0, offsetY: 6, blurRadius: 14, color: hexToRgba(colors.primaryAction, 0.4) }],
     elevation: 8,
   },
   fabIcon: { fontSize: 28, color: colors.textInverse, lineHeight: 32 },

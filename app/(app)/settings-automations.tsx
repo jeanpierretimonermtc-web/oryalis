@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch } from 'react-native'
+import { useMemo, useState } from 'react'
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Switch } from 'react-native'
 import { Stack } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/shared/theme/ThemeProvider'
@@ -9,9 +9,11 @@ import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 import {
   AUTOMATION_RULES, TRIGGER_LABELS, TRIGGER_ICONS, TRIGGER_MODULE,
+  renderRuleTitle, renderRuleDescription,
 } from '@/features/automations/automationService'
 import type { AutoTrigger, AutomationRule } from '@/features/automations/automationService'
 import type { ModuleKey } from '@/shared/lib/types'
+import { AdvisorGate } from '@/features/subscriptions/AdvisorGate'
 
 const TRIGGERS: AutoTrigger[] = ['new_client', 'order', 'appointment', 'no_contact']
 
@@ -23,16 +25,57 @@ const ACTION_ICONS: Record<string, string> = {
   rdv:      '📅',
 }
 
-function RuleRow({ rule, colors, styles }: { rule: AutomationRule; colors: ThemeColors; styles: ReturnType<typeof makeStyles> }) {
-  const delayLabel = rule.delayDays === 0 ? 'Immédiat' : `J+${rule.delayDays}`
+function RuleRow({
+  rule, delayDays, onChangeDelay, colors, styles,
+}: {
+  rule: AutomationRule
+  delayDays: number
+  onChangeDelay: (days: number) => void
+  colors: ThemeColors
+  styles: ReturnType<typeof makeStyles>
+}) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft]     = useState(String(delayDays))
+
+  function commit() {
+    const parsed = parseInt(draft, 10)
+    if (!isNaN(parsed) && parsed >= 0 && parsed !== delayDays) onChangeDelay(parsed)
+    else setDraft(String(delayDays))
+    setEditing(false)
+  }
+
   return (
     <View style={styles.ruleRow}>
-      <View style={[styles.delayBadge, { backgroundColor: colors.primaryLight }]}>
-        <Text style={[styles.delayText, { color: colors.primary }]}>{delayLabel}</Text>
-      </View>
+      {editing ? (
+        <View style={[styles.delayBadge, styles.delayBadgeEditing, { borderColor: colors.primary }]}>
+          <Text style={[styles.delayText, { color: colors.primary }]}>J+</Text>
+          <TextInput
+            style={[styles.delayInput, { color: colors.primary }]}
+            value={draft}
+            onChangeText={setDraft}
+            keyboardType="number-pad"
+            autoFocus
+            onBlur={commit}
+            onSubmitEditing={commit}
+            selectTextOnFocus
+            maxLength={3}
+          />
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={[styles.delayBadge, { backgroundColor: colors.primaryLight }]}
+          onPress={() => { setDraft(String(delayDays)); setEditing(true) }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.delayText, { color: colors.primary }]}>
+            {delayDays === 0 ? t('settings.automation_immediate') : `J+${delayDays}`}
+          </Text>
+        </TouchableOpacity>
+      )}
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={styles.ruleTitle} numberOfLines={2}>{rule.title.replace(/\{prénom\}/g, '[prénom]')}</Text>
-        <Text style={styles.ruleDesc}>{rule.description}</Text>
+        <Text style={styles.ruleTitle} numberOfLines={2}>{renderRuleTitle(rule, '[prénom]', delayDays)}</Text>
+        <Text style={styles.ruleDesc}>{renderRuleDescription(rule, delayDays)}</Text>
       </View>
       <Text style={styles.actionIcon}>{ACTION_ICONS[rule.actionType] ?? '📋'}</Text>
     </View>
@@ -40,12 +83,14 @@ function RuleRow({ rule, colors, styles }: { rule: AutomationRule; colors: Theme
 }
 
 function TriggerSection({
-  trigger, rules, enabled, onToggle, colors, styles,
+  trigger, rules, enabled, onToggle, getDelay, onChangeDelay, colors, styles,
 }: {
   trigger:   AutoTrigger
   rules:     AutomationRule[]
   enabled:   boolean
   onToggle:  () => void
+  getDelay:  (rule: AutomationRule) => number
+  onChangeDelay: (rule: AutomationRule, days: number) => void
   colors:    ThemeColors
   styles:    ReturnType<typeof makeStyles>
 }) {
@@ -72,7 +117,13 @@ function TriggerSection({
           {rules.map((rule, i) => (
             <View key={rule.id}>
               {i > 0 && <View style={styles.ruleSep} />}
-              <RuleRow rule={rule} colors={colors} styles={styles} />
+              <RuleRow
+                rule={rule}
+                delayDays={getDelay(rule)}
+                onChangeDelay={(days) => onChangeDelay(rule, days)}
+                colors={colors}
+                styles={styles}
+              />
             </View>
           ))}
         </View>
@@ -85,18 +136,20 @@ export default function SettingsAutomationsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { isModuleActive, toggleModule } = useAppConfig()
+  const { isModuleActive, toggleModule, getAutomationDelay, setAutomationDelay } = useAppConfig()
 
   return (
     <>
       <Stack.Screen options={settingsScreenOptions(t('settings.section_automations'))} />
+      <AdvisorGate feature={t('subscription.features.automations')}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         {/* Info banner */}
         <View style={styles.infoBanner}>
           <Text style={styles.infoEmoji}>⚡</Text>
           <Text style={styles.infoText}>
-            Les relances automatiques sont créées dans votre liste Relances dès qu'un événement se produit (nouveau client, commande, RDV terminé).
+            Les relances automatiques sont créées dans votre liste Relances dès qu'un événement se produit (nouveau client, commande, RDV terminé).{' '}
+            {t('settings.automation_edit_hint')}
           </Text>
         </View>
 
@@ -111,6 +164,8 @@ export default function SettingsAutomationsScreen() {
               rules={rules}
               enabled={enabled}
               onToggle={() => toggleModule(modKey, !enabled)}
+              getDelay={(rule) => getAutomationDelay(rule.id, rule.delayDays)}
+              onChangeDelay={(rule, days) => setAutomationDelay(rule.id, days)}
               colors={colors}
               styles={styles}
             />
@@ -119,15 +174,16 @@ export default function SettingsAutomationsScreen() {
 
         {/* Legend */}
         <View style={styles.legend}>
-          <Text style={styles.legendTitle}>Variables disponibles dans les titres</Text>
+          <Text style={styles.legendTitle}>{t('settings.automation_legend_title')}</Text>
           <View style={styles.legendRow}>
             <View style={styles.legendChip}><Text style={styles.legendChipText}>{'{prénom}'}</Text></View>
-            <Text style={styles.legendDesc}>Prénom du client</Text>
+            <Text style={styles.legendDesc}>{t('settings.automation_legend_desc')}</Text>
           </View>
         </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      </AdvisorGate>
     </>
   )
 }
@@ -154,10 +210,7 @@ function makeStyles(colors: ThemeColors) {
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
+    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.04)' }],
     elevation: 2,
   },
   sectionDisabled: { opacity: 0.6 },
@@ -183,7 +236,9 @@ function makeStyles(colors: ThemeColors) {
   },
   ruleSep:    { height: 1, backgroundColor: colors.border, marginHorizontal: 16 },
   delayBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', flexShrink: 0, minWidth: 52, alignItems: 'center' },
+  delayBadgeEditing: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, backgroundColor: 'transparent' },
   delayText:  { fontSize: 11, fontFamily: fonts.bold },
+  delayInput: { fontSize: 11, fontFamily: fonts.bold, padding: 0, minWidth: 20 },
   ruleTitle:  { fontSize: 13, fontFamily: fonts.semibold, color: colors.text, lineHeight: 18 },
   ruleDesc:   { fontSize: 11, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 1 },
   actionIcon: { fontSize: 18, flexShrink: 0, marginTop: 2 },

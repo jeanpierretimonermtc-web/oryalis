@@ -18,6 +18,8 @@ export type LineIconName =
   | 'modules'
   | 'org'
   | 'subscription'
+  | 'shield'
+  | 'sync'
 
 type Props = {
   name: LineIconName
@@ -140,11 +142,24 @@ export function LineIcon({ name, size = 18, color, strokeWidth = 2 }: Props) {
           <Line x1="7" y1="15" x2="10" y2="15" {...common} />
         </>
       )}
+      {name === 'shield' && (
+        <>
+          <Path d="M12 3 5 6v5c0 4.8 2.9 8.1 7 10 4.1-1.9 7-5.2 7-10V6l-7-3Z" {...common} />
+          <Path d="m9 12 2 2 4-4" {...common} />
+        </>
+      )}
       {name === 'logout' && (
         <>
           <Path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4" {...common} />
           <Path d="M14 8l4 4-4 4" {...common} />
           <Line x1="18" y1="12" x2="9" y2="12" {...common} />
+        </>
+      )}
+      {name === 'sync' && (
+        <>
+          <Path d="M4 12a8 8 0 0 1 14-5.2M4 12a8 8 0 0 0 14 5.2" {...common} />
+          <Polyline points="18 3 18 7 14 7" {...common} />
+          <Polyline points="6 21 6 17 10 17" {...common} />
         </>
       )}
       {name === 'chevronRight' && <Polyline points="9 18 15 12 9 6" {...common} />}

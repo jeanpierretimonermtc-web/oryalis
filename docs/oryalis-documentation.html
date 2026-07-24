@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oryalis — Documentation technique</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #0f172a;
+    background: #f8fafc;
+  }
+
+  /* ── Print ────────────────────────────────────────────────────────── */
+  @media print {
+    body { background: #fff; font-size: 12px; }
+    .page { box-shadow: none !important; margin: 0 !important; border-radius: 0 !important; }
+    .cover { min-height: 100vh; }
+    .no-break { page-break-inside: avoid; }
+    h2 { page-break-before: always; }
+    h2:first-of-type { page-break-before: avoid; }
+    .cover + * h2 { page-break-before: avoid; }
+  }
+
+  /* ── Layout ───────────────────────────────────────────────────────── */
+  .page {
+    max-width: 900px;
+    margin: 32px auto;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+
+  /* ── Cover ────────────────────────────────────────────────────────── */
+  .cover {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #1e1547 100%);
+    color: #fff;
+    padding: 80px 64px 64px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -80px; right: -80px;
+    width: 400px; height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(34,211,238,0.15) 0%, transparent 70%);
+  }
+  .cover::after {
+    content: '';
+    position: absolute;
+    bottom: -60px; left: -60px;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(109,59,255,0.2) 0%, transparent 70%);
+  }
+  .cover-logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 48px;
+  }
+  .cover-glyph {
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, #22D3EE, #6D3BFF);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px;
+  }
+  .cover-brand {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    background: linear-gradient(90deg, #22D3EE, #3B82F6, #8B5CF6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .cover h1 {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 16px;
+    color: #f8fafc;
+  }
+  .cover-subtitle {
+    font-size: 18px;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 48px;
+  }
+  .cover-meta {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .cover-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .cover-meta-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+  }
+  .cover-meta-value {
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.85);
+  }
+
+  /* ── Body content ─────────────────────────────────────────────────── */
+  .content {
+    padding: 48px 64px 64px;
+  }
+
+  /* ── Section headings ─────────────────────────────────────────────── */
+  h2 {
+    font-size: 24px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 48px 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2:first-child { margin-top: 0; }
+  h2 .section-num {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 28px 0 12px;
+  }
+
+  /* ── Paragraphs ───────────────────────────────────────────────────── */
+  p { margin-bottom: 12px; color: #334155; }
+
+  /* ── Pill badges ──────────────────────────────────────────────────── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+  .badge-blue   { background: #DBEAFE; color: #1D4ED8; }
+  .badge-violet { background: #EDE9FE; color: #5B21B6; }
+  .badge-cyan   { background: #ECFEFF; color: #0E7490; }
+  .badge-green  { background: #D1FAE5; color: #059669; }
+  .badge-amber  { background: #FEF3C7; color: #B45309; }
+  .badge-dark   { background: #1e293b; color: #94a3b8; }
+
+  /* ── Stack grid ───────────────────────────────────────────────────── */
+  .stack-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .stack-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stack-card-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #94a3b8;
+    margin-bottom: 4px;
+  }
+  .stack-card-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  /* ── App flow diagram ─────────────────────────────────────────────── */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .flow-box {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+  .flow-arrow {
+    font-size: 18px;
+    color: #94a3b8;
+    padding: 0 6px;
+    flex-shrink: 0;
+  }
+
+  /* ── Tables ───────────────────────────────────────────────────────── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 16px 0;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead tr {
+    background: #f1f5f9;
+  }
+  thead th {
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #64748b;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  tbody tr {
+    border-bottom: 1px solid #f1f5f9;
+  }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #fafafa; }
+  tbody td {
+    padding: 9px 14px;
+    color: #334155;
+    vertical-align: top;
+  }
+  tbody td:first-child {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6D3BFF;
+    white-space: nowrap;
+  }
+  code {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: #6D3BFF;
+  }
+
+  /* ── DB Table cards ───────────────────────────────────────────────── */
+  .db-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .db-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .db-card-header {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .db-card-title {
+    font-family: 'Courier New', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .db-card-body {
+    padding: 10px 16px 14px;
+    background: #fff;
+  }
+  .db-field {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid #f8fafc;
+    font-size: 12.5px;
+  }
+  .db-field:last-child { border-bottom: none; }
+  .db-field-name {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    color: #3B82F6;
+    flex-shrink: 0;
+  }
+  .db-field-type {
+    color: #94a3b8;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .db-field-desc {
+    color: #64748b;
+    font-size: 11.5px;
+  }
+  .db-field-pk { color: #f59e0b !important; }
+  .db-field-fk { color: #10b981 !important; }
+
+  /* ── Relation diagram ─────────────────────────────────────────────── */
+  .relation-diagram {
+    background: #0f172a;
+    border-radius: 12px;
+    padding: 32px;
+    margin: 20px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.8;
+    overflow-x: auto;
+  }
+  .rel-table { color: #22D3EE; font-weight: 700; font-size: 13px; }
+  .rel-pk    { color: #f59e0b; }
+  .rel-fk    { color: #10b981; }
+  .rel-col   { color: #cbd5e1; }
+  .rel-arrow { color: #6D3BFF; }
+  .rel-comment { color: #475569; font-style: italic; }
+
+  /* ── RLS box ──────────────────────────────────────────────────────── */
+  .rls-box {
+    background: #0f172a;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 16px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.9;
+    color: #94a3b8;
+  }
+  .rls-keyword { color: #22D3EE; font-weight: 700; }
+  .rls-fn      { color: #f59e0b; }
+  .rls-str     { color: #a3e635; }
+  .rls-comment { color: #475569; }
+
+  /* ── Calendar flow ────────────────────────────────────────────────── */
+  .cal-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 20px 0;
+    position: relative;
+  }
+  .cal-step {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 16px 0;
+    position: relative;
+  }
+  .cal-step::after {
+    content: '';
+    position: absolute;
+    left: 15px; top: 48px; bottom: 0;
+    width: 2px;
+    background: #e2e8f0;
+  }
+  .cal-step:last-child::after { display: none; }
+  .cal-step-num {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #22D3EE, #6D3BFF);
+    color: #fff;
+    font-weight: 800;
+    font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .cal-step-body { flex: 1; padding-top: 4px; }
+  .cal-step-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #0f172a;
+    margin-bottom: 4px;
+  }
+  .cal-step-desc { font-size: 13px; color: #64748b; }
+
+  /* ── Info boxes ───────────────────────────────────────────────────── */
+  .info-box {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .info-box-blue   { background: #eff6ff; border-left: 4px solid #3B82F6; color: #1e3a5f; }
+  .info-box-violet { background: #f5f3ff; border-left: 4px solid #6D3BFF; color: #2e1065; }
+  .info-box-amber  { background: #fffbeb; border-left: 4px solid #f59e0b; color: #451a03; }
+  .info-box-green  { background: #f0fdf4; border-left: 4px solid #10b981; color: #064e3b; }
+
+  /* ── Features list ────────────────────────────────────────────────── */
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .feature-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .feature-icon { font-size: 18px; flex-shrink: 0; }
+  .feature-text { font-size: 12.5px; }
+  .feature-title { font-weight: 700; color: #0f172a; }
+  .feature-desc  { color: #64748b; margin-top: 2px; }
+
+  /* ── Footer ───────────────────────────────────────────────────────── */
+  .doc-footer {
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    padding: 24px 64px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #94a3b8;
+  }
+
+  /* ── Separator ────────────────────────────────────────────────────── */
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 32px 0; }
+
+  ul { padding-left: 20px; color: #475569; }
+  li { margin-bottom: 4px; font-size: 13px; }
+  strong { color: #0f172a; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ══════════════════ COVER ══════════════════ -->
+  <div class="cover">
+    <div class="cover-logo">
+      <div class="cover-glyph">🐦</div>
+      <div class="cover-brand">ORYALIS</div>
+    </div>
+    <h1>Documentation<br>Technique</h1>
+    <p class="cover-subtitle">Architecture · Base de données · Synchronisation Calendrier</p>
+    <div class="cover-meta">
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Version</span>
+        <span class="cover-meta-value">1.0.0</span>
+      </div>
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Stack</span>
+        <span class="cover-meta-value">Expo 56 · React Native · Supabase</span>
+      </div>
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Supabase</span>
+        <span class="cover-meta-value">nhpvjfyjyculnijipzoa (eu-west-1)</span>
+      </div>
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Auteur</span>
+        <span class="cover-meta-value">Jean-Pierre Timoner</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ CONTENT ══════════════════ -->
+  <div class="content">
+
+    <!-- ──────────────────────────────────────────────
+         1. VUE D'ENSEMBLE
+         ────────────────────────────────────────────── -->
+    <h2>
+      <span class="section-num" style="background:linear-gradient(135deg,#22D3EE,#3B82F6)">1</span>
+      Vue d'ensemble de l'application
+    </h2>
+
+    <p>
+      <strong>Oryalis</strong> est un CRM SaaS mobile-first destiné aux <strong>praticiens du bien-être</strong>
+      (naturopathes, thérapeutes, conseillers doTERRA…). Il permet de gérer les clients, les rendez-vous,
+      les relances, les notes de séance et les recommandations de produits, le tout synchronisé en temps
+      réel avec Supabase.
+    </p>
+
+    <div class="stack-grid">
+      <div class="stack-card">
+        <div class="stack-card-label">Frontend</div>
+        <div class="stack-card-value">Expo SDK 56<br>React Native 0.85.3</div>
+      </div>
+      <div class="stack-card">
+        <div class="stack-card-label">Navigation</div>
+        <div class="stack-card-value">Expo Router v4<br>File-based routing</div>
+      </div>
+      <div class="stack-card">
+        <div class="stack-card-label">Backend / DB</div>
+        <div class="stack-card-value">Supabase<br>PostgreSQL + Auth + RLS</div>
+      </div>
+      <div class="stack-card">
+        <div class="stack-card-label">i18n</div>
+        <div class="stack-card-value">i18next v24<br>EN (source) · FR</div>
+      </div>
+      <div class="stack-card">
+        <div class="stack-card-label">Déploiement web</div>
+        <div class="stack-card-value">Vercel<br>npx vercel --prod</div>
+      </div>
+      <div class="stack-card">
+        <div class="stack-card-label">Calendrier</div>
+        <div class="stack-card-value">expo-calendar ~56.0.8<br>iOS · Android</div>
+      </div>
+    </div>
+
+    <h3>Flux de données</h3>
+    <p>Toute la logique suit un flux strict à sens unique :</p>
+    <div class="flow">
+      <div class="flow-box">🖥 Écran UI</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">🪝 Hook métier</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">⚙️ Service métier</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">🗄 Supabase Client</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">🐘 PostgreSQL + RLS</div>
+    </div>
+    <p style="color:#94a3b8;font-size:12px">Aucune logique métier ne réside dans les composants UI. Les hooks et services sont testables indépendamment.</p>
+
+    <h3>Fonctionnalités Phase 1 (livrées)</h3>
+    <div class="features">
+      <div class="feature-item">
+        <div class="feature-icon">👥</div>
+        <div class="feature-text">
+          <div class="feature-title">Gestion clients</div>
+          <div class="feature-desc">Fiche complète, statuts, historique médical, intérêts</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">📅</div>
+        <div class="feature-text">
+          <div class="feature-title">Agenda</div>
+          <div class="feature-desc">Vue semaine/jour, grille horaire, numérotation séances</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">📝</div>
+        <div class="feature-text">
+          <div class="feature-title">Notes de séance</div>
+          <div class="feature-desc">Notes libres par client, horodatées</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🔔</div>
+        <div class="feature-text">
+          <div class="feature-title">Relances</div>
+          <div class="feature-desc">To-do client avec date d'échéance, statut en retard</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🌿</div>
+        <div class="feature-text">
+          <div class="feature-title">Recommandations produits</div>
+          <div class="feature-desc">Catalogue doTERRA (128 produits), custom, picker</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">📊</div>
+        <div class="feature-text">
+          <div class="feature-title">Dashboard KPI</div>
+          <div class="feature-desc">Clients actifs, séances du mois, relances urgentes, LRP</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🌙</div>
+        <div class="feature-text">
+          <div class="feature-title">Dark mode</div>
+          <div class="feature-desc">Thème clair/sombre persisté, design system complet</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">📱</div>
+        <div class="feature-text">
+          <div class="feature-title">Responsive</div>
+          <div class="feature-desc">Sidebar web (≥768px) + bottom tabs mobile custom</div>
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ──────────────────────────────────────────────
+         2. BASE DE DONNÉES
+         ────────────────────────────────────────────── -->
+    <h2>
+      <span class="section-num" style="background:linear-gradient(135deg,#3B82F6,#6D3BFF)">2</span>
+      Base de données Supabase
+    </h2>
+
+    <p>
+      La base de données est hébergée sur Supabase (PostgreSQL 15, région <strong>eu-west-1</strong>).
+      Toutes les tables ont la <strong>Row Level Security (RLS) activée</strong> : un utilisateur ne peut
+      voir et modifier que ses propres données.
+    </p>
+
+    <div class="info-box info-box-blue">
+      <strong>Instance Supabase :</strong> <code>nhpvjfyjyculnijipzoa</code><br>
+      <strong>Migrations :</strong> scripts Node.js <code>migrate*.mjs</code> (jamais le CLI Supabase — projet sur compte tiers)
+    </div>
+
+    <!-- ── DIAGRAMME DE RELATIONS ── -->
+    <h3>Diagramme des relations</h3>
+
+    <div class="relation-diagram">
+<pre>
+<span class="rel-comment">-- Utilisateur (auth.users)</span>
+<span class="rel-table">auth.users</span> <span class="rel-pk">(id UUID)</span>
+    │
+    ├──<span class="rel-arrow">1:1</span>──► <span class="rel-table">profiles</span>          <span class="rel-comment">-- profil praticien</span>
+    │         <span class="rel-pk">id</span> = <span class="rel-fk">auth.users.id</span>
+    │
+    ├──<span class="rel-arrow">1:N</span>──► <span class="rel-table">clients</span>           <span class="rel-comment">-- liste de clients</span>
+    │         <span class="rel-fk">user_id</span> → auth.users.id
+    │             │
+    │             ├──<span class="rel-arrow">1:N</span>──► <span class="rel-table">appointments</span>   <span class="rel-comment">-- séances/RDV</span>
+    │             │         <span class="rel-fk">client_id</span> → clients.id
+    │             │         <span class="rel-fk">user_id</span>   → auth.users.id
+    │             │
+    │             ├──<span class="rel-arrow">1:N</span>──► <span class="rel-table">notes</span>          <span class="rel-comment">-- notes de séance</span>
+    │             │         <span class="rel-fk">client_id</span> → clients.id
+    │             │
+    │             ├──<span class="rel-arrow">1:N</span>──► <span class="rel-table">followups</span>      <span class="rel-comment">-- relances</span>
+    │             │         <span class="rel-fk">client_id</span> → clients.id
+    │             │
+    │             └──<span class="rel-arrow">1:N</span>──► <span class="rel-table">recommendations</span> <span class="rel-comment">-- produits conseillés</span>
+    │                       <span class="rel-fk">client_id</span>  → clients.id
+    │                       <span class="rel-fk">catalog_id</span> → catalogs.id   (optionnel)
+    │                       <span class="rel-fk">product_id</span> → catalog_products.id (optionnel)
+    │
+    └──<span class="rel-arrow">1:N</span>──► <span class="rel-table">catalogs</span>          <span class="rel-comment">-- catalogues custom</span>
+               <span class="rel-fk">user_id</span> → auth.users.id (NULL si officiel)
+                   │
+                   └──<span class="rel-arrow">1:N</span>──► <span class="rel-table">catalog_products</span>  <span class="rel-comment">-- produits</span>
+                             <span class="rel-fk">catalog_id</span> → catalogs.id
+</pre>
+    </div>
+
+    <!-- ── TABLE profiles ── -->
+    <h3>Table : <code>profiles</code></h3>
+    <p>Profil du praticien, créé automatiquement via un trigger Supabase lors de l'inscription. Relation 1:1 avec <code>auth.users</code>.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Colonne</th><th>Type</th><th>Description</th><th>Contrainte</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>= auth.users.id — identifiant unique</td><td><span class="badge badge-amber">PK · FK</span></td></tr>
+          <tr><td>full_name</td><td>TEXT</td><td>Nom complet du praticien</td><td></td></tr>
+          <tr><td>email</td><td>TEXT</td><td>Email (copie de auth.users)</td><td></td></tr>
+          <tr><td>specialty</td><td>TEXT</td><td>Spécialité (naturopathe, thérapeute MTC…)</td><td></td></tr>
+          <tr><td>locale</td><td>TEXT</td><td>Langue : <code>'fr'</code> ou <code>'en'</code></td><td></td></tr>
+          <tr><td>timezone</td><td>TEXT</td><td>Fuseau horaire IANA (ex: <code>Europe/Paris</code>)</td><td></td></tr>
+          <tr><td>plan</td><td>TEXT</td><td>Cache plan tarifaire : <code>free</code> / <code>pro</code> / <code>cabinet</code></td><td></td></tr>
+          <tr><td>active_catalog_slugs</td><td>TEXT[]</td><td>Slugs des catalogues actifs (NULL = tous actifs)</td><td></td></tr>
+          <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>Date de dernière mise à jour</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="info-box info-box-green">
+      <strong>Trigger automatique :</strong> <code>handle_new_user()</code> — insère une ligne dans <code>profiles</code> à chaque nouveau signup via <code>auth.users</code>. <code>SECURITY DEFINER SET search_path = public</code>.
+    </div>
+
+    <!-- ── TABLE clients ── -->
+    <h3>Table : <code>clients</code></h3>
+    <p>Fiche client complète. Chaque praticien ne voit que ses propres clients (RLS sur <code>user_id</code>).</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>Identifiant unique du client</td></tr>
+          <tr><td>user_id</td><td>UUID</td><td><span class="badge badge-green">FK → profiles</span> Praticien propriétaire</td></tr>
+          <tr><td>full_name</td><td>TEXT</td><td>Nom complet (obligatoire)</td></tr>
+          <tr><td>first_name</td><td>TEXT</td><td>Prénom séparé (ajouté migrate3)</td></tr>
+          <tr><td>email / phone</td><td>TEXT</td><td>Coordonnées</td></tr>
+          <tr><td>status</td><td>TEXT</td><td><code>prospect</code> · <code>active</code> · <code>inactive</code> · <code>vip</code> · <code>advisor</code></td></tr>
+          <tr><td>source</td><td>TEXT</td><td>Comment le client a été trouvé</td></tr>
+          <tr><td>language</td><td>TEXT</td><td>Langue préférée du client</td></tr>
+          <tr><td>birth_date</td><td>DATE</td><td>Date de naissance</td></tr>
+          <tr><td>inscription_date</td><td>DATE</td><td>Date d'inscription (ajouté migrate3)</td></tr>
+          <tr><td>profession</td><td>TEXT</td><td>Profession du client</td></tr>
+          <tr><td>children</td><td>TEXT</td><td>Enfants et âges (texte libre)</td></tr>
+          <tr><td>interests</td><td>TEXT[]</td><td>Centres d'intérêt (array)</td></tr>
+          <tr><td>client_type</td><td>TEXT</td><td>Type de suivi</td></tr>
+          <tr><td>medical_treatment</td><td>BOOLEAN</td><td>Sous traitement médical ?</td></tr>
+          <tr><td>medical_notes</td><td>TEXT</td><td>Précisions traitement</td></tr>
+          <tr><td>particularities</td><td>TEXT</td><td>Particularités à retenir</td></tr>
+          <tr><td>welcome_email_sent</td><td>BOOLEAN</td><td>Email d'accueil envoyé ?</td></tr>
+          <tr><td>doterra_id</td><td>TEXT</td><td>Identifiant compte doTERRA</td></tr>
+          <tr><td>next_lrp_date</td><td>DATE</td><td>Prochaine commande LRP automatique</td></tr>
+          <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>Horodatages</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── TABLE appointments ── -->
+    <h3>Table : <code>appointments</code></h3>
+    <p>Séances / rendez-vous. Numéroté automatiquement par praticien-client. Lié au calendrier natif via <code>native_event_id</code>.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>Identifiant unique</td></tr>
+          <tr><td>client_id</td><td>UUID</td><td><span class="badge badge-green">FK → clients</span></td></tr>
+          <tr><td>user_id</td><td>UUID</td><td><span class="badge badge-green">FK → profiles</span></td></tr>
+          <tr><td>appointment_number</td><td>INT</td><td>Numéro de séance (1, 2, 3…) par client</td></tr>
+          <tr><td>appointment_date</td><td>TIMESTAMPTZ</td><td>Date et heure du rendez-vous</td></tr>
+          <tr><td>themes_discussed</td><td>TEXT</td><td>Thèmes abordés pendant la séance</td></tr>
+          <tr><td>solutions_proposed</td><td>TEXT</td><td>Solutions/produits proposés</td></tr>
+          <tr><td>recap_sent</td><td>BOOLEAN</td><td>Récapitulatif envoyé au client ?</td></tr>
+          <tr><td>next_appointment_date</td><td>TIMESTAMPTZ</td><td>Prochain RDV planifié</td></tr>
+          <tr><td>native_event_id</td><td>TEXT</td><td>ID de l'événement dans le calendrier natif iOS/Android</td></tr>
+          <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>Horodatages</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── TABLE notes ── -->
+    <h3>Table : <code>notes</code></h3>
+    <p>Notes libres attachées à un client. Peuvent être prises indépendamment d'une séance.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>Identifiant unique</td></tr>
+          <tr><td>client_id</td><td>UUID</td><td><span class="badge badge-green">FK → clients</span></td></tr>
+          <tr><td>user_id</td><td>UUID</td><td><span class="badge badge-green">FK → profiles</span></td></tr>
+          <tr><td>content</td><td>TEXT</td><td>Contenu de la note (texte libre)</td></tr>
+          <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>Date de création (ordre d'affichage)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── TABLE followups ── -->
+    <h3>Table : <code>followups</code></h3>
+    <p>Relances et tâches à effectuer pour un client. Affichées avec statut "en retard", "aujourd'hui", "à venir".</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>Identifiant unique</td></tr>
+          <tr><td>client_id</td><td>UUID</td><td><span class="badge badge-green">FK → clients</span></td></tr>
+          <tr><td>user_id</td><td>UUID</td><td><span class="badge badge-green">FK → profiles</span></td></tr>
+          <tr><td>title</td><td>TEXT</td><td>Titre de la relance</td></tr>
+          <tr><td>content</td><td>TEXT</td><td>Description / corps du message</td></tr>
+          <tr><td>due_date</td><td>DATE</td><td>Date d'échéance — clé pour le tri urgence</td></tr>
+          <tr><td>done</td><td>BOOLEAN</td><td>Relance effectuée (archivée)</td></tr>
+          <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>Date de dernière modification</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── TABLE recommendations ── -->
+    <h3>Table : <code>recommendations</code></h3>
+    <p>Produits recommandés à un client, avec lien optionnel vers un catalogue et un produit précis.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>Identifiant unique</td></tr>
+          <tr><td>client_id</td><td>UUID</td><td><span class="badge badge-green">FK → clients</span></td></tr>
+          <tr><td>user_id</td><td>UUID</td><td><span class="badge badge-green">FK → profiles</span></td></tr>
+          <tr><td>product_name</td><td>TEXT</td><td>Nom du produit (saisi ou copié du catalogue)</td></tr>
+          <tr><td>reason</td><td>TEXT</td><td>Raison de la recommandation</td></tr>
+          <tr><td>status</td><td>TEXT</td><td><code>advised</code> (conseillé) · <code>purchased</code> (acheté)</td></tr>
+          <tr><td>catalog_id</td><td>UUID</td><td><span class="badge badge-cyan">FK → catalogs</span> (optionnel)</td></tr>
+          <tr><td>product_id</td><td>UUID</td><td><span class="badge badge-cyan">FK → catalog_products</span> (optionnel)</td></tr>
+          <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>Horodatages</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── TABLE catalogs ── -->
+    <h3>Table : <code>catalogs</code></h3>
+    <p>Catalogues de produits. Deux types : <strong>officiels</strong> (partagés, <code>user_id=NULL</code>) et <strong>custom</strong> (propres au praticien).</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>Identifiant unique</td></tr>
+          <tr><td>slug</td><td>TEXT</td><td>Identifiant texte unique (ex: <code>doterra</code>). Utilisé pour les préférences.</td></tr>
+          <tr><td>name</td><td>TEXT</td><td>Nom affiché du catalogue</td></tr>
+          <tr><td>brand</td><td>TEXT</td><td>Nom de la marque</td></tr>
+          <tr><td>type</td><td>TEXT</td><td><code>official</code> (visible par tous) · <code>custom</code> (propre au user)</td></tr>
+          <tr><td>user_id</td><td>UUID</td><td>NULL pour les catalogues officiels, sinon <span class="badge badge-green">FK → profiles</span></td></tr>
+          <tr><td>color</td><td>TEXT</td><td>Couleur hex pour l'UI (ex: <code>#6D3BFF</code>)</td></tr>
+          <tr><td>icon</td><td>TEXT</td><td>Emoji icône du catalogue</td></tr>
+          <tr><td>created_at</td><td>TIMESTAMPTZ</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="info-box info-box-violet">
+      <strong>Catalogue doTERRA :</strong> 128 produits pré-chargés (migrate4.mjs). <code>type='official'</code>, <code>user_id=NULL</code>. Visible par tous les praticiens sans configuration. Pour ajouter une nouvelle marque : <code>INSERT INTO catalogs</code> + <code>INSERT INTO catalog_products</code> — zéro changement de code.
+    </div>
+
+    <!-- ── TABLE catalog_products ── -->
+    <h3>Table : <code>catalog_products</code></h3>
+    <p>Produits appartenant à un catalogue. Chargés dynamiquement par <code>CatalogProductPicker</code>.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>id</td><td>UUID</td><td>Identifiant unique</td></tr>
+          <tr><td>catalog_id</td><td>UUID</td><td><span class="badge badge-cyan">FK → catalogs</span></td></tr>
+          <tr><td>sku</td><td>TEXT</td><td>Référence produit (optionnel)</td></tr>
+          <tr><td>name</td><td>TEXT</td><td>Nom du produit</td></tr>
+          <tr><td>category</td><td>TEXT</td><td>Catégorie pour le filtrage</td></tr>
+          <tr><td>created_at</td><td>TIMESTAMPTZ</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── RLS ── -->
+    <h3>Row Level Security (RLS)</h3>
+    <p>Chaque table a RLS activé. Les politiques garantissent qu'un praticien ne peut accéder qu'à ses propres données.</p>
+
+    <div class="rls-box">
+<span class="rls-comment">-- Politique standard (clients, appointments, notes, followups, recommendations)</span>
+<span class="rls-keyword">CREATE POLICY</span> "user_own_rows" <span class="rls-keyword">ON</span> table_name
+  <span class="rls-keyword">USING</span> (<span class="rls-fn">auth.uid</span>() = user_id)
+  <span class="rls-keyword">WITH CHECK</span> (<span class="rls-fn">auth.uid</span>() = user_id);
+
+<span class="rls-comment">-- Exception : catalogues officiels (visibles par tous)</span>
+<span class="rls-keyword">CREATE POLICY</span> "official_catalogs_visible" <span class="rls-keyword">ON</span> catalogs
+  <span class="rls-keyword">USING</span> (user_id <span class="rls-keyword">IS NULL AND</span> type = <span class="rls-str">'official'</span>);
+
+<span class="rls-comment">-- Exception : catalog_products des catalogues officiels</span>
+<span class="rls-keyword">CREATE POLICY</span> "official_products_visible" <span class="rls-keyword">ON</span> catalog_products
+  <span class="rls-keyword">USING</span> (
+    <span class="rls-keyword">EXISTS</span> (
+      <span class="rls-keyword">SELECT</span> 1 <span class="rls-keyword">FROM</span> catalogs
+      <span class="rls-keyword">WHERE</span> id = catalog_id
+        <span class="rls-keyword">AND</span> (user_id <span class="rls-keyword">IS NULL OR</span> user_id = <span class="rls-fn">auth.uid</span>())
+    )
+  );
+    </div>
+
+    <h3>Historique des migrations</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Script</th><th>Contenu</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>migrate.mjs</td><td>Création initiale : toutes les tables + trigger <code>handle_new_user()</code></td></tr>
+          <tr><td>migrate2.mjs</td><td>Correctifs RLS + trigger (recherche path, SECURITY DEFINER)</td></tr>
+          <tr><td>migrate3.mjs</td><td>Ajout colonnes <code>first_name</code> et <code>inscription_date</code> sur <code>clients</code></td></tr>
+          <tr><td>migrate4.mjs</td><td>Tables <code>catalogs</code> + <code>catalog_products</code> + seed doTERRA (128 produits)</td></tr>
+          <tr><td>add_native_event_id…sql</td><td>Ajout <code>native_event_id TEXT</code> sur <code>appointments</code> (sync calendrier)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr>
+
+    <!-- ──────────────────────────────────────────────
+         3. SYNCHRONISATION CALENDRIER
+         ────────────────────────────────────────────── -->
+    <h2>
+      <span class="section-num" style="background:linear-gradient(135deg,#6D3BFF,#22D3EE)">3</span>
+      Synchronisation Calendrier
+    </h2>
+
+    <p>
+      La synchronisation calendrier (<code>expo-calendar ~56.0.8</code>) crée un calendrier dédié
+      <strong>"Oryalis"</strong> sur l'appareil iOS ou Android du praticien et y pousse les rendez-vous Supabase.
+      Elle affiche aussi les événements personnels de l'utilisateur dans la vue agenda, avec une distinction
+      visuelle claire.
+    </p>
+
+    <div class="info-box info-box-amber">
+      <strong>Web :</strong> toutes les fonctions calendrier sont désactivées silencieusement sur
+      <code>Platform.OS === 'web'</code>. Le module <code>expo-calendar</code> n'est jamais importé
+      au niveau module (import conditionnel / <code>require()</code> lazy dans chaque fonction).
+    </div>
+
+    <h3>Architecture des fichiers</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Fichier</th><th>Rôle</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>features/appointments/calendarSyncService.ts</td><td>Service pur : accès à expo-calendar, pas de hooks React. Toutes les opérations natives.</td></tr>
+          <tr><td>features/appointments/useCalendarSync.ts</td><td>Hook React : orchestre le service, gère l'état (syncing, error), accès Supabase pour sauvegarder native_event_id.</td></tr>
+          <tr><td>app/(app)/settings.tsx</td><td>Section "Calendrier" : bouton sync, message d'erreur inline.</td></tr>
+          <tr><td>app/(app)/appointments/index.tsx</td><td>Vue agenda : affiche les événements personnels (non-Oryalis) en superposition.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Flux de synchronisation — Push vers le calendrier natif</h3>
+
+    <div class="cal-flow no-break">
+      <div class="cal-step">
+        <div class="cal-step-num">1</div>
+        <div class="cal-step-body">
+          <div class="cal-step-title">Demande de permission</div>
+          <div class="cal-step-desc">
+            <code>Calendar.requestCalendarPermissionsAsync()</code> — demande l'accès au calendrier natif.
+            Si <code>status !== 'granted'</code>, la fonction retourne <code>null</code> et le hook expose
+            <code>error = 'calendar_permission_denied'</code>. Le message d'erreur s'affiche inline dans les Réglages.
+          </div>
+        </div>
+      </div>
+      <div class="cal-step">
+        <div class="cal-step-num">2</div>
+        <div class="cal-step-body">
+          <div class="cal-step-title">Création / récupération du calendrier "Oryalis"</div>
+          <div class="cal-step-desc">
+            <code>getOrCreateOryalisCalendar()</code> cherche d'abord un calendrier existant nommé <strong>"Oryalis"</strong>
+            dans la liste des calendriers natifs.<br>
+            • S'il existe → retourne son <code>id</code><br>
+            • Sinon → le crée avec la couleur <code>#6D3BFF</code> (violet Oryalis)<br>
+            &nbsp;&nbsp;• <strong>iOS :</strong> récupère la source <code>LOCAL</code> ou <code>CALDAV</code><br>
+            &nbsp;&nbsp;• <strong>Android :</strong> crée avec <code>ownerAccount: 'personal'</code> et <code>CalendarAccessLevel.OWNER</code>
+          </div>
+        </div>
+      </div>
+      <div class="cal-step">
+        <div class="cal-step-num">3</div>
+        <div class="cal-step-body">
+          <div class="cal-step-title">Récupération des RDV Supabase</div>
+          <div class="cal-step-desc">
+            <code>syncAllToNative()</code> charge tous les appointments du praticien depuis Supabase
+            avec la colonne <code>native_event_id</code> et le nom du client (join <code>clients</code>).
+          </div>
+        </div>
+      </div>
+      <div class="cal-step">
+        <div class="cal-step-num">4</div>
+        <div class="cal-step-body">
+          <div class="cal-step-title">Création ou mise à jour de l'événement natif</div>
+          <div class="cal-step-desc">
+            <code>pushAppointmentToCalendar(calendarId, appt)</code> pour chaque RDV :<br>
+            • Si <code>native_event_id</code> existe → <code>Calendar.updateEventAsync()</code><br>
+            • Si <code>native_event_id</code> est null → <code>Calendar.createEventAsync()</code><br><br>
+            <strong>Format de l'événement créé :</strong><br>
+            — Titre : <code>🟣 {Nom client} — RDV #{numéro}</code><br>
+            — Durée : 60 minutes (valeur par défaut)<br>
+            — Notes : <code>[Oryalis] {thèmes abordés}</code>
+          </div>
+        </div>
+      </div>
+      <div class="cal-step">
+        <div class="cal-step-num">5</div>
+        <div class="cal-step-body">
+          <div class="cal-step-title">Sauvegarde du native_event_id en base</div>
+          <div class="cal-step-desc">
+            Si un nouvel événement a été créé (pas de <code>native_event_id</code> avant), l'ID retourné
+            par expo-calendar est sauvegardé dans <code>appointments.native_event_id</code> via Supabase.
+            Cela permet les mises à jour futures sans créer de doublons.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Fonctions exposées par le service</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Fonction</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>getOrCreateOryalisCalendar</td>
+            <td><code>() → Promise&lt;string | null&gt;</code></td>
+            <td>Retourne l'id du calendrier "Oryalis" (crée si absent). Null sur web ou si permission refusée.</td>
+          </tr>
+          <tr>
+            <td>pushAppointmentToCalendar</td>
+            <td><code>(calId, appt) → Promise&lt;string | null&gt;</code></td>
+            <td>Crée ou met à jour un événement natif. Retourne le <code>native_event_id</code>.</td>
+          </tr>
+          <tr>
+            <td>deleteAppointmentFromCalendar</td>
+            <td><code>(nativeEventId) → Promise&lt;void&gt;</code></td>
+            <td>Supprime l'événement natif. À appeler avant la suppression en base.</td>
+          </tr>
+          <tr>
+            <td>fetchAllNativeEvents</td>
+            <td><code>(from, to) → Promise&lt;NativeCalendarEvent[]&gt;</code></td>
+            <td>Lit TOUS les calendriers natifs (Oryalis + personnels) sur la période. Retourne le flag <code>isOryalis</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Type NativeCalendarEvent</h3>
+    <div class="rls-box">
+<span class="rls-keyword">type</span> <span class="rls-fn">NativeCalendarEvent</span> = {
+  id:            <span class="rls-str">string</span>          <span class="rls-comment">// ID natif de l'événement</span>
+  title:         <span class="rls-str">string</span>          <span class="rls-comment">// Titre de l'événement</span>
+  startDate:     <span class="rls-str">string</span>          <span class="rls-comment">// ISO string</span>
+  endDate:       <span class="rls-str">string</span>          <span class="rls-comment">// ISO string</span>
+  notes?:        <span class="rls-str">string</span>
+  calendarId:    <span class="rls-str">string</span>          <span class="rls-comment">// ID du calendrier source</span>
+  calendarTitle: <span class="rls-str">string</span>          <span class="rls-comment">// Nom du calendrier (ex: "Oryalis", "iPhone")</span>
+  calendarColor: <span class="rls-str">string</span>          <span class="rls-comment">// Couleur hex native du calendrier</span>
+  isOryalis:     <span class="rls-str">boolean</span>         <span class="rls-comment">// true si calendarTitle === 'Oryalis'</span>
+}
+    </div>
+
+    <h3>Affichage dans la vue agenda</h3>
+    <p>
+      Les événements natifs personnels (non-Oryalis) sont affichés en superposition sur la grille horaire,
+      à côté des RDV Supabase du praticien.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Type d'événement</th><th>Style visuel</th><th>Source</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>🟣 RDV Oryalis</td>
+            <td>Palette de couleurs cyclique par client (violet, bleu, vert…), barre colorée à gauche</td>
+            <td>Supabase <code>appointments</code></td>
+          </tr>
+          <tr>
+            <td>👤 Événement personnel</td>
+            <td>Fond <code>colors.bgDim</code> (discret), barre gauche = couleur native du calendrier, badge "Personnel", opacity 0.9</td>
+            <td>Calendrier natif iOS/Android (<code>isOryalis = false</code>)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="info-box info-box-blue">
+      <strong>Anti-duplication :</strong> les événements Oryalis synchonisés vers le calendrier natif
+      (<code>isOryalis = true</code>) sont filtrés de l'affichage natif — ils sont déjà affichés
+      via les données Supabase. Seuls les événements <code>isOryalis = false</code> sont superposés.
+    </div>
+
+    <h3>Fonctions du hook useCalendarSync</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Exposé</th><th>Type</th><th>Usage</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>syncAllToNative()</td><td>async function</td><td>Pousse tous les RDV Supabase vers le calendrier Oryalis natif</td></tr>
+          <tr><td>syncOne(id)</td><td>async function</td><td>Pousse un seul RDV (appeler après création/modification)</td></tr>
+          <tr><td>removeFromNative(nativeId)</td><td>async function</td><td>Supprime du calendrier natif (appeler avant suppression en base)</td></tr>
+          <tr><td>fetchMergedCalendar(from, to)</td><td>async function</td><td>Retourne tous les événements natifs de la période</td></tr>
+          <tr><td>syncing</td><td>boolean</td><td>Indicateur de chargement pour l'UI</td></tr>
+          <tr><td>error</td><td>string | null</td><td><code>'calendar_permission_denied'</code> ou <code>'sync_failed'</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr>
+
+    <!-- ──────────────────────────────────────────────
+         4. ARCHITECTURE DOSSIERS
+         ────────────────────────────────────────────── -->
+    <h2>
+      <span class="section-num" style="background:linear-gradient(135deg,#10b981,#3B82F6)">4</span>
+      Architecture dossiers
+    </h2>
+
+    <div class="rls-box" style="font-size:12px">
+<pre>
+<span class="rel-table">app/</span>
+  _layout.tsx               <span class="rel-comment">Root layout : ThemeProvider + AuthProvider + SplashAnimated + fonts</span>
+  reset-password.tsx        <span class="rel-comment">Route publique (hors auth)</span>
+  <span class="rel-table">(auth)/</span>
+    login.tsx               <span class="rel-comment">Login : brand block + form + forgot password</span>
+    register.tsx
+  <span class="rel-table">(app)/</span>
+    _layout.tsx             <span class="rel-comment">Sidebar web + bottom tabs mobile + CatalogPrefsProvider</span>
+    index.tsx               <span class="rel-comment">Dashboard KPI</span>
+    settings.tsx            <span class="rel-comment">Profil, langue, dark mode, catalogues, calendrier, abonnement</span>
+    <span class="rel-table">clients/</span>
+      index.tsx             <span class="rel-comment">Liste + filtres par statut</span>
+      new.tsx               <span class="rel-comment">Formulaire création</span>
+      <span class="rel-table">[id]/</span>
+        index.tsx           <span class="rel-comment">Fiche client avec tabs</span>
+        appointments.tsx    <span class="rel-comment">Historique séances du client</span>
+        notes.tsx
+        followups.tsx
+        recommendations.tsx
+    appointments/index.tsx  <span class="rel-comment">Agenda vue semaine/jour + événements natifs</span>
+    followups/index.tsx     <span class="rel-comment">Vue globale des relances</span>
+    catalog/index.tsx       <span class="rel-comment">Browsing catalogue + recommandation</span>
+
+<span class="rel-table">features/</span>
+  auth/AuthProvider.tsx
+  clients/                  <span class="rel-comment">clientService.ts · useClients.ts · useClient.ts</span>
+  appointments/             <span class="rel-comment">appointmentService.ts · useAppointments.ts · calendarSyncService.ts · useCalendarSync.ts</span>
+  notes/                    <span class="rel-comment">noteService.ts · useNotes.ts</span>
+  followups/                <span class="rel-comment">followupService.ts · useFollowups.ts</span>
+  recommendations/          <span class="rel-comment">recommendationService.ts · useRecommendations.ts</span>
+  dashboard/                <span class="rel-comment">useDashboard.ts</span>
+  catalogs/                 <span class="rel-comment">catalogService.ts · useCatalog.ts · CatalogProductPicker.tsx · CatalogPrefsProvider.tsx</span>
+  demo/                     <span class="rel-comment">DemoProvider.tsx</span>
+
+<span class="rel-table">shared/</span>
+  lib/supabase.ts           <span class="rel-comment">Client Supabase + AsyncStorage</span>
+  lib/types.ts              <span class="rel-comment">Tous les types TypeScript</span>
+  i18n/                     <span class="rel-comment">Config i18next · locales/en.json (source) · locales/fr.json</span>
+  theme/colors.ts           <span class="rel-comment">Palette complète light/dark</span>
+  theme/fonts.ts            <span class="rel-comment">Constantes Inter</span>
+  theme/ThemeProvider.tsx   <span class="rel-comment">Context useTheme() · persistance AsyncStorage</span>
+  components/ui/            <span class="rel-comment">Button · Card · Input · TextArea · Badge · EmptyState · Avatar · SplashAnimated</span>
+</pre>
+    </div>
+
+    <hr>
+
+    <!-- ──────────────────────────────────────────────
+         5. DESIGN SYSTEM
+         ────────────────────────────────────────────── -->
+    <h2>
+      <span class="section-num" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">5</span>
+      Design System &amp; Tokens
+    </h2>
+
+    <p>Gradient officiel de la marque : <strong>Cyan → Bleu → Violet</strong></p>
+    <div style="height:8px;border-radius:4px;background:linear-gradient(90deg,#22D3EE,#3B82F6,#6D3BFF);margin-bottom:20px"></div>
+
+    <p>Règle absolue : <strong>jamais d'import statique de palette dans un composant</strong>. Toujours <code>useTheme()</code>.</p>
+
+    <h3>Tokens principaux (Light / Dark)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Token</th><th>Light</th><th>Dark</th><th>Usage</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>bg</td><td>#FFFFFF</td><td>#0B1220</td><td>Fond principal</td></tr>
+          <tr><td>surface</td><td>#F8FAFC</td><td>#111827</td><td>Fond secondaire</td></tr>
+          <tr><td>card</td><td>#FFFFFF</td><td>#111827</td><td>Cartes, panneaux</td></tr>
+          <tr><td>text</td><td>#0F172A</td><td>#F8FAFC</td><td>Texte principal</td></tr>
+          <tr><td>textSecondary</td><td>#475569</td><td>#CBD5E1</td><td>Labels, métadonnées</td></tr>
+          <tr><td>primary</td><td>#2563EB</td><td>#3B82F6</td><td>Bleu — CTA, liens</td></tr>
+          <tr><td>tertiary</td><td>#6D3BFF</td><td>#8B5CF6</td><td>Violet — accent Oryalis</td></tr>
+          <tr><td>secondary</td><td>#22D3EE</td><td>#22D3EE</td><td>Cyan — accent marque</td></tr>
+          <tr><td>success</td><td>#10B981</td><td>#10B981</td><td>Statuts positifs</td></tr>
+          <tr><td>danger</td><td>#EF4444</td><td>#EF4444</td><td>Erreurs, suppressions</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Roadmap Phase 2 &amp; 3</h3>
+    <div class="features">
+      <div class="feature-item">
+        <div class="feature-icon">💳</div>
+        <div class="feature-text">
+          <div class="feature-title">Stripe (Phase 2)</div>
+          <div class="feature-desc">Abonnements Free / Pro 29€ / Cabinet 79€ + webhooks</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">📄</div>
+        <div class="feature-text">
+          <div class="feature-title">Export PDF (Phase 3)</div>
+          <div class="feature-desc">Fiche client, factures, URSAF</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🤖</div>
+        <div class="feature-text">
+          <div class="feature-title">Résumé IA (Phase 3)</div>
+          <div class="feature-desc">Claude API — résumé automatique séance</div>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🌍</div>
+        <div class="feature-text">
+          <div class="feature-title">Croissance (Phase 4)</div>
+          <div class="feature-desc">Module MTC, Zinzino, ES/DE/PT/AR, white-label</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+
+  <!-- ══════════════════ FOOTER ══════════════════ -->
+  <div class="doc-footer">
+    <span>Oryalis — Documentation technique v1.0</span>
+    <span>Jean-Pierre Timoner · jeanpierre.timoner.mtc@gmail.com</span>
+    <span>crm-bienetre.vercel.app</span>
+  </div>
+
+</div><!-- /page -->
+</body>
+</html>

@@ -11,6 +11,7 @@ import type { AppointmentStatus, AppointmentTask } from '@/features/appointments
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
+import { formatDate } from '@/shared/lib/dateFormat'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -94,7 +95,7 @@ function TaskRow({ task, colors, styles, onDone, onRemove, locale }: {
   const isDone = task.status === 'done'
   const isOverdue = !isDone && !!task.due_at && new Date(task.due_at) < new Date()
   const dueStr = task.due_at
-    ? new Date(task.due_at).toLocaleDateString(locale, { day: '2-digit', month: 'short' })
+    ? formatDate(task.due_at, locale, { day: '2-digit', month: 'short' })
     : null
 
   return (
@@ -218,7 +219,7 @@ export default function AppointmentDetailScreen() {
 
   async function handleStatusChange(status: AppointmentStatus) {
     setInlineError(null)
-    const ok = await update(id!, { status })
+    const ok = await update({ status })
     if (!ok) setInlineError(t('appointments.error_update_status'))
   }
 
@@ -285,7 +286,7 @@ export default function AppointmentDetailScreen() {
   const startDate   = new Date(appointment.start_at)
   const endDate     = new Date(appointment.end_at)
   const accentColor = TYPE_COLORS[appointment.appointment_type] ?? '#94A3B8'
-  const dateStr     = startDate.toLocaleDateString(locale, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+  const dateStr     = formatDate(startDate, locale, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
   const startTime   = `${pad2(startDate.getHours())}h${pad2(startDate.getMinutes())}`
   const endTime     = `${pad2(endDate.getHours())}h${pad2(endDate.getMinutes())}`
   const isCancelled = appointment.status === 'cancelled'
@@ -577,7 +578,7 @@ export default function AppointmentDetailScreen() {
               >
                 <Text style={styles.sideHistoryTitle} numberOfLines={1}>{h.title}</Text>
                 <Text style={styles.sideHistoryDate}>
-                  {new Date(h.start_at).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {formatDate(h.start_at, locale, { day: 'numeric', month: 'short', year: 'numeric' })}
                   {' · '}{t(`appointment_statuses.${h.status}` as any)}
                 </Text>
               </TouchableOpacity>

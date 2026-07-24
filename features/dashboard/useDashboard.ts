@@ -6,6 +6,73 @@ import type { Alert } from '@/shared/lib/types'
 import { computeAndSaveAlerts, fetchUnreadAlerts, markAlertRead, markAllAlertsRead } from '@/features/alerts/alertService'
 import { checkNoContact } from '@/features/automations/automationService'
 
+export type DailyActionKind = 'overdue_followup' | 'today_appointment' | 'today_action' | 'hot_prospect' | 'renewal'
+export interface DailyActionItem {
+  id: string
+  kind: DailyActionKind
+  clientId: string | null
+  clientName: string
+  title: string
+  at: string | null
+  href: string
+}
+
+function localDayBounds(date = new Date()) {
+  const start = new Date(date); start.setHours(0, 0, 0, 0)
+  const end = new Date(date); end.setHours(23, 59, 59, 999)
+  const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, '0'), d = String(date.getDate()).padStart(2, '0')
+  return { start: start.toISOString(), end: end.toISOString(), date: `${y}-${m}-${d}` }
+}
+
+export function useDailyActions() {
+  const { session } = useAuth()
+  const [items, setItems] = useState<DailyActionItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetch = useCallback(async () => {
+    if (!session) return
+    setLoading(true)
+    try {
+      const uid = session.user.id
+      const day = localDayBounds()
+      const renewalEnd = new Date(); renewalEnd.setDate(renewalEnd.getDate() + 5)
+      const renewalDate = localDayBounds(renewalEnd).date
+      const [overdue, appointments, actions, hotSignals, renewals] = await Promise.all([
+        supabase.from('followups').select('id, client_id, title, content, due_date, client:clients(full_name, archived_at)').eq('user_id', uid).eq('done', false).lt('due_date', day.date).order('due_date').limit(20),
+        supabase.from('appointments').select('id, client_id, title, start_at, client:clients(full_name, archived_at)').eq('user_id', uid).in('status', ['scheduled', 'rescheduled']).gte('start_at', day.start).lte('start_at', day.end).order('start_at').limit(20),
+        supabase.from('clients').select('id, full_name, next_action_at, next_action_type, next_action_source').eq('user_id', uid).is('archived_at', null).neq('next_action_source', 'appointment').gte('next_action_at', day.start).lte('next_action_at', day.end).order('next_action_at').limit(20),
+        supabase.from('followups').select('id, prospect_temperature, client:clients(id, full_name, next_action_at, archived_at, pipeline_stage)').eq('user_id', uid).in('prospect_temperature', ['hot', 'very_hot']).order('created_at', { ascending: false }).limit(50),
+        supabase.from('clients').select('id, full_name, next_lrp_date').eq('user_id', uid).is('archived_at', null).not('next_lrp_date', 'is', null).gte('next_lrp_date', day.date).lte('next_lrp_date', renewalDate).order('next_lrp_date').limit(20),
+      ])
+
+      const result: DailyActionItem[] = []
+      for (const row of overdue.data ?? []) {
+        const client = row.client as any
+        if (client?.archived_at) continue
+        result.push({ id: `followup-${row.id}`, kind: 'overdue_followup', clientId: row.client_id, clientName: client?.full_name ?? '', title: row.title ?? row.content ?? 'Relance', at: row.due_date, href: `/(app)/clients/${row.client_id}/followups` })
+      }
+      for (const row of appointments.data ?? []) {
+        const client = row.client as any
+        if (client?.archived_at) continue
+        result.push({ id: `appointment-${row.id}`, kind: 'today_appointment', clientId: row.client_id, clientName: client?.full_name ?? '', title: row.title, at: row.start_at, href: `/(app)/appointments/${row.id}` })
+      }
+      for (const row of actions.data ?? []) result.push({ id: `action-${row.id}`, kind: 'today_action', clientId: row.id, clientName: row.full_name, title: row.next_action_type ?? 'Action', at: row.next_action_at, href: `/(app)/clients/${row.id}` })
+      const seenHot = new Set<string>()
+      for (const row of hotSignals.data ?? []) {
+        const client = row.client as any
+        if (!client || client.archived_at || client.next_action_at || seenHot.has(client.id) || !['new_lead', 'contacted', 'presentation_scheduled', 'presentation_completed', 'follow_up'].includes(client.pipeline_stage)) continue
+        seenHot.add(client.id)
+        result.push({ id: `hot-${client.id}`, kind: 'hot_prospect', clientId: client.id, clientName: client.full_name, title: row.prospect_temperature, at: null, href: `/(app)/clients/${client.id}` })
+      }
+      for (const row of renewals.data ?? []) result.push({ id: `renewal-${row.id}`, kind: 'renewal', clientId: row.id, clientName: row.full_name, title: 'LRP', at: row.next_lrp_date, href: `/(app)/clients/${row.id}` })
+      setItems(result)
+    } finally { setLoading(false) }
+  }, [session])
+
+  useEffect(() => { fetch() }, [fetch])
+  return { items, loading, refresh: fetch }
+}
+
 interface DashboardStats {
   totalClients: number
   activeClients: number
@@ -103,7 +170,7 @@ export function useMonthlyRevenue() {
 
 export function usePipelineStats() {
   const { session } = useAuth()
-  const [byStatus, setByStatus] = useState<Record<string, number>>({})
+  const [byStage, setByStage] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
 
   const fetch = useCallback(async () => {
@@ -112,20 +179,21 @@ export function usePipelineStats() {
     try {
       const { data } = await supabase
         .from('clients')
-        .select('status')
+        .select('pipeline_stage')
         .eq('user_id', session.user.id)
+        .is('archived_at', null)
       const counts: Record<string, number> = {}
       for (const row of data ?? []) {
-        counts[row.status] = (counts[row.status] ?? 0) + 1
+        counts[row.pipeline_stage] = (counts[row.pipeline_stage] ?? 0) + 1
       }
-      setByStatus(counts)
+      setByStage(counts)
     } finally {
       setLoading(false)
     }
   }, [session])
 
   useEffect(() => { fetch() }, [fetch])
-  return { byStatus, loading, refresh: fetch }
+  return { byStage, loading, refresh: fetch }
 }
 
 export function useUpcomingLrp(limit = 5) {

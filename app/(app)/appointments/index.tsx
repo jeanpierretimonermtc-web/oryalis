@@ -11,6 +11,8 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { fetchAllNativeEvents, type NativeCalendarEvent } from '@/features/appointments/calendarSyncService'
+import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
+import { LineIcon } from '@/shared/components/ui/LineIcon'
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
 
 // ── Local type (joins client for display) ─────────────────────────────────────
@@ -100,6 +102,7 @@ export default function AgendaScreen() {
   const { session } = useAuth()
   const { width: screenW } = useWindowDimensions()
   const isFr = i18n.language === 'fr'
+  const { isConfigured: gcConfigured, isConnected: gcConnected, syncing: gcSyncing, syncResult: gcResult, error: gcError, syncAll: gcSyncAll } = useGoogleCalendar()
 
   const daysShort = isFr ? DAYS_SHORT_FR : DAYS_SHORT_EN
   const daysLong  = isFr ? DAYS_LONG_FR  : DAYS_LONG_EN
@@ -130,6 +133,12 @@ export default function AgendaScreen() {
   }, [session, weekStart])
 
   useFocusEffect(useCallback(() => { fetchWeek() }, [fetchWeek]))
+
+  const handleGoogleSyncPress = useCallback(async () => {
+    if (!gcConnected) { router.push('/(app)/settings-google' as any); return }
+    await gcSyncAll()
+    fetchWeek()
+  }, [gcConnected, gcSyncAll, fetchWeek])
 
   useFocusEffect(useCallback(() => {
     if (Platform.OS === 'web' || !session) return
@@ -390,6 +399,20 @@ export default function AgendaScreen() {
         <View style={styles.pageHeader}>
           <Text style={styles.pageTitle}>{t('appointments.title')}</Text>
           <View style={styles.headerRight}>
+            {gcConfigured && (
+              <TouchableOpacity
+                style={[styles.syncBtn, gcConnected && styles.syncBtnConnected]}
+                onPress={handleGoogleSyncPress}
+                disabled={gcSyncing}
+                activeOpacity={0.7}
+                accessibilityLabel={gcConnected ? t('settings.sync_google_sync') : t('settings.sync_google_connect')}
+              >
+                {gcSyncing
+                  ? <ActivityIndicator size="small" color={gcConnected ? colors.primary : colors.textTertiary} />
+                  : <LineIcon name="sync" size={16} color={gcConnected ? colors.primary : colors.textTertiary} />
+                }
+              </TouchableOpacity>
+            )}
             {!isToday && (
               <TouchableOpacity style={styles.todayBtn} onPress={jumpToToday} activeOpacity={0.7}>
                 <Text style={styles.todayBtnText}>{t('appointments.today_short')}</Text>
@@ -398,6 +421,12 @@ export default function AgendaScreen() {
             {loadingWeek && <ActivityIndicator size="small" color={colors.primary} />}
           </View>
         </View>
+
+        {(gcResult || gcError) && (
+          <Text style={[styles.gcStatusText, gcError && { color: colors.danger }]}>
+            {gcError ? gcError : `✓ ${t('settings.sync_google_result', { pushed: gcResult!.pushed, pulled: gcResult!.pulled })}`}
+          </Text>
+        )}
 
         <View style={styles.viewToggleRow}>
           <View style={styles.viewToggle}>
@@ -486,10 +515,14 @@ function makeStyles(colors: ThemeColors) {
   todayBtn:     { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: colors.primaryLight },
   todayBtnText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
 
+  syncBtn:          { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgDim },
+  syncBtnConnected: { backgroundColor: colors.primaryLight },
+  gcStatusText:     { fontSize: 11, fontFamily: fonts.medium, color: colors.success, paddingHorizontal: 20, paddingTop: 4 },
+
   viewToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card },
   viewToggle:          { flexDirection: 'row', backgroundColor: colors.bgDim, borderRadius: 10, padding: 3, gap: 2 },
   toggleBtn:           { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 8 },
-  toggleBtnActive:     { backgroundColor: colors.card, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
+  toggleBtnActive:     { backgroundColor: colors.card, boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(0, 0, 0, 0.1)' }], elevation: 2 },
   toggleBtnText:       { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
   toggleBtnTextActive: { color: colors.text, fontFamily: fonts.semibold },
 

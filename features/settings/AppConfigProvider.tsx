@@ -20,6 +20,7 @@ const DEFAULT_PROFILE: UserBusinessProfile = {
   activity_type: 'generic',
   custom_brand_name: null,
   active_modules: ['products', 'renewals_lrp', 'downline', 'goals', 'calendar_sync', 'auto_new_client', 'auto_order', 'auto_appointment', 'auto_no_contact'],
+  automation_delays: {},
   created_at: '', updated_at: '',
 }
 
@@ -34,10 +35,12 @@ type AppConfigCtx = {
   // ── Read ───────────────────────────────────────────────────────────────────
   isModuleActive: (key: ModuleKey) => boolean
   getStatusLabel: (key: ClientStatus) => string
+  getAutomationDelay: (ruleId: string, fallback: number) => number
 
   // ── Business profile writes ────────────────────────────────────────────────
   saveActivityType: (type: ActivityType, customBrand?: string | null) => Promise<void>
   toggleModule: (key: ModuleKey, active: boolean) => Promise<void>
+  setAutomationDelay: (ruleId: string, days: number) => Promise<void>
 
   // ── Status label writes ────────────────────────────────────────────────────
   saveLabel: (key: ClientStatus, value: string) => Promise<void>
@@ -54,8 +57,10 @@ const AppConfigContext = createContext<AppConfigCtx>({
   loading:    true,
   isModuleActive:    () => true,
   getStatusLabel:    (k) => DEFAULT_STATUS_LABELS[k] ?? k,
+  getAutomationDelay: (_ruleId, fallback) => fallback,
   saveActivityType:  async () => {},
   toggleModule:      async () => {},
+  setAutomationDelay: async () => {},
   saveLabel:         async () => {},
   applyActivityPreset: async () => {},
   resetLabels:       async () => {},
@@ -101,6 +106,10 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     labels[key] ?? DEFAULT_STATUS_LABELS[key] ?? key
   , [labels])
 
+  const getAutomationDelay = useCallback((ruleId: string, fallback: number): number =>
+    profile.automation_delays[ruleId] ?? fallback
+  , [profile.automation_delays])
+
   // ── Business profile writes ──────────────────────────────────────────────────
 
   const saveActivityType = useCallback(async (
@@ -130,6 +139,17 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       })
       setProfile(updated)
     } catch (e) { console.error('[toggleModule]', e) }
+  }, [userId, profile])
+
+  const setAutomationDelay = useCallback(async (ruleId: string, days: number) => {
+    if (!userId) return
+    try {
+      const updated = await upsertBusinessProfile(userId, {
+        ...profile,
+        automation_delays: { ...profile.automation_delays, [ruleId]: days },
+      })
+      setProfile(updated)
+    } catch (e) { console.error('[setAutomationDelay]', e) }
   }, [userId, profile])
 
   // ── Status label writes ──────────────────────────────────────────────────────
@@ -163,8 +183,8 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   return (
     <AppConfigContext.Provider value={{
       profile, labels, loading,
-      isModuleActive, getStatusLabel,
-      saveActivityType, toggleModule,
+      isModuleActive, getStatusLabel, getAutomationDelay,
+      saveActivityType, toggleModule, setAutomationDelay,
       saveLabel, applyActivityPreset, resetLabels,
       reload: load,
     }}>

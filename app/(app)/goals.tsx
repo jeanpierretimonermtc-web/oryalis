@@ -10,8 +10,9 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { GoalMetric } from '@/shared/lib/types'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
+import { AdvisorGate } from '@/features/subscriptions/AdvisorGate'
 
-const METRICS: GoalMetric[] = ['new_clients', 'new_distributors', 'revenue', 'appointments']
+const METRICS: GoalMetric[] = ['new_clients', 'new_distributors', 'revenue', 'appointments', 'presentations', 'followups']
 
 function ProgressBar({ pct, accent, bg }: { pct: number; accent: string; bg: string }) {
   return (
@@ -62,6 +63,7 @@ export default function GoalsScreen() {
   return (
     <>
       <Stack.Screen options={settingsScreenOptions(t('goals.title'))} />
+      <AdvisorGate feature={t('subscription.features.reports')}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         <Text style={styles.subtitle}>{t('goals.subtitle')}</Text>
@@ -146,6 +148,7 @@ export default function GoalsScreen() {
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <View style={{ height: 40 }} />
       </ScrollView>
+      </AdvisorGate>
     </>
   )
 }

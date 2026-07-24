@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch } from 'react-native'
-import { Stack } from 'expo-router'
+import { router, Stack } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
@@ -12,8 +12,10 @@ import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 
 const PLAN_CONFIG: Record<string, { label: string; descKey: string }> = {
   free:    { label: 'Gratuit', descKey: 'settings.plan_free_desc'    },
-  pro:     { label: 'Pro',     descKey: 'settings.plan_pro_desc'     },
-  cabinet: { label: 'Cabinet', descKey: 'settings.plan_cabinet_desc' },
+  pro:     { label: 'Conseiller', descKey: 'settings.plan_pro_desc'     },
+  advisor: { label: 'Conseiller', descKey: 'settings.plan_pro_desc'     },
+  cabinet: { label: 'Leader', descKey: 'settings.plan_cabinet_desc' },
+  leader:  { label: 'Leader', descKey: 'settings.plan_cabinet_desc' },
 }
 
 export default function DisplaySettingsScreen() {
@@ -39,7 +41,7 @@ export default function DisplaySettingsScreen() {
   }, [session?.user.id])
 
   const planCfg = PLAN_CONFIG[plan] ?? PLAN_CONFIG.free
-  const isPaid = plan === 'pro' || plan === 'cabinet'
+  const isPaid = ['pro', 'cabinet', 'advisor', 'leader', 'enterprise'].includes(plan)
 
   return (
     <>
@@ -82,7 +84,7 @@ export default function DisplaySettingsScreen() {
             )}
           </View>
           <Text style={[styles.planDesc, !isPaid && { color: colors.textSecondary }]}>{t(planCfg.descKey)}</Text>
-          <TouchableOpacity style={[styles.upgradeBtn, isPaid && { backgroundColor: 'rgba(255,255,255,0.15)' }]} activeOpacity={0.85}>
+          <TouchableOpacity style={[styles.upgradeBtn, isPaid && { backgroundColor: 'rgba(255,255,255,0.15)' }]} activeOpacity={0.85} onPress={() => router.push('/(app)/settings-subscription' as any)}>
             <Text style={[styles.upgradeBtnText, isPaid && { color: '#fff' }]}>{t('settings.upgrade')}</Text>
           </TouchableOpacity>
         </View>

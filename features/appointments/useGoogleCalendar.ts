@@ -4,7 +4,7 @@ import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import { useAuth } from '@/features/auth/AuthProvider'
 import {
-  saveGcToken, loadGcToken, deleteGcToken,
+  saveGcToken, loadGcToken, deleteGcToken, refreshGcAccessToken,
   pushAppointmentToGoogle, pullFromGoogle,
 } from './googleCalendarService'
 import { fetchAppointments } from './appointmentService'
@@ -116,8 +116,9 @@ export function useGoogleCalendar() {
       await saveGcToken(userId, gcToken)
       setToken(gcToken)
     } catch (e) {
-      console.error('[exchangeCode]', e)
-      setError(e instanceof Error ? e.message : 'Erreur connexion Google')
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+      console.error('[exchangeCode]', msg)
+      setError(msg)
     }
   }
 
@@ -139,12 +140,40 @@ export function useGoogleCalendar() {
     setSyncResult(null)
   }, [userId])
 
+  // ── Token refresh ──────────────────────────────────────────────────────────
+  // Google access tokens expire after ~1h; refresh via refresh_token before each sync.
+  const ensureFreshToken = useCallback(async (): Promise<string | null> => {
+    if (!userId || !token) return null
+    const isExpired = !token.expires_at || new Date(token.expires_at).getTime() - 60_000 < Date.now()
+    if (!isExpired) return token.access_token
+
+    if (!token.refresh_token) {
+      setError('Session Google expirée — reconnectez Google Agenda')
+      return null
+    }
+    try {
+      const refreshed = await refreshGcAccessToken(token.refresh_token, getClientId(), CLIENT_SECRET_WEB)
+      const newToken: GcToken = { access_token: refreshed.access_token, refresh_token: token.refresh_token, expires_at: refreshed.expires_at }
+      await saveGcToken(userId, newToken)
+      setToken(newToken)
+      return newToken.access_token
+    } catch (e) {
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+      console.error('[ensureFreshToken]', msg)
+      setError('Session Google expirée — reconnectez Google Agenda')
+      return null
+    }
+  }, [userId, token])
+
   // ── Sync ───────────────────────────────────────────────────────────────────
   const syncAll = useCallback(async () => {
     if (!userId || !token?.access_token) return
     setSyncing(true)
     setError(null)
     try {
+      const accessToken = await ensureFreshToken()
+      if (!accessToken) return
+
       // Push Oryalis → Google (next 30 days + past 7 days)
       const from = new Date(Date.now() - 7 * 86400000).toISOString()
       const to   = new Date(Date.now() + 30 * 86400000).toISOString()
@@ -153,25 +182,27 @@ export function useGoogleCalendar() {
       for (const appt of appointments) {
         if (!appt.client_id) continue
         try {
-          await pushAppointmentToGoogle(userId, appt, token.access_token)
+          await pushAppointmentToGoogle(userId, appt, accessToken)
           pushed++
         } catch (e: any) {
           if (e.message === 'gc_token_expired') { setError('Token expiré — reconnectez Google Agenda'); break }
+          console.error('[syncAll.push]', appt.id, e)
         }
       }
 
       // Pull Google → Oryalis
-      const { created: pulled } = await pullFromGoogle(userId, token.access_token)
+      const { created: pulled } = await pullFromGoogle(userId, accessToken)
 
       setSyncResult({ pushed, pulled })
       setTimeout(() => setSyncResult(null), 8000)
     } catch (e) {
-      console.error('[syncAll]', e)
-      setError(e instanceof Error ? e.message : 'Erreur synchronisation')
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+      console.error('[syncAll]', msg)
+      setError(msg)
     } finally {
       setSyncing(false)
     }
-  }, [userId, token])
+  }, [userId, token, ensureFreshToken])
 
   return {
     isConfigured,

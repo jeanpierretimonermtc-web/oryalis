@@ -59,8 +59,9 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .from('clients')
     .select('id, full_name')
     .eq('user_id', userId)
+    .is('archived_at', null)
     .in('status', ['prospect', 'new_client'])
-    .lt('updated_at', sevenDaysAgo)
+    .or(`last_interaction_at.lt.${sevenDaysAgo},last_interaction_at.is.null`)
     .limit(10)
 
   for (const c of forgotten ?? []) {
@@ -88,6 +89,7 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .from('clients')
     .select('id, full_name')
     .eq('user_id', userId)
+    .is('archived_at', null)
     .in('status', ['active', 'loyal', 'vip'])
     .limit(30)
 
@@ -110,6 +112,7 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .from('clients')
     .select('id, full_name, next_lrp_date')
     .eq('user_id', userId)
+    .is('archived_at', null)
     .gte('next_lrp_date', today)
     .lte('next_lrp_date', fiveDaysLater)
     .limit(10)
@@ -143,8 +146,9 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
       .from('clients')
       .select('id, full_name')
       .eq('user_id', userId)
+      .is('archived_at', null)
       .in('contact_role', ['distributor', 'leader'])
-      .lt('updated_at', thirtyDaysAgo)
+      .or(`last_interaction_at.lt.${thirtyDaysAgo},last_interaction_at.is.null`)
       .limit(10)
 
     for (const c of dormant ?? []) {

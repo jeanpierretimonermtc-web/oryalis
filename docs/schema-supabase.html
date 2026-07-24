@@ -1,0 +1,1410 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oryalis — Schéma base de données Supabase</title>
+<style>
+  :root {
+    --blue:    #2563EB;
+    --cyan:    #0891B2;
+    --violet:  #6D3BFF;
+    --green:   #059669;
+    --amber:   #B45309;
+    --rose:    #E11D48;
+    --slate:   #475569;
+    --bg:      #F8FAFC;
+    --card:    #FFFFFF;
+    --border:  #E2E8F0;
+    --text:    #0F172A;
+    --text2:   #475569;
+    --text3:   #94A3B8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, 'Inter', 'Segoe UI', sans-serif;
+    font-size: 11px;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.5;
+  }
+
+  /* ── Cover ── */
+  .cover {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0B1220 0%, #1E293B 100%);
+    color: white;
+    text-align: center;
+    padding: 60px 40px;
+    page-break-after: always;
+  }
+  .cover-logo {
+    font-size: 48px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #22D3EE, #3B82F6, #6D3BFF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -2px;
+    margin-bottom: 16px;
+  }
+  .cover-subtitle {
+    font-size: 18px;
+    color: #94A3B8;
+    margin-bottom: 8px;
+  }
+  .cover-meta {
+    margin-top: 48px;
+    color: #64748B;
+    font-size: 12px;
+    line-height: 2;
+  }
+  .cover-meta strong { color: #94A3B8; }
+  .cover-stats {
+    display: flex;
+    gap: 40px;
+    margin-top: 40px;
+  }
+  .cover-stat {
+    text-align: center;
+  }
+  .cover-stat-num {
+    font-size: 36px;
+    font-weight: 700;
+    color: #3B82F6;
+  }
+  .cover-stat-lbl {
+    font-size: 11px;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ── Layout ── */
+  .page {
+    padding: 32px 40px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  /* ── Section headers ── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 32px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .section-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .section-desc {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 2px;
+  }
+
+  /* ── Table cards ── */
+  .table-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 20px;
+    overflow: hidden;
+    page-break-inside: avoid;
+  }
+  .table-header {
+    padding: 14px 18px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .table-name {
+    font-size: 14px;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+    color: var(--text);
+  }
+  .table-purpose {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 3px;
+    line-height: 1.4;
+  }
+  .rls-badge {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: #D1FAE5;
+    color: #059669;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ── Columns table ── */
+  table.cols {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.5px;
+  }
+  table.cols thead {
+    background: #F8FAFC;
+    border-bottom: 1px solid var(--border);
+  }
+  table.cols th {
+    padding: 7px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+  }
+  table.cols td {
+    padding: 6px 14px;
+    border-bottom: 1px solid #F1F5F9;
+    vertical-align: top;
+  }
+  table.cols tr:last-child td { border-bottom: none; }
+  table.cols tr:hover td { background: #FAFBFC; }
+
+  .col-name {
+    font-family: 'Courier New', monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .col-type {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: var(--cyan);
+  }
+  .col-pk   { color: #F59E0B; font-weight: 700; font-size: 9px; }
+  .col-fk   { color: var(--violet); font-size: 9px; font-weight: 600; }
+  .col-note { color: var(--text2); font-size: 10px; }
+  .col-enum { font-size: 9.5px; color: var(--slate); font-family: 'Courier New', monospace; }
+
+  /* ── Relation diagram ── */
+  .diagram-section {
+    page-break-before: always;
+  }
+  .diagram-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 20px;
+  }
+  .diagram-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+
+  /* ── Relation table ── */
+  table.rels {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.5px;
+  }
+  table.rels th {
+    padding: 7px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 9px;
+    color: var(--text2);
+    text-transform: uppercase;
+    background: #F8FAFC;
+    border-bottom: 1px solid var(--border);
+  }
+  table.rels td {
+    padding: 7px 12px;
+    border-bottom: 1px solid #F1F5F9;
+    vertical-align: middle;
+  }
+  table.rels tr:last-child td { border-bottom: none; }
+  .rel-arrow { color: var(--blue); font-weight: 700; font-size: 12px; }
+  .rel-on-delete {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .cascade  { background: #FEE2E2; color: #991B1B; }
+  .set-null { background: #FEF3C7; color: #92400E; }
+
+  /* ── Domain colors ── */
+  .domain-auth    { background: #DBEAFE; }
+  .domain-user    { background: #EDE9FE; }
+  .domain-client  { background: #D1FAE5; }
+  .domain-crm     { background: #ECFEFF; }
+  .domain-catalog { background: #FEF3C7; }
+  .domain-mlm     { background: #FCE7F3; }
+  .domain-calendar{ background: #F0FDF4; }
+  .domain-system  { background: #F1F5F9; }
+
+  .icon-auth    { background: #DBEAFE; }
+  .icon-user    { background: #EDE9FE; }
+  .icon-client  { background: #D1FAE5; }
+  .icon-crm     { background: #ECFEFF; }
+  .icon-catalog { background: #FEF3C7; }
+  .icon-mlm     { background: #FCE7F3; }
+  .icon-calendar{ background: #F0FDF4; }
+  .icon-system  { background: #F1F5F9; }
+
+  /* ── Info boxes ── */
+  .info-box {
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 10.5px;
+    line-height: 1.6;
+  }
+  .info-blue   { background: #EFF6FF; border-left: 3px solid #2563EB; color: #1E3A8A; }
+  .info-green  { background: #F0FDF4; border-left: 3px solid #059669; color: #14532D; }
+  .info-amber  { background: #FFFBEB; border-left: 3px solid #F59E0B; color: #78350F; }
+  .info-violet { background: #F5F3FF; border-left: 3px solid #6D3BFF; color: #3B0764; }
+
+  /* ── Grid ── */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text2);
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { background: white; font-size: 10px; }
+    .cover { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .table-card { page-break-inside: avoid; }
+    .domain-auth, .domain-user, .domain-client,
+    .domain-crm, .domain-catalog, .domain-mlm,
+    .domain-calendar, .domain-system,
+    .icon-auth, .icon-user, .icon-client,
+    .icon-crm, .icon-catalog, .icon-mlm,
+    .icon-calendar, .icon-system,
+    .rls-badge, .cascade, .set-null,
+    .info-blue, .info-green, .info-amber, .info-violet {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    @page { margin: 1.5cm; }
+  }
+
+  h2.toc-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    color: var(--text);
+  }
+  .toc-group {
+    margin-bottom: 16px;
+  }
+  .toc-group-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text2);
+    margin-bottom: 8px;
+  }
+  .toc-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px dotted var(--border);
+    font-size: 11px;
+  }
+  .toc-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .toc-item-name { font-family: 'Courier New', monospace; font-weight: 600; }
+  .toc-item-desc { color: var(--text2); margin-left: auto; font-style: italic; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════ COVER -->
+<div class="cover">
+  <div class="cover-logo">ORYALIS</div>
+  <div class="cover-subtitle">Schéma Base de Données Supabase</div>
+  <div style="color:#64748B;font-size:13px;margin-top:8px;">CRM SaaS pour praticiens du bien-être</div>
+
+  <div class="cover-stats">
+    <div class="cover-stat">
+      <div class="cover-stat-num">17</div>
+      <div class="cover-stat-lbl">Tables</div>
+    </div>
+    <div class="cover-stat">
+      <div class="cover-stat-num">28</div>
+      <div class="cover-stat-lbl">Migrations</div>
+    </div>
+    <div class="cover-stat">
+      <div class="cover-stat-num">100%</div>
+      <div class="cover-stat-lbl">RLS activé</div>
+    </div>
+  </div>
+
+  <div class="cover-meta">
+    <strong>Projet</strong> — nhpvjfyjyculnijipzoa (eu-west-1)<br>
+    <strong>Stack</strong> — PostgreSQL + Supabase Auth + RLS + PostgREST<br>
+    <strong>Propriétaire</strong> — Jean-Pierre Timoner<br>
+    <strong>Généré le</strong> — 29 juin 2026
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ TOC -->
+<div class="page">
+  <h2 class="toc-title">Table des matières</h2>
+
+  <div class="grid-2">
+    <div>
+      <div class="toc-group">
+        <div class="toc-group-title" style="color:#4F46E5">🔐 Authentification & Profil</div>
+        <div class="toc-item"><div class="toc-dot" style="background:#DBEAFE;border:1px solid #2563EB"></div><span class="toc-item-name">auth.users</span><span class="toc-item-desc">Supabase Auth (built-in)</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#EDE9FE;border:1px solid #6D3BFF"></div><span class="toc-item-name">profiles</span><span class="toc-item-desc">Profil praticien</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#EDE9FE;border:1px solid #6D3BFF"></div><span class="toc-item-name">user_business_profiles</span><span class="toc-item-desc">Config activité (doTERRA, Zinzino…)</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#EDE9FE;border:1px solid #6D3BFF"></div><span class="toc-item-name">user_status_labels</span><span class="toc-item-desc">Libellés personnalisés</span></div>
+      </div>
+
+      <div class="toc-group">
+        <div class="toc-group-title" style="color:#059669">👤 Clients & Réseau</div>
+        <div class="toc-item"><div class="toc-dot" style="background:#D1FAE5;border:1px solid #059669"></div><span class="toc-item-name">clients</span><span class="toc-item-desc">Fiche client principale</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#FCE7F3;border:1px solid #DB2777"></div><span class="toc-item-name">upline_nodes</span><span class="toc-item-desc">Ligne ascendante MLM</span></div>
+      </div>
+
+      <div class="toc-group">
+        <div class="toc-group-title" style="color:#0891B2">📋 Activités CRM</div>
+        <div class="toc-item"><div class="toc-dot" style="background:#ECFEFF;border:1px solid #0891B2"></div><span class="toc-item-name">appointments</span><span class="toc-item-desc">Rendez-vous & séances</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#ECFEFF;border:1px solid #0891B2"></div><span class="toc-item-name">notes</span><span class="toc-item-desc">Notes libres</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#ECFEFF;border:1px solid #0891B2"></div><span class="toc-item-name">followups</span><span class="toc-item-desc">Relances planifiées</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#ECFEFF;border:1px solid #0891B2"></div><span class="toc-item-name">interactions</span><span class="toc-item-desc">Journal d'interactions</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="toc-group">
+        <div class="toc-group-title" style="color:#B45309">📦 Catalogue & Commandes</div>
+        <div class="toc-item"><div class="toc-dot" style="background:#FEF3C7;border:1px solid #F59E0B"></div><span class="toc-item-name">catalogs</span><span class="toc-item-desc">Catalogues produits</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#FEF3C7;border:1px solid #F59E0B"></div><span class="toc-item-name">catalog_products</span><span class="toc-item-desc">Produits dans un catalogue</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#FEF3C7;border:1px solid #F59E0B"></div><span class="toc-item-name">recommendations</span><span class="toc-item-desc">Recommandations produits</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#FEF3C7;border:1px solid #F59E0B"></div><span class="toc-item-name">orders</span><span class="toc-item-desc">Commandes clients</span></div>
+      </div>
+
+      <div class="toc-group">
+        <div class="toc-group-title" style="color:#7C3AED">📊 Pilotage</div>
+        <div class="toc-item"><div class="toc-dot" style="background:#EDE9FE;border:1px solid #6D3BFF"></div><span class="toc-item-name">goals</span><span class="toc-item-desc">Objectifs business</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#EDE9FE;border:1px solid #6D3BFF"></div><span class="toc-item-name">alerts</span><span class="toc-item-desc">Alertes opportunités</span></div>
+      </div>
+
+      <div class="toc-group">
+        <div class="toc-group-title" style="color:#059669">📅 Google Calendar</div>
+        <div class="toc-item"><div class="toc-dot" style="background:#F0FDF4;border:1px solid #059669"></div><span class="toc-item-name">google_calendar_tokens</span><span class="toc-item-desc">Tokens OAuth</span></div>
+        <div class="toc-item"><div class="toc-dot" style="background:#F0FDF4;border:1px solid #059669"></div><span class="toc-item-name">google_calendar_events</span><span class="toc-item-desc">Mapping RDV ↔ Google</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-box info-blue">
+    <strong>Règle RLS universelle</strong> — Toutes les tables ont le Row Level Security activé. Chaque utilisateur ne voit que ses propres données grâce à <code>auth.uid() = user_id</code>. Exception : les catalogues officiels (<code>type='official'</code>, <code>user_id IS NULL</code>) sont visibles par tous.
+  </div>
+
+  <div class="info-box info-violet">
+    <strong>Trigger automatique</strong> — À chaque inscription, la fonction <code>handle_new_user()</code> insère automatiquement un enregistrement dans <code>profiles</code>, garantissant que chaque utilisateur auth a son profil.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ SECTION 1 : AUTH & PROFIL -->
+<div class="page">
+  <div class="section-header">
+    <div class="section-icon icon-auth">🔐</div>
+    <div>
+      <div class="section-title">Authentification & Profil utilisateur</div>
+      <div class="section-desc">Identité, configuration personnelle et préférences d'activité</div>
+    </div>
+  </div>
+
+  <!-- auth.users -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-auth">🔑</div>
+      <div>
+        <div class="table-name">auth.users</div>
+        <div class="table-purpose">Table gérée par Supabase Auth. Contient l'identité de chaque praticien inscrit (email, password hashé, métadonnées). C'est la <strong>racine de toutes les relations</strong> — toute table avec <code>user_id</code> pointe ici. On ne la modifie jamais directement.</div>
+      </div>
+      <div class="rls-badge">Supabase géré</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span> — Clé primaire, réutilisée dans toutes les tables comme <code>user_id</code></td></tr>
+        <tr><td><span class="col-name">email</span></td><td><span class="col-type">text</span></td><td class="col-note">Email de connexion (unique)</td></tr>
+        <tr><td><span class="col-name">created_at</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Date d'inscription</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- profiles -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-user">👤</div>
+      <div>
+        <div class="table-name">profiles</div>
+        <div class="table-purpose">Profil public du praticien. Créé automatiquement via trigger au signup. Contient toutes les informations affichées dans l'app (nom, photo, bio, plan tarifaire).</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span> = <span class="col-fk">FK → auth.users.id</span> — même identifiant que l'utilisateur auth</td></tr>
+        <tr><td><span class="col-name">full_name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom complet du praticien</td></tr>
+        <tr><td><span class="col-name">email</span></td><td><span class="col-type">text</span></td><td class="col-note">Email (copie depuis auth pour affichage)</td></tr>
+        <tr><td><span class="col-name">locale</span></td><td><span class="col-type">text</span></td><td class="col-note">Langue préférée (<code>'fr'</code>, <code>'en'</code>)</td></tr>
+        <tr><td><span class="col-name">timezone</span></td><td><span class="col-type">text</span></td><td class="col-note">Fuseau horaire (<code>'Europe/Paris'</code>…)</td></tr>
+        <tr><td><span class="col-name">plan</span></td><td><span class="col-type">text</span></td><td class="col-note">Cache d'affichage du plan Stripe (<code>'free'</code>, <code>'pro'</code>, <code>'cabinet'</code>)</td></tr>
+        <tr><td><span class="col-name">specialty</span></td><td><span class="col-type">text</span></td><td class="col-note">Spécialité (naturo, aromathérapie…)</td></tr>
+        <tr><td><span class="col-name">onboarding_completed</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Indique si l'onboarding 3 étapes est terminé</td></tr>
+        <tr><td><span class="col-name">active_catalog_slugs</span></td><td><span class="col-type">text[]</span></td><td class="col-note">Catalogues activés pour ce praticien (<code>['doterra', 'zinzino']</code>)</td></tr>
+        <tr><td><span class="col-name">avatar_url</span></td><td><span class="col-type">text</span></td><td class="col-note">URL photo de profil (Supabase Storage)</td></tr>
+        <tr><td><span class="col-name">phone</span></td><td><span class="col-type">text</span></td><td class="col-note">Téléphone professionnel</td></tr>
+        <tr><td><span class="col-name">website</span></td><td><span class="col-type">text</span></td><td class="col-note">Site web</td></tr>
+        <tr><td><span class="col-name">bio</span></td><td><span class="col-type">text</span></td><td class="col-note">Présentation courte</td></tr>
+        <tr><td><span class="col-name">company</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom du cabinet ou de la marque</td></tr>
+        <tr><td><span class="col-name">city</span></td><td><span class="col-type">text</span></td><td class="col-note">Ville d'exercice</td></tr>
+        <tr><td><span class="col-name">linkedin_url</span></td><td><span class="col-type">text</span></td><td class="col-note">Profil LinkedIn</td></tr>
+        <tr><td><span class="col-name">updated_at</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Dernière modification</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- user_business_profiles -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-user">⚙️</div>
+      <div>
+        <div class="table-name">user_business_profiles</div>
+        <div class="table-purpose">Configuration de l'activité du praticien. Détermine le type d'activité (doTERRA, Zinzino, générique…) et les modules activés. Unique par utilisateur. Conditionne l'affichage de l'interface.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> ON DELETE CASCADE — UNIQUE</td></tr>
+        <tr><td><span class="col-name">activity_type</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'generic' | 'doterra' | 'zinzino' | 'herbalife' | 'custom' | 'multi'</span></td></tr>
+        <tr><td><span class="col-name">custom_brand_name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom de marque si activity_type = 'custom'</td></tr>
+        <tr><td><span class="col-name">active_modules</span></td><td><span class="col-type">text[]</span></td><td class="col-note">Modules activés — <span class="col-enum">'products' | 'renewals_lrp' | 'downline' | 'goals' | 'calendar_sync' | 'client_import' | 'auto_*'</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- user_status_labels -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-user">🏷️</div>
+      <div>
+        <div class="table-name">user_status_labels</div>
+        <div class="table-purpose">Libellés personnalisés pour les statuts clients. Permet à chaque praticien de renommer les statuts selon son vocabulaire (ex. <code>loyal</code> → <code>"LRP"</code> pour doTERRA, <code>"Client récurrent"</code> pour Zinzino).</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> — UNIQUE(user_id, status_key)</td></tr>
+        <tr><td><span class="col-name">status_key</span></td><td><span class="col-type">text</span></td><td class="col-note">Clé du statut à renommer (<code>'prospect'</code>, <code>'loyal'</code>, <code>'vip'</code>…)</td></tr>
+        <tr><td><span class="col-name">custom_label</span></td><td><span class="col-type">text</span></td><td class="col-note">Libellé personnalisé affiché à la place du défaut</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ SECTION 2 : CLIENTS -->
+<div class="page">
+  <div class="section-header">
+    <div class="section-icon icon-client">👥</div>
+    <div>
+      <div class="section-title">Clients & Réseau MLM</div>
+      <div class="section-desc">La table centrale du CRM — tout gravite autour d'elle</div>
+    </div>
+  </div>
+
+  <!-- clients -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-client">👤</div>
+      <div>
+        <div class="table-name">clients</div>
+        <div class="table-purpose">
+          Table centrale du CRM. Chaque client appartient à un praticien (<code>user_id</code>). Elle stocke à la fois les données personnelles, le parcours CRM (journey_stage, acquisition_source), les informations MLM (sponsor_id, contact_role, next_lrp_date) et les données doTERRA (doterra_id). Toutes les autres tables d'activité (RDV, notes, relances, commandes…) y sont rattachées.
+        </div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> — praticien propriétaire</td></tr>
+        <tr><td colspan="3" style="background:#F8FAFC;font-weight:700;font-size:9px;color:#94A3B8;padding:5px 14px;text-transform:uppercase;letter-spacing:0.5px">Identité</td></tr>
+        <tr><td><span class="col-name">full_name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom complet</td></tr>
+        <tr><td><span class="col-name">first_name</span></td><td><span class="col-type">text</span></td><td class="col-note">Prénom seul (pour personnalisation messages)</td></tr>
+        <tr><td><span class="col-name">email</span></td><td><span class="col-type">text</span></td><td class="col-note">Email client</td></tr>
+        <tr><td><span class="col-name">phone</span></td><td><span class="col-type">text</span></td><td class="col-note">Téléphone (WhatsApp deep link)</td></tr>
+        <tr><td><span class="col-name">address</span></td><td><span class="col-type">text</span></td><td class="col-note">Adresse postale</td></tr>
+        <tr><td><span class="col-name">country</span></td><td><span class="col-type">text</span></td><td class="col-note">Pays (CRM international)</td></tr>
+        <tr><td><span class="col-name">language</span></td><td><span class="col-type">text</span></td><td class="col-note">Langue préférée du client</td></tr>
+        <tr><td><span class="col-name">birth_date</span></td><td><span class="col-type">date</span></td><td class="col-note">Date de naissance</td></tr>
+        <tr><td><span class="col-name">profession</span></td><td><span class="col-type">text</span></td><td class="col-note">Profession</td></tr>
+        <tr><td><span class="col-name">children</span></td><td><span class="col-type">text</span></td><td class="col-note">Info enfants (libre)</td></tr>
+        <tr><td><span class="col-name">interests</span></td><td><span class="col-type">text[]</span></td><td class="col-note">Centres d'intérêt (tableau)</td></tr>
+        <tr><td colspan="3" style="background:#F8FAFC;font-weight:700;font-size:9px;color:#94A3B8;padding:5px 14px;text-transform:uppercase;letter-spacing:0.5px">CRM</td></tr>
+        <tr><td><span class="col-name">status</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'prospect' | 'new_client' | 'active' | 'loyal' | 'vip' | 'inactive' | 'advisor' | 'team_member' | 'lost'</span></td></tr>
+        <tr><td><span class="col-name">source</span></td><td><span class="col-type">text</span></td><td class="col-note">Source d'acquisition libre (ancien champ)</td></tr>
+        <tr><td><span class="col-name">acquisition_source</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'facebook' | 'instagram' | 'referral' | 'workshop' | 'trade_show' | …</span></td></tr>
+        <tr><td><span class="col-name">journey_stage</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'discovery' | 'evaluation' | 'first_order' | 'onboarding' | 'followup_7d' | 'loyal'</span></td></tr>
+        <tr><td><span class="col-name">inscription_date</span></td><td><span class="col-type">date</span></td><td class="col-note">Date d'inscription comme client</td></tr>
+        <tr><td><span class="col-name">first_contact_date</span></td><td><span class="col-type">date</span></td><td class="col-note">Premier contact</td></tr>
+        <tr><td><span class="col-name">first_purchase_date</span></td><td><span class="col-type">date</span></td><td class="col-note">Premier achat</td></tr>
+        <tr><td><span class="col-name">next_action_date</span></td><td><span class="col-type">date</span></td><td class="col-note">Date de la prochaine action planifiée</td></tr>
+        <tr><td><span class="col-name">next_action_type</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'call' | 'whatsapp' | 'sms' | 'email' | 'rdv'</span></td></tr>
+        <tr><td><span class="col-name">referrals_count / referral_count</span></td><td><span class="col-type">int</span></td><td class="col-note">Nombre de parrainages effectués</td></tr>
+        <tr><td><span class="col-name">network_potential</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'low' | 'medium' | 'high'</span> — potentiel MLM</td></tr>
+        <tr><td colspan="3" style="background:#F8FAFC;font-weight:700;font-size:9px;color:#94A3B8;padding:5px 14px;text-transform:uppercase;letter-spacing:0.5px">Santé & Notes</td></tr>
+        <tr><td><span class="col-name">client_type</span></td><td><span class="col-type">text</span></td><td class="col-note">Type de prise en charge</td></tr>
+        <tr><td><span class="col-name">medical_treatment</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Sous traitement médical</td></tr>
+        <tr><td><span class="col-name">medical_notes</span></td><td><span class="col-type">text</span></td><td class="col-note">Notes médicales confidentielles</td></tr>
+        <tr><td><span class="col-name">particularities</span></td><td><span class="col-type">text</span></td><td class="col-note">Particularités à connaître</td></tr>
+        <tr><td><span class="col-name">loyalty_notes</span></td><td><span class="col-type">text</span></td><td class="col-note">Notes de fidélisation</td></tr>
+        <tr><td colspan="3" style="background:#F8FAFC;font-weight:700;font-size:9px;color:#94A3B8;padding:5px 14px;text-transform:uppercase;letter-spacing:0.5px">MLM / doTERRA</td></tr>
+        <tr><td><span class="col-name">sponsor_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE SET NULL — auto-référence pour l'arbre réseau</td></tr>
+        <tr><td><span class="col-name">contact_role</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'prospect' | 'customer' | 'distributor' | 'leader' | 'team_member' | 'inactive'</span></td></tr>
+        <tr><td><span class="col-name">doterra_id</span></td><td><span class="col-type">text</span></td><td class="col-note">Numéro membre doTERRA</td></tr>
+        <tr><td><span class="col-name">next_lrp_date</span></td><td><span class="col-type">date</span></td><td class="col-note">Prochain renouvellement LRP doTERRA</td></tr>
+        <tr><td><span class="col-name">welcome_email_sent</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Email de bienvenue envoyé</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- upline_nodes -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-mlm">🔗</div>
+      <div>
+        <div class="table-name">upline_nodes</div>
+        <div class="table-purpose">Ligne ascendante du praticien dans son organisation MLM. Saisie manuelle — le praticien indique ses supérieurs hiérarchiques (son sponsor, le sponsor de son sponsor…) pour afficher sa position dans la structure.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom du membre de l'upline</td></tr>
+        <tr><td><span class="col-name">member_id</span></td><td><span class="col-type">text</span></td><td class="col-note">Numéro membre (doTERRA ID) optionnel</td></tr>
+        <tr><td><span class="col-name">position</span></td><td><span class="col-type">integer</span></td><td class="col-note">Ordre dans la ligne (0 = sponsor direct, 1 = sponsor du sponsor…)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ SECTION 3 : ACTIVITÉS CRM -->
+<div class="page">
+  <div class="section-header">
+    <div class="section-icon icon-crm">📋</div>
+    <div>
+      <div class="section-title">Activités CRM</div>
+      <div class="section-desc">Tout ce qui trace l'historique et planifie les actions avec les clients</div>
+    </div>
+  </div>
+
+  <div class="info-box info-green">
+    Toutes ces tables partagent le même pattern : <code>client_id → clients.id</code> + <code>user_id → auth.users.id</code>, avec ON DELETE CASCADE (si le client est supprimé, toutes ses données disparaissent).
+  </div>
+
+  <!-- appointments -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-crm">📅</div>
+      <div>
+        <div class="table-name">appointments</div>
+        <div class="table-purpose">Rendez-vous et séances avec les clients. Numérotés automatiquement (<code>appointment_number</code>). Contient le compte-rendu, les solutions proposées, et peut déclencher une synchronisation Google Calendar.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">client_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">appointment_number</span></td><td><span class="col-type">integer</span></td><td class="col-note">Numéro de séance (1er RDV, 2e RDV…)</td></tr>
+        <tr><td><span class="col-name">appointment_date</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Date et heure du rendez-vous</td></tr>
+        <tr><td><span class="col-name">themes_discussed</span></td><td><span class="col-type">text</span></td><td class="col-note">Thèmes abordés durant la séance</td></tr>
+        <tr><td><span class="col-name">solutions_proposed</span></td><td><span class="col-type">text</span></td><td class="col-note">Solutions et produits proposés</td></tr>
+        <tr><td><span class="col-name">recap_sent</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Récapitulatif envoyé au client</td></tr>
+        <tr><td><span class="col-name">next_appointment_date</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Date du prochain RDV planifié</td></tr>
+        <tr><td><span class="col-name">native_event_id</span></td><td><span class="col-type">text</span></td><td class="col-note">ID de l'événement Google Calendar (si synchronisé)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- notes -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-crm">📝</div>
+      <div>
+        <div class="table-name">notes</div>
+        <div class="table-purpose">Notes libres associées à un client. Simples et rapides à saisir — le praticien peut noter n'importe quelle observation sans contrainte de format.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">client_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">content</span></td><td><span class="col-type">text</span></td><td class="col-note">Contenu de la note</td></tr>
+        <tr><td><span class="col-name">created_at</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Horodatage de création</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- followups -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-crm">🔔</div>
+      <div>
+        <div class="table-name">followups</div>
+        <div class="table-purpose">Relances et tâches planifiées. Au cœur du CRM — chaque relance a une date d'échéance, un type d'action (appel, WhatsApp…), et peut être générée automatiquement par le système (<code>auto_generated</code>). Les relances intelligentes ajoutent une température prospect et un score de priorité.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">client_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">title</span></td><td><span class="col-type">text</span></td><td class="col-note">Titre de la relance</td></tr>
+        <tr><td><span class="col-name">content</span></td><td><span class="col-type">text</span></td><td class="col-note">Description détaillée</td></tr>
+        <tr><td><span class="col-name">due_date</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Date et heure d'échéance</td></tr>
+        <tr><td><span class="col-name">done</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Tâche effectuée</td></tr>
+        <tr><td><span class="col-name">action_type</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'call' | 'whatsapp' | 'sms' | 'email' | 'rdv'</span></td></tr>
+        <tr><td colspan="3" style="background:#F8FAFC;font-weight:700;font-size:9px;color:#94A3B8;padding:5px 14px;text-transform:uppercase;letter-spacing:0.5px">Relance intelligente (migrate17)</td></tr>
+        <tr><td><span class="col-name">prospect_temperature</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'cold' | 'warm' | 'hot' | 'very_hot'</span></td></tr>
+        <tr><td><span class="col-name">pipeline_stage</span></td><td><span class="col-type">text</span></td><td class="col-note">Étape du tunnel de vente</td></tr>
+        <tr><td><span class="col-name">product_context</span></td><td><span class="col-type">text</span></td><td class="col-note">Contexte produit associé à la relance</td></tr>
+        <tr><td><span class="col-name">auto_generated</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Générée automatiquement par le système (badge ⚡ Auto)</td></tr>
+        <tr><td><span class="col-name">priority_score</span></td><td><span class="col-type">integer</span></td><td class="col-note">Score de priorité pour le tri intelligent</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- interactions -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-crm">💬</div>
+      <div>
+        <div class="table-name">interactions</div>
+        <div class="table-purpose">Journal détaillé des échanges avec un client. Plus riche qu'une note — capture le type d'interaction, le résumé, les besoins identifiés, les objections, et réserve des champs pour les résumés IA à venir (Phase 3).</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">client_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">interaction_type</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'rdv' | 'call' | 'visio' | 'whatsapp' | 'sms' | 'email' | 'workshop' | 'group_meeting' | 'product_followup'</span></td></tr>
+        <tr><td><span class="col-name">scheduled_at</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Heure planifiée</td></tr>
+        <tr><td><span class="col-name">completed_at</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Heure effective de réalisation</td></tr>
+        <tr><td><span class="col-name">subject</span></td><td><span class="col-type">text</span></td><td class="col-note">Sujet / objet de l'échange</td></tr>
+        <tr><td><span class="col-name">summary</span></td><td><span class="col-type">text</span></td><td class="col-note">Résumé narratif</td></tr>
+        <tr><td><span class="col-name">needs_identified</span></td><td><span class="col-type">text</span></td><td class="col-note">Besoins détectés durant l'échange</td></tr>
+        <tr><td><span class="col-name">objections</span></td><td><span class="col-type">text</span></td><td class="col-note">Objections soulevées</td></tr>
+        <tr><td><span class="col-name">interest_level</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'very_low' | 'low' | 'medium' | 'high' | 'very_high'</span></td></tr>
+        <tr><td><span class="col-name">notes_brutes</span></td><td><span class="col-type">text</span></td><td class="col-note">Notes brutes prises pendant l'échange</td></tr>
+        <tr><td><span class="col-name">ai_summary</span></td><td><span class="col-type">text</span></td><td class="col-note">Résumé généré par IA (Phase 3 — Claude API)</td></tr>
+        <tr><td><span class="col-name">ai_next_actions</span></td><td><span class="col-type">text</span></td><td class="col-note">Prochaines actions suggérées par IA</td></tr>
+        <tr><td><span class="col-name">ai_followup_draft</span></td><td><span class="col-type">text</span></td><td class="col-note">Brouillon de relance généré par IA</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ SECTION 4 : CATALOGUE & COMMANDES -->
+<div class="page">
+  <div class="section-header">
+    <div class="section-icon icon-catalog">📦</div>
+    <div>
+      <div class="section-title">Catalogue produits & Commandes</div>
+      <div class="section-desc">Gestion des produits doTERRA, Zinzino, et recommandations clients</div>
+    </div>
+  </div>
+
+  <!-- catalogs -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-catalog">📚</div>
+      <div>
+        <div class="table-name">catalogs</div>
+        <div class="table-purpose">Catalogues de produits. Deux types : <strong>officiels</strong> (<code>type='official'</code>, <code>user_id=null</code>) visibles par tous les praticiens (ex. doTERRA avec 128 produits, Zinzino…), et <strong>custom</strong> (<code>type='custom'</code>) créés par un praticien pour ses propres produits. Ajout d'une marque = un INSERT, zéro modification de code.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">slug</span></td><td><span class="col-type">text</span></td><td class="col-note">Identifiant URL unique (<code>'doterra'</code>, <code>'zinzino'</code>) — UNIQUE</td></tr>
+        <tr><td><span class="col-name">name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom affiché (<code>'doTERRA'</code>)</td></tr>
+        <tr><td><span class="col-name">brand</span></td><td><span class="col-type">text</span></td><td class="col-note">Marque commerciale</td></tr>
+        <tr><td><span class="col-name">type</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'official' | 'custom'</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> — NULL pour les catalogues officiels</td></tr>
+        <tr><td><span class="col-name">color</span></td><td><span class="col-type">text</span></td><td class="col-note">Couleur hex pour l'affichage des badges</td></tr>
+        <tr><td><span class="col-name">icon</span></td><td><span class="col-type">text</span></td><td class="col-note">Emoji ou icône représentant la marque</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- catalog_products -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-catalog">🧴</div>
+      <div>
+        <div class="table-name">catalog_products</div>
+        <div class="table-purpose">Produits au sein d'un catalogue. Inclut les données commerciales (prix retail/wholesale, PV doTERRA), botaniques (nom latin pour les huiles essentielles) et logistiques (SKU, unité). Les produits officiels sont pré-chargés via migration.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">catalog_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → catalogs.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">sku</span></td><td><span class="col-type">text</span></td><td class="col-note">Code produit / référence</td></tr>
+        <tr><td><span class="col-name">name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom du produit</td></tr>
+        <tr><td><span class="col-name">category</span></td><td><span class="col-type">text</span></td><td class="col-note">Catégorie (<code>'Huiles essentielles'</code>, <code>'Suppléments'</code>…)</td></tr>
+        <tr><td><span class="col-name">description</span></td><td><span class="col-type">text</span></td><td class="col-note">Description du produit</td></tr>
+        <tr><td><span class="col-name">unit</span></td><td><span class="col-type">text</span></td><td class="col-note">Unité de vente (ml, gélules…)</td></tr>
+        <tr><td><span class="col-name">retail_price_eur</span></td><td><span class="col-type">numeric</span></td><td class="col-note">Prix public (€)</td></tr>
+        <tr><td><span class="col-name">wholesale_price_eur</span></td><td><span class="col-type">numeric</span></td><td class="col-note">Prix préférentiel conseiller (€)</td></tr>
+        <tr><td><span class="col-name">pv</span></td><td><span class="col-type">numeric</span></td><td class="col-note">Points de volume (doTERRA)</td></tr>
+        <tr><td><span class="col-name">latin_name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom botanique latin (huiles essentielles)</td></tr>
+        <tr><td><span class="col-name">image_url</span></td><td><span class="col-type">text</span></td><td class="col-note">URL image produit</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- recommendations -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-catalog">💊</div>
+      <div>
+        <div class="table-name">recommendations</div>
+        <div class="table-purpose">Produits recommandés à un client. Suit le cycle complet de la recommandation : du conseil initial à la livraison. Peut être liée à un produit du catalogue ou saisie en texte libre. Le statut évolue de <code>advised</code> → <code>ordered</code> → <code>received</code> → <code>completed</code>.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">client_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">product_name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom du produit (libre ou depuis catalogue)</td></tr>
+        <tr><td><span class="col-name">catalog_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → catalogs.id</span> ON DELETE SET NULL — optionnel</td></tr>
+        <tr><td><span class="col-name">product_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → catalog_products.id</span> ON DELETE SET NULL — optionnel</td></tr>
+        <tr><td><span class="col-name">reason</span></td><td><span class="col-type">text</span></td><td class="col-note">Raison de la recommandation</td></tr>
+        <tr><td><span class="col-name">status</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'advised' | 'ordered' | 'received' | 'completed'</span></td></tr>
+        <tr><td><span class="col-name">quantity</span></td><td><span class="col-type">integer</span></td><td class="col-note">Quantité recommandée</td></tr>
+        <tr><td><span class="col-name">objective</span></td><td><span class="col-type">text</span></td><td class="col-note">Objectif santé visé</td></tr>
+        <tr><td><span class="col-name">recommendation_date</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Date de la recommandation</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- orders -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-catalog">🛒</div>
+      <div>
+        <div class="table-name">orders</div>
+        <div class="table-purpose">Commandes passées par les clients. Chaque commande peut être liée à un produit catalogue ou saisie en texte libre. Le champ <code>is_lrp</code> identifie les renouvellements automatiques doTERRA. <code>products</code> (JSONB) stocke la liste multi-produits d'une commande.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">client_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users.id</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">product_name</span></td><td><span class="col-type">text</span></td><td class="col-note">Nom du produit principal</td></tr>
+        <tr><td><span class="col-name">catalog_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → catalogs.id</span> ON DELETE SET NULL</td></tr>
+        <tr><td><span class="col-name">product_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → catalog_products.id</span> ON DELETE SET NULL</td></tr>
+        <tr><td><span class="col-name">quantity</span></td><td><span class="col-type">integer</span></td><td class="col-note">Quantité commandée</td></tr>
+        <tr><td><span class="col-name">amount</span></td><td><span class="col-type">numeric(10,2)</span></td><td class="col-note">Montant total</td></tr>
+        <tr><td><span class="col-name">currency</span></td><td><span class="col-type">text</span></td><td class="col-note">Devise (<code>'EUR'</code> par défaut)</td></tr>
+        <tr><td><span class="col-name">order_date</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Date de la commande</td></tr>
+        <tr><td><span class="col-name">status</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'pending' | 'ordered' | 'delivered' | 'cancelled'</span></td></tr>
+        <tr><td><span class="col-name">order_number</span></td><td><span class="col-type">text</span></td><td class="col-note">Numéro de commande (référence externe doTERRA)</td></tr>
+        <tr><td><span class="col-name">is_lrp</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Commande LRP (Loyalty Rewards Program doTERRA)</td></tr>
+        <tr><td><span class="col-name">products</span></td><td><span class="col-type">jsonb</span></td><td class="col-note">Liste multi-produits : <code>[{name, qty, price}]</code></td></tr>
+        <tr><td><span class="col-name">notes</span></td><td><span class="col-type">text</span></td><td class="col-note">Remarques libres</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ SECTION 5 : PILOTAGE & CALENDRIER -->
+<div class="page">
+  <div class="section-header">
+    <div class="section-icon icon-system">📊</div>
+    <div>
+      <div class="section-title">Pilotage & Outils</div>
+      <div class="section-desc">Objectifs business, alertes intelligentes et intégration Google Calendar</div>
+    </div>
+  </div>
+
+  <!-- goals -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-user">🎯</div>
+      <div>
+        <div class="table-name">goals</div>
+        <div class="table-purpose">Objectifs mensuels ou trimestriels du praticien. Chaque objectif est défini pour une période et une métrique (nouveaux clients, CA, RDV…). Le champ <code>current</code> est mis à jour au fil du temps pour afficher la progression sur le dashboard.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> ON DELETE CASCADE — UNIQUE(user_id, period, metric)</td></tr>
+        <tr><td><span class="col-name">period</span></td><td><span class="col-type">text</span></td><td class="col-note">Période ciblée (<code>'2026-06'</code>, <code>'2026-Q2'</code>…)</td></tr>
+        <tr><td><span class="col-name">metric</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'new_clients' | 'new_distributors' | 'revenue' | 'appointments'</span></td></tr>
+        <tr><td><span class="col-name">target</span></td><td><span class="col-type">integer</span></td><td class="col-note">Valeur cible à atteindre</td></tr>
+        <tr><td><span class="col-name">current</span></td><td><span class="col-type">integer</span></td><td class="col-note">Valeur actuelle (mis à jour périodiquement)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- alerts -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-user">⚡</div>
+      <div>
+        <div class="table-name">alerts</div>
+        <div class="table-purpose">Opportunités et alertes détectées automatiquement. Le système surveille les données et crée des alertes (prospect oublié, LRP en retard, distributeur dormant…). Le praticien voit les alertes non lues en priorité sur le dashboard.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">type</span></td><td><span class="col-type">text</span></td><td class="col-note"><span class="col-enum">'prospect_forgotten' | 'client_inactive' | 'lrp_due' | 'distributor_dormant' | 'followup_overdue' | 'leader_emerging'</span></td></tr>
+        <tr><td><span class="col-name">client_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → clients.id</span> ON DELETE CASCADE — NULL si alerte globale</td></tr>
+        <tr><td><span class="col-name">message</span></td><td><span class="col-type">text</span></td><td class="col-note">Message d'alerte affiché au praticien</td></tr>
+        <tr><td><span class="col-name">action_url</span></td><td><span class="col-type">text</span></td><td class="col-note">URL de navigation (deep link vers client ou écran)</td></tr>
+        <tr><td><span class="col-name">read</span></td><td><span class="col-type">boolean</span></td><td class="col-note">Alerte lue / traitée</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- google_calendar_tokens -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-calendar">🗝️</div>
+      <div>
+        <div class="table-name">google_calendar_tokens</div>
+        <div class="table-purpose">Tokens OAuth2 Google Calendar du praticien. Stockés de manière sécurisée (RLS). Permettent à l'app de créer et synchroniser des événements dans le calendrier Google sans redemander la connexion.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> ON DELETE CASCADE — UNIQUE</td></tr>
+        <tr><td><span class="col-name">access_token</span></td><td><span class="col-type">text</span></td><td class="col-note">Token d'accès OAuth2 (courte durée)</td></tr>
+        <tr><td><span class="col-name">refresh_token</span></td><td><span class="col-type">text</span></td><td class="col-note">Token de rafraîchissement (longue durée)</td></tr>
+        <tr><td><span class="col-name">expires_at</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Expiration du access_token</td></tr>
+        <tr><td><span class="col-name">scope</span></td><td><span class="col-type">text</span></td><td class="col-note">Permissions accordées par Google</td></tr>
+        <tr><td><span class="col-name">token_type</span></td><td><span class="col-type">text</span></td><td class="col-note"><code>'Bearer'</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- google_calendar_events -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon domain-calendar">📆</div>
+      <div>
+        <div class="table-name">google_calendar_events</div>
+        <div class="table-purpose">Table de mapping entre les RDV Oryalis et les événements Google Calendar. Permet d'éviter les doublons de synchronisation et de retrouver quel événement Google correspond à quel rendez-vous Oryalis.</div>
+      </div>
+      <div class="rls-badge">RLS actif</div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Colonne</th><th>Type</th><th>Rôle</th></tr></thead>
+      <tbody>
+        <tr><td><span class="col-name">id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-pk">PK</span></td></tr>
+        <tr><td><span class="col-name">user_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → auth.users</span> ON DELETE CASCADE</td></tr>
+        <tr><td><span class="col-name">appointment_id</span></td><td><span class="col-type">uuid</span></td><td class="col-note"><span class="col-fk">FK → appointments.id</span> ON DELETE CASCADE — UNIQUE(user_id, appointment_id)</td></tr>
+        <tr><td><span class="col-name">google_event_id</span></td><td><span class="col-type">text</span></td><td class="col-note">ID de l'événement dans Google Calendar — UNIQUE(user_id, google_event_id)</td></tr>
+        <tr><td><span class="col-name">calendar_id</span></td><td><span class="col-type">text</span></td><td class="col-note">ID du calendrier Google (<code>'primary'</code> par défaut)</td></tr>
+        <tr><td><span class="col-name">last_synced_at</span></td><td><span class="col-type">timestamptz</span></td><td class="col-note">Dernière synchronisation réussie</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ SECTION 6 : DIAGRAMME RELATIONS -->
+<div class="page diagram-section">
+  <div class="section-header">
+    <div class="section-icon" style="background:#F1F5F9">🔗</div>
+    <div>
+      <div class="section-title">Diagramme des relations</div>
+      <div class="section-desc">Vue d'ensemble des clés étrangères et comportements ON DELETE</div>
+    </div>
+  </div>
+
+  <div class="diagram-box">
+    <div class="diagram-title">Toutes les relations FK (→ = pointe vers)</div>
+    <table class="rels">
+      <thead>
+        <tr>
+          <th>Table source</th>
+          <th>Colonne FK</th>
+          <th></th>
+          <th>Table cible</th>
+          <th>ON DELETE</th>
+          <th>Signification</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>profiles</code></td>
+          <td><code>id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>1 profil = 1 compte (même UUID)</td>
+        </tr>
+        <tr>
+          <td><code>user_business_profiles</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Config activité supprimée avec le compte</td>
+        </tr>
+        <tr>
+          <td><code>user_status_labels</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Libellés supprimés avec le compte</td>
+        </tr>
+        <tr>
+          <td><code>clients</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Clients supprimés si le praticien se désinscrit</td>
+        </tr>
+        <tr>
+          <td><code>clients</code></td>
+          <td><code>sponsor_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete set-null">SET NULL</span></td>
+          <td>Auto-référence MLM — si le sponsor est supprimé, les filleuls restent sans sponsor</td>
+        </tr>
+        <tr>
+          <td><code>appointments</code></td>
+          <td><code>client_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>RDV supprimés si le client est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>appointments</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>RDV supprimés si le praticien se désinscrit</td>
+        </tr>
+        <tr>
+          <td><code>notes</code></td>
+          <td><code>client_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Notes supprimées si le client est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>followups</code></td>
+          <td><code>client_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Relances supprimées si le client est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>interactions</code></td>
+          <td><code>client_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Journal supprimé si le client est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>recommendations</code></td>
+          <td><code>client_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Recommandations supprimées si le client est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>recommendations</code></td>
+          <td><code>catalog_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>catalogs.id</code></td>
+          <td><span class="rel-on-delete set-null">SET NULL</span></td>
+          <td>Le lien catalogue est annulé, la reco reste</td>
+        </tr>
+        <tr>
+          <td><code>recommendations</code></td>
+          <td><code>product_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>catalog_products.id</code></td>
+          <td><span class="rel-on-delete set-null">SET NULL</span></td>
+          <td>Le lien produit est annulé, la reco reste</td>
+        </tr>
+        <tr>
+          <td><code>orders</code></td>
+          <td><code>client_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Commandes supprimées si le client est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>orders</code></td>
+          <td><code>catalog_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>catalogs.id</code></td>
+          <td><span class="rel-on-delete set-null">SET NULL</span></td>
+          <td>Historique commande préservé sans lien catalogue</td>
+        </tr>
+        <tr>
+          <td><code>orders</code></td>
+          <td><code>product_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>catalog_products.id</code></td>
+          <td><span class="rel-on-delete set-null">SET NULL</span></td>
+          <td>Historique commande préservé sans lien produit</td>
+        </tr>
+        <tr>
+          <td><code>catalog_products</code></td>
+          <td><code>catalog_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>catalogs.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Produits supprimés si le catalogue est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>catalogs</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Catalogues custom supprimés avec le compte (officiels = NULL)</td>
+        </tr>
+        <tr>
+          <td><code>alerts</code></td>
+          <td><code>client_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>clients.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Alertes supprimées si le client est supprimé</td>
+        </tr>
+        <tr>
+          <td><code>goals</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Objectifs supprimés avec le compte</td>
+        </tr>
+        <tr>
+          <td><code>upline_nodes</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Upline supprimée avec le compte</td>
+        </tr>
+        <tr>
+          <td><code>google_calendar_tokens</code></td>
+          <td><code>user_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>auth.users.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Tokens supprimés avec le compte</td>
+        </tr>
+        <tr>
+          <td><code>google_calendar_events</code></td>
+          <td><code>appointment_id</code></td>
+          <td class="rel-arrow">→</td>
+          <td><code>appointments.id</code></td>
+          <td><span class="rel-on-delete cascade">CASCADE</span></td>
+          <td>Mapping supprimé si le RDV est supprimé</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Visual schema summary -->
+  <div class="diagram-box">
+    <div class="diagram-title">Schéma visuel simplifié</div>
+    <pre style="font-size:9.5px;line-height:1.7;font-family:'Courier New',monospace;color:#334155;overflow:hidden;">
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                           auth.users  (Supabase Auth)                       │
+  │                                  id (UUID)                                  │
+  └──────┬──────────┬──────────┬──────────────┬──────────┬──────────┬───────────┘
+         │          │          │              │          │          │
+         ▼          ▼          ▼              ▼          ▼          ▼
+    profiles  user_business  user_status    goals     alerts   upline_nodes
+              _profiles      _labels                           google_calendar
+                                                               _tokens
+         │
+         ▼
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                                 clients                                     │
+  │     id ◄──────────────────────── sponsor_id (auto-référence MLM)           │
+  └──┬────┬─────┬──────────┬──────────────┬──────────────────────────────────┘
+     │    │     │          │              │
+     ▼    ▼     ▼          ▼              ▼
+  appts notes follow-  interact-     recommand-    orders
+             ups       ions          ations
+     │                                   │              │
+     ▼                                   ▼              ▼
+  google_                          ┌──────────────────────┐
+  calendar_                        │       catalogs        │
+  events                           └──────────┬───────────┘
+                                              │
+                                              ▼
+                                      catalog_products
+    </pre>
+  </div>
+
+  <!-- Legend -->
+  <div class="diagram-box">
+    <div class="diagram-title">Règles de comportement ON DELETE</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span class="rel-on-delete cascade" style="font-size:11px;">CASCADE</span>
+          <span style="font-size:11px;color:#475569;">La suppression se propage en cascade</span>
+        </div>
+        <div style="font-size:10px;color:#64748B;line-height:1.6;">
+          Si on supprime un <strong>client</strong>, tous ses RDV, notes, relances, interactions, recommandations et commandes sont supprimés automatiquement.<br><br>
+          Si on supprime un <strong>compte praticien</strong>, tous ses clients et par cascade toute leur histoire sont supprimés.
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span class="rel-on-delete set-null" style="font-size:11px;">SET NULL</span>
+          <span style="font-size:11px;color:#475569;">La FK est mise à null, l'enregistrement reste</span>
+        </div>
+        <div style="font-size:10px;color:#64748B;line-height:1.6;">
+          Si on supprime un <strong>produit catalogue</strong>, les recommandations et commandes qui y font référence conservent leur <code>product_name</code> mais perdent le lien typé.<br><br>
+          Si on supprime le <strong>sponsor MLM</strong> d'un client, le client reste mais <code>sponsor_id = null</code>.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ SECTION 7 : INDEX & PERFORMANCES -->
+<div class="page">
+  <div class="section-header">
+    <div class="section-icon" style="background:#F0FDF4">⚡</div>
+    <div>
+      <div class="section-title">Index & Performances</div>
+      <div class="section-desc">Index créés pour les requêtes critiques du dashboard et du réseau</div>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon" style="background:#F0FDF4">🔍</div>
+      <div>
+        <div class="table-name">Index PostgreSQL</div>
+        <div class="table-purpose">Index explicitement créés par les migrations (en plus des index PK/FK automatiques)</div>
+      </div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Index</th><th>Table</th><th>Colonnes</th><th>Utilité</th></tr></thead>
+      <tbody>
+        <tr><td><code>idx_clients_sponsor_id</code></td><td><code>clients</code></td><td><code>sponsor_id</code></td><td>Requêtes réseau downline (arbre MLM)</td></tr>
+        <tr><td><code>idx_orders_user_order_date</code></td><td><code>orders</code></td><td><code>user_id, order_date DESC</code></td><td>Dashboard CA trié par date</td></tr>
+        <tr><td><code>idx_followups_priority</code></td><td><code>followups</code></td><td><code>user_id, priority_score DESC NULLS LAST</code></td><td>Tri des relances intelligentes</td></tr>
+        <tr><td><code>idx_alerts_user_unread</code></td><td><code>alerts</code></td><td><code>user_id, read, created_at DESC</code></td><td>Alertes non lues en premier</td></tr>
+        <tr><td><code>idx_alerts_dedup</code></td><td><code>alerts</code></td><td><code>user_id, type, client_id, created_at</code></td><td>Dédoublonnage des alertes générées</td></tr>
+        <tr><td><code>idx_goals_user_period</code></td><td><code>goals</code></td><td><code>user_id, period</code></td><td>Objectifs par période</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-icon" style="background:#EFF6FF">🔒</div>
+      <div>
+        <div class="table-name">Contraintes UNIQUE importantes</div>
+        <div class="table-purpose">Garantissent l'intégrité métier au niveau base de données</div>
+      </div>
+    </div>
+    <table class="cols">
+      <thead><tr><th>Table</th><th>Contrainte UNIQUE</th><th>Signification</th></tr></thead>
+      <tbody>
+        <tr><td><code>catalogs</code></td><td><code>slug</code></td><td>Pas deux catalogues avec le même slug</td></tr>
+        <tr><td><code>user_business_profiles</code></td><td><code>user_id</code></td><td>Un seul profil d'activité par praticien</td></tr>
+        <tr><td><code>user_status_labels</code></td><td><code>(user_id, status_key)</code></td><td>Un seul label custom par statut par praticien</td></tr>
+        <tr><td><code>google_calendar_tokens</code></td><td><code>user_id</code></td><td>Un seul token Google par praticien</td></tr>
+        <tr><td><code>google_calendar_events</code></td><td><code>(user_id, appointment_id)</code></td><td>Un RDV ne peut être synchro qu'une fois</td></tr>
+        <tr><td><code>google_calendar_events</code></td><td><code>(user_id, google_event_id)</code></td><td>Un event Google ne peut mapper qu'un seul RDV</td></tr>
+        <tr><td><code>goals</code></td><td><code>(user_id, period, metric)</code></td><td>Un seul objectif par métrique par période</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="info-box info-amber">
+    <strong>Note sur la migration des statuts (migrate25)</strong> — La contrainte CHECK sur <code>clients.status</code> a été élargie de 5 à 9 valeurs pour couvrir tous les statuts CRM : <code>prospect</code>, <code>new_client</code>, <code>active</code>, <code>loyal</code>, <code>vip</code>, <code>inactive</code>, <code>advisor</code>, <code>team_member</code>, <code>lost</code>.
+  </div>
+
+  <div class="info-box info-violet">
+    <strong>Note sur recommendations.status (en transition)</strong> — Le statut <code>'purchased'</code> est conservé temporairement pour compatibilité descendante. Phase D prévoit : <code>UPDATE recommendations SET status='ordered' WHERE status='purchased'</code>, puis suppression de <code>'purchased'</code> du type union.
+  </div>
+
+  <div class="section-header" style="margin-top:32px;">
+    <div class="section-icon" style="background:#F8FAFC">🗺️</div>
+    <div>
+      <div class="section-title">Récapitulatif par domaine</div>
+      <div class="section-desc">Qui fait quoi, en un coup d'œil</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="info-box info-blue" style="margin-bottom:0">
+      <strong>🔐 Identité &amp; Config (4 tables)</strong><br>
+      <code>auth.users</code> → <code>profiles</code> → <code>user_business_profiles</code> + <code>user_status_labels</code><br><br>
+      Qui est le praticien, quelle est son activité, comment il nomme ses statuts.
+    </div>
+    <div class="info-box info-green" style="margin-bottom:0">
+      <strong>👥 Réseau Clients (2 tables)</strong><br>
+      <code>clients</code> (auto-ref <code>sponsor_id</code>) + <code>upline_nodes</code><br><br>
+      Toute la base de contacts, avec l'arbre MLM descendant (clients) et ascendant (upline).
+    </div>
+    <div class="info-box info-violet" style="margin-bottom:0">
+      <strong>📋 Activité CRM (4 tables)</strong><br>
+      <code>appointments</code> + <code>notes</code> + <code>followups</code> + <code>interactions</code><br><br>
+      L'historique et la planification de toutes les interactions avec les clients.
+    </div>
+    <div class="info-box info-amber" style="margin-bottom:0">
+      <strong>📦 Produits &amp; Commandes (4 tables)</strong><br>
+      <code>catalogs</code> → <code>catalog_products</code> ← <code>recommendations</code> + <code>orders</code><br><br>
+      Du catalogue officiel doTERRA jusqu'à la commande tracée en base.
+    </div>
+  </div>
+
+  <div style="margin-top:16px;" class="grid-2">
+    <div class="info-box info-blue" style="margin-bottom:0;border-color:#6D3BFF;background:#F5F3FF;color:#3B0764;">
+      <strong>📊 Pilotage (2 tables)</strong><br>
+      <code>goals</code> + <code>alerts</code><br><br>
+      Objectifs business et alertes automatiques pour ne jamais rater une opportunité.
+    </div>
+    <div class="info-box info-green" style="margin-bottom:0;border-color:#059669;">
+      <strong>📅 Intégration (2 tables)</strong><br>
+      <code>google_calendar_tokens</code> + <code>google_calendar_events</code><br><br>
+      Bridge OAuth2 pour synchroniser les RDV Oryalis avec Google Calendar.
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -111,21 +111,21 @@ function ClientPickerModal({ visible, onClose, onSelect, userId, colors, styles 
   useEffect(() => {
     if (!visible || !userId) return
     setLoading(true)
-    supabase.from('clients').select('id, full_name, first_name, email, status').eq('user_id', userId).order('full_name').limit(60)
+    supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('user_id', userId).is('archived_at', null).order('full_name').limit(60)
       .then(({ data }) => { setResults((data ?? []) as Client[]); setLoading(false) })
   }, [visible, userId])
 
   useEffect(() => {
     if (!visible || !userId || query.length === 0) {
       if (visible && userId) {
-        supabase.from('clients').select('id, full_name, first_name, email, status').eq('user_id', userId).order('full_name').limit(60)
+        supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('user_id', userId).is('archived_at', null).order('full_name').limit(60)
           .then(({ data }) => setResults((data ?? []) as Client[]))
       }
       return
     }
     if (query.length < 2) return
     const timer = setTimeout(() => {
-      supabase.from('clients').select('id, full_name, first_name, email, status').eq('user_id', userId).ilike('full_name', `%${query}%`).limit(20)
+      supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('user_id', userId).is('archived_at', null).ilike('full_name', `%${query}%`).limit(20)
         .then(({ data }) => setResults((data ?? []) as Client[]))
     }, 200)
     return () => clearTimeout(timer)
@@ -353,8 +353,14 @@ export default function NewAppointmentScreen() {
 
   useEffect(() => {
     if (!paramClientId || !session) return
-    supabase.from('clients').select('id, full_name, first_name, email, status').eq('id', paramClientId).single()
-      .then(({ data }) => { if (data) setSelectedClient(data as Client) })
+    supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('id', paramClientId).single()
+      .then(({ data }) => {
+        if (data) {
+          const selected = data as Client
+          setSelectedClient(selected)
+          setPipelineStage(selected.pipeline_stage)
+        }
+      })
   }, [paramClientId, session])
 
   function formatDate(dateStr: string) {
@@ -364,6 +370,11 @@ export default function NewAppointmentScreen() {
   function handleStartDateConfirm(d: string) {
     setStartDate(d)
     if (d > endDate) setEndDate(d)
+  }
+
+  function handleSelectClient(client: Client) {
+    setSelectedClient(client)
+    setPipelineStage(client.pipeline_stage)
   }
 
   function handleStartTimeConfirm(time: string) {
@@ -440,9 +451,9 @@ export default function NewAppointmentScreen() {
     { value: 'presentation_scheduled',   label: t('pipeline_stages.presentation_scheduled') },
     { value: 'presentation_completed',   label: t('pipeline_stages.presentation_completed') },
     { value: 'follow_up',                label: t('pipeline_stages.follow_up') },
-    { value: 'proposal_sent',            label: t('pipeline_stages.proposal_sent') },
     { value: 'customer',                 label: t('pipeline_stages.customer') },
     { value: 'distributor',              label: t('pipeline_stages.distributor') },
+    { value: 'lost',                     label: t('pipeline_stages.lost') },
   ]
 
   const tempOptions: { value: ProspectTemperature; label: string }[] = [
@@ -572,7 +583,7 @@ export default function NewAppointmentScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      <ClientPickerModal visible={showClientPicker} onClose={() => setShowClientPicker(false)} onSelect={setSelectedClient} userId={session?.user.id ?? ''} colors={colors} styles={styles} />
+      <ClientPickerModal visible={showClientPicker} onClose={() => setShowClientPicker(false)} onSelect={handleSelectClient} userId={session?.user.id ?? ''} colors={colors} styles={styles} />
       <CalendarPickerModal visible={showStartCal} value={startDate} locale={locale} onClose={() => setShowStartCal(false)} onConfirm={handleStartDateConfirm} colors={colors} styles={styles} />
       <TimePickerModal visible={showStartTime} value={startTime} onClose={() => setShowStartTime(false)} onConfirm={handleStartTimeConfirm} colors={colors} styles={styles} />
       <CalendarPickerModal visible={showEndCal} value={endDate} locale={locale} onClose={() => setShowEndCal(false)} onConfirm={setEndDate} colors={colors} styles={styles} />
@@ -625,7 +636,7 @@ function makeStyles(colors: ThemeColors) {
   clientRowEmail:    { fontSize: 13, fontFamily: fonts.body, marginTop: 1 },
 
   overlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 },
-  pickerBox:     { width: '100%', maxWidth: 340, borderRadius: 20, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.2, shadowRadius: 24, elevation: 16 },
+  pickerBox:     { width: '100%', maxWidth: 340, borderRadius: 20, padding: 20, boxShadow: [{ offsetX: 0, offsetY: 12, blurRadius: 24, color: 'rgba(0, 0, 0, 0.2)' }], elevation: 16 },
   confirmBtn:    { borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 16 },
   confirmBtnText:{ fontSize: 15, fontFamily: fonts.semibold, color: '#fff' },
 

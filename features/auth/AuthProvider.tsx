@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/shared/lib/supabase'
+import { recordSecurityLogin } from '@/features/security/securityService'
 
 type AuthContextType = {
   session: Session | null
@@ -32,8 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
+      if (event === 'SIGNED_IN') {
+        setTimeout(() => {
+          void recordSecurityLogin().catch(error => console.warn('[security.login]', error))
+        }, 0)
+      }
     })
 
     return () => {

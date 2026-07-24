@@ -19,7 +19,9 @@ import {
   usePipelineStats,
   useMonthlyRevenue,
   useAlerts,
+  useDailyActions,
 } from '@/features/dashboard/useDashboard'
+import type { DailyActionItem, DailyActionKind } from '@/features/dashboard/useDashboard'
 import { useGoals } from '@/features/goals/useGoals'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useUpcomingAppointments } from '@/features/appointments/useAppointments'
@@ -28,8 +30,9 @@ import { Avatar } from '@/shared/components/ui/Avatar'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { FollowupWithClient, Client, ClientStatus } from '@/shared/lib/types'
+import type { FollowupWithClient, Client, PipelineStage } from '@/shared/lib/types'
 import type { Appointment } from '@/features/appointments/appointmentTypes'
+import { formatDate } from '@/shared/lib/dateFormat'
 
 function useLocale() {
   const { i18n } = useTranslation()
@@ -267,10 +270,7 @@ function LrpCard({ client }: { client: Client }) {
         </Text>
         <Text style={styles.apptType}>
           {client.next_lrp_date &&
-            new Date(client.next_lrp_date).toLocaleDateString(locale, {
-              day: '2-digit',
-              month: 'long',
-            })}
+            formatDate(client.next_lrp_date, locale, { day: '2-digit', month: 'long' })}
         </Text>
       </View>
 
@@ -284,15 +284,14 @@ function LrpCard({ client }: { client: Client }) {
 }
 
 // ── Pipeline strip ────────────────────────────────────────────────────────────
-const PIPELINE_ORDER: string[] = ['prospect', 'new_client', 'active', 'loyal', 'vip', 'advisor', 'inactive']
+const PIPELINE_ORDER: PipelineStage[] = ['new_lead', 'contacted', 'presentation_scheduled', 'presentation_completed', 'follow_up', 'customer', 'distributor', 'lost']
 
-function PipelineStrip({ byStatus }: { byStatus: Record<string, number> }) {
+function PipelineStrip({ byStage }: { byStage: Record<string, number> }) {
   const { t } = useTranslation()
-  const { colors, statusColors } = useTheme()
+  const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { getStatusLabel } = useAppConfig()
 
-  const pills = PIPELINE_ORDER.map((s) => ({ status: s, count: byStatus[s] ?? 0 })).filter(
+  const pills = PIPELINE_ORDER.map((stage) => ({ stage, count: byStage[stage] ?? 0 })).filter(
     (p) => p.count > 0,
   )
 
@@ -307,22 +306,29 @@ function PipelineStrip({ byStatus }: { byStatus: Record<string, number> }) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.pipelineRow}
       >
-        {pills.map(({ status, count }) => {
-          const sc = statusColors[status] ?? {
-            bg: colors.surfaceContainerHigh,
-            text: colors.textSecondary,
-          }
+        {pills.map(({ stage, count }, index) => {
+          const palettes = [
+            { bg: colors.bgDim, text: colors.textSecondary },
+            { bg: colors.primaryLight, text: colors.primary },
+            { bg: colors.secondaryLight, text: colors.secondary },
+            { bg: colors.tertiaryLight, text: colors.tertiary },
+            { bg: colors.warningLight, text: colors.warning },
+            { bg: colors.successLight, text: colors.success },
+            { bg: colors.primaryLight, text: colors.primary },
+            { bg: colors.dangerLight, text: colors.danger },
+          ]
+          const sc = palettes[index]
 
           return (
             <TouchableOpacity
-              key={status}
+              key={stage}
               style={[styles.pipelinePill, { backgroundColor: sc.bg }]}
-              onPress={() => router.push({ pathname: '/(app)/clients', params: { status } } as any)}
+              onPress={() => router.push({ pathname: '/(app)/clients', params: { pipeline: stage } } as any)}
               activeOpacity={0.75}
             >
               <Text style={[styles.pipelinePillCount, { color: sc.text }]}>{count}</Text>
               <Text style={[styles.pipelinePillLabel, { color: sc.text }]}>
-                {getStatusLabel(status as ClientStatus)}
+                {t(`pipeline_stages.${stage}`)}
               </Text>
             </TouchableOpacity>
           )
@@ -462,6 +468,33 @@ function OpportunityCard({
   )
 }
 
+const DAILY_ORDER: DailyActionKind[] = ['overdue_followup', 'today_appointment', 'today_action', 'hot_prospect', 'renewal']
+
+function DailyActionCenter({ items, loading }: { items: DailyActionItem[]; loading: boolean }) {
+  const { t } = useTranslation()
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const locale = useLocale()
+  if (loading) return <View style={styles.actionCenter}><ActivityIndicator color={colors.primary} /></View>
+
+  return <View style={styles.actionCenter}>
+    <View style={styles.actionCenterHeader}><View><Text style={styles.actionCenterTitle}>{t('dashboard.action_center')}</Text><Text style={styles.actionCenterSub}>{t('dashboard.action_center_sub', { count: items.length })}</Text></View><Text style={styles.actionCenterTotal}>{items.length}</Text></View>
+    {items.length === 0 ? <View style={styles.allClearRow}><Text style={styles.allClearText}>{t('dashboard.no_priorities')}</Text></View> : DAILY_ORDER.map(kind => {
+      const group = items.filter(item => item.kind === kind)
+      if (!group.length) return null
+      return <View key={kind} style={styles.actionGroup}>
+        <View style={styles.actionGroupHeader}><Text style={styles.actionGroupTitle}>{t(`dashboard.daily.${kind}`)}</Text><Text style={styles.actionGroupCount}>{group.length}</Text></View>
+        {group.slice(0, 5).map(item => <TouchableOpacity key={item.id} style={styles.actionRow} onPress={() => router.push(item.href as any)} activeOpacity={0.75}>
+          <View style={[styles.actionKindDot, { backgroundColor: kind === 'overdue_followup' ? colors.danger : kind === 'hot_prospect' ? colors.warning : kind === 'renewal' ? colors.secondary : colors.primary }]} />
+          <View style={styles.actionRowText}><Text style={styles.actionClient}>{item.clientName || item.title}</Text><Text style={styles.actionDetail}>{item.clientName ? item.title : t(`dashboard.daily.${kind}`)}{item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: kind === 'today_appointment' ? '2-digit' : undefined, minute: kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}</Text></View>
+          <Text style={styles.actionArrow}>→</Text>
+        </TouchableOpacity>)}
+        {group.length > 5 ? <Text style={styles.actionMore}>+{group.length - 5} {t('dashboard.other_actions')}</Text> : null}
+      </View>
+    })}
+  </View>
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export default function DashboardScreen() {
   const { t } = useTranslation()
@@ -475,11 +508,12 @@ export default function DashboardScreen() {
   const { appointments, loading: apptLoading, refresh: refreshAppts } = useUpcomingAppointments(10)
   const { followups, loading: fuLoading, refresh: refreshFu } = usePendingFollowups()
   const { clients: lrpClients, refresh: refreshLrp } = useUpcomingLrp(8)
-  const { byStatus, refresh: refreshPipeline } = usePipelineStats()
+  const { byStage, refresh: refreshPipeline } = usePipelineStats()
   const { amount: monthRevenue, refresh: refreshRevenue } = useMonthlyRevenue()
   const { alerts, reload: refreshAlerts } = useAlerts()
   const { goals } = useGoals()
   const { isModuleActive } = useAppConfig()
+  const { items: dailyActions, loading: dailyLoading, refresh: refreshDaily } = useDailyActions()
 
   const firstName = session?.user?.user_metadata?.full_name?.split(' ')[0] ?? ''
   const hour = new Date().getHours()
@@ -510,6 +544,7 @@ export default function DashboardScreen() {
     refreshPipeline()
     refreshRevenue()
     refreshAlerts()
+    refreshDaily()
   }
 
   useFocusEffect(
@@ -707,14 +742,10 @@ export default function DashboardScreen() {
         )}
 
         {/* ── Priorités du jour ─────────────────────────── */}
-        <PriorityStrip
-          overdueCount={overdueToday.length}
-          lrpSoonCount={lrpSoon.length}
-          rdvTodayCount={todayAppts.length}
-        />
+        <DailyActionCenter items={dailyActions} loading={dailyLoading} />
 
         {/* ── Opportunités détectées ────────────────────── */}
-        {visibleOpportunities.length > 0 && (
+        {false && visibleOpportunities.length > 0 && (
           <View style={styles.section}>
             <SectionHeader title={t('dashboard.opportunities_title')} />
 
@@ -786,10 +817,10 @@ export default function DashboardScreen() {
         </View>
 
         {/* ── Pipeline ──────────────────────────────────── */}
-        <PipelineStrip byStatus={byStatus} />
+        <PipelineStrip byStage={byStage} />
 
         {/* ── Sections opérationnelles ──────────────────── */}
-        {hasOperationalSections && (
+        {false && hasOperationalSections && (
           <View style={useTwoColSections ? styles.twoCol : styles.oneCol}>
             {hasTodaySection && (
               <View style={useTwoColSections ? styles.col : undefined}>
@@ -1040,10 +1071,7 @@ function makeStyles(colors: ThemeColors) {
       alignItems: 'center',
       gap: 4,
       minWidth: 84,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.08,
-      shadowRadius: 6,
+      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 6, color: 'rgba(0, 0, 0, 0.08)' }],
       elevation: 2,
     },
 
@@ -1075,10 +1103,7 @@ function makeStyles(colors: ThemeColors) {
       gap: 8,
       borderWidth: 1,
       borderColor: colors.border,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.045,
-      shadowRadius: 8,
+      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.045)' }],
       elevation: 1,
     },
 
@@ -1190,10 +1215,7 @@ function makeStyles(colors: ThemeColors) {
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: colors.border,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.045,
-      shadowRadius: 8,
+      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.045)' }],
       elevation: 1,
     },
 
@@ -1212,7 +1234,7 @@ function makeStyles(colors: ThemeColors) {
     },
 
     apptTimeCol: {
-      width: 48,
+      minWidth: 48,
       flexShrink: 0,
       alignItems: 'flex-start',
     },
@@ -1436,6 +1458,21 @@ function makeStyles(colors: ThemeColors) {
       color: colors.danger,
     },
 
+    actionCenter: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 18, gap: 16 },
+    actionCenterHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    actionCenterTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text },
+    actionCenterSub: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 3 },
+    actionCenterTotal: { minWidth: 40, textAlign: 'center', fontSize: 22, fontFamily: fonts.display, color: colors.primary, backgroundColor: colors.primaryLight, borderRadius: 14, paddingVertical: 7 },
+    actionGroup: { gap: 4 },
+    actionGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 5 },
+    actionGroupTitle: { fontSize: 12, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+    actionGroupCount: { fontSize: 12, fontFamily: fonts.bold, color: colors.textTertiary },
+    actionRow: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 52, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border },
+    actionKindDot: { width: 8, height: 8, borderRadius: 4 },
+    actionRowText: { flex: 1 }, actionClient: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+    actionDetail: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 2 },
+    actionArrow: { color: colors.primary, fontSize: 18 }, actionMore: { textAlign: 'center', fontSize: 12, color: colors.textTertiary, paddingTop: 4 },
+
     priorityStrip: {
       backgroundColor: colors.card,
       borderRadius: 18,
@@ -1505,10 +1542,7 @@ function makeStyles(colors: ThemeColors) {
       gap: 14,
       borderWidth: 1,
       borderColor: colors.border,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
-      shadowRadius: 8,
+      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.04)' }],
       elevation: 1,
     },
 

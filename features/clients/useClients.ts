@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { getClients, searchClients } from './clientService'
-import type { Client, ClientStatus } from '@/shared/lib/types'
+import type { ClientListItem, ClientStatus } from '@/shared/lib/types'
 
 export function useClients(statusFilter?: ClientStatus) {
   const { session } = useAuth()
-  const [clients, setClients] = useState<Client[]>([])
+  const [clients, setClients] = useState<ClientListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -30,7 +30,7 @@ export function useClients(statusFilter?: ClientStatus) {
 
 export function useClientSearch() {
   const { session } = useAuth()
-  const [results, setResults] = useState<Client[]>([])
+  const [results, setResults] = useState<ClientListItem[]>([])
   const [loading, setLoading] = useState(false)
 
   const search = useCallback(async (query: string, status?: ClientStatus) => {

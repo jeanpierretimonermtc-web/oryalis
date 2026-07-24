@@ -10,6 +10,7 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { Note } from '@/shared/lib/types'
+import { formatDate } from '@/shared/lib/dateFormat'
 
 export default function ClientNotesScreen() {
   const { t, i18n } = useTranslation()
@@ -99,9 +100,11 @@ function NoteRow({ note, locale, isConfirming, onDeleteRequest, onDeleteCancel, 
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const date = new Date(note.created_at).toLocaleDateString(locale, {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  })
+  const date = locale.startsWith('fr')
+    ? `${formatDate(note.created_at, locale)} ${new Date(note.created_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}`
+    : new Date(note.created_at).toLocaleDateString(locale, {
+        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      })
   return (
     <View style={styles.noteRow}>
       <View style={styles.noteMain}>

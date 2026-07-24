@@ -1,0 +1,33 @@
+[auth]
+site_url = "https://oryalis.vercel.app"
+additional_redirect_urls = [
+  "https://oryalis.vercel.app/reset-password",
+  "https://crm-bienetre.vercel.app/reset-password",
+]
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[auth.email]
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+
+[storage.vector]
+enabled = false
+
+[functions.create-checkout-session]
+verify_jwt = true
+
+[functions.create-billing-portal]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.revenuecat-webhook]
+verify_jwt = false
+
+[functions.record-security-login]
+verify_jwt = true

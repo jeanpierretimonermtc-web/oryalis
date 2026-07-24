@@ -10,6 +10,7 @@ import { CatalogPrefsProvider } from '@/features/catalogs/CatalogPrefsProvider'
 import { useCalendarSetup } from '@/features/appointments/useCalendarSetup'
 import { useCalendarForegroundSync } from '@/features/appointments/useCalendarForegroundSync'
 import { useNotificationSetup } from '@/features/notifications/useNotifications'
+import { useSecurityNotifications } from '@/features/security/useSecurityNotifications'
 import { AppConfigProvider, useAppConfig } from '@/features/settings/AppConfigProvider'
 import type { ModuleKey } from '@/shared/lib/types'
 import { useTheme } from '@/shared/theme/ThemeProvider'
@@ -94,10 +95,7 @@ function makeTabStyles(colors: ThemeColors) {
     borderRadius: 28,
     paddingVertical: 8,
     paddingHorizontal: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
+    boxShadow: [{ offsetX: 0, offsetY: 6, blurRadius: 20, color: 'rgba(0, 0, 0, 0.1)' }],
     elevation: 12,
     borderWidth: 1,
     borderColor: colors.border,
@@ -235,6 +233,7 @@ export default function AppLayout() {
   useCalendarSetup()
   useCalendarForegroundSync()
   useNotificationSetup()
+  useSecurityNotifications(session)
 
 
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null)
@@ -322,6 +321,8 @@ export default function AppLayout() {
             <Tabs.Screen name="network"      options={{ title: t('network.title')      }} />
             <Tabs.Screen name="goals"        options={{ title: t('goals.title')        }} />
             <Tabs.Screen name="import"              options={{ title: t('settings.import_title'),      href: null }} />
+            <Tabs.Screen name="export"              options={{ title: t('settings.export_title'),      href: null }} />
+            <Tabs.Screen name="settings-subscription" options={{ href: null }} />
             <Tabs.Screen name="settings-profile"      options={{ href: null }} />
             <Tabs.Screen name="settings-identity"    options={{ href: null }} />
             <Tabs.Screen name="settings-contact"     options={{ href: null }} />
@@ -336,6 +337,8 @@ export default function AppLayout() {
             <Tabs.Screen name="settings-google"      options={{ href: null }} />
             <Tabs.Screen name="settings-catalogs"    options={{ href: null }} />
             <Tabs.Screen name="settings-display"     options={{ href: null }} />
+            <Tabs.Screen name="settings-owner"       options={{ href: null }} />
+            <Tabs.Screen name="settings-support-access" options={{ href: null }} />
             <Tabs.Screen name="orders"       options={{ title: t('orders.title')       }} />
             <Tabs.Screen name="settings"     options={{ title: t('settings.title')     }} />
           </Tabs>

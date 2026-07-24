@@ -10,6 +10,7 @@ import { Card } from '@/shared/components/ui/Card'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
+import { formatDate } from '@/shared/lib/dateFormat'
 
 const TYPE_ACCENT: Record<AppointmentType, string> = {
   discovery_call:       '#3B82F6',
@@ -28,7 +29,7 @@ const TYPE_ACCENT: Record<AppointmentType, string> = {
 function pad2(n: number) { return String(n).padStart(2, '0') }
 function formatDateTime(iso: string, locale: string) {
   const d = new Date(iso)
-  const dateStr = d.toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' })
+  const dateStr = formatDate(d, locale, { day: '2-digit', month: 'long', year: 'numeric' })
   const timeStr = `${pad2(d.getHours())}h${pad2(d.getMinutes())}`
   const hasTime = d.getHours() > 0 || d.getMinutes() > 0
   return hasTime ? `${dateStr} · ${timeStr}` : dateStr
@@ -150,7 +151,7 @@ function AppointmentCard({ appt, locale, confirmId, onDeleteRequest, onDeleteCan
             </View>
           ) : (
             <View style={styles.cardActions}>
-              <TouchableOpacity style={[styles.actionBtn, { borderColor: colors.danger, flex: 0, paddingHorizontal: 16 }]} onPress={onDeleteRequest} activeOpacity={0.75}>
+              <TouchableOpacity style={[styles.actionBtn, { borderColor: colors.danger }]} onPress={onDeleteRequest} activeOpacity={0.75}>
                 <Text style={styles.actionIcon}>🗑</Text>
                 <Text style={[styles.actionLabel, { color: colors.danger }]}>{t('common.delete')}</Text>
               </TouchableOpacity>
@@ -181,7 +182,7 @@ function makeStyles(colors: ThemeColors) {
 
   expandedContent: { marginTop: 8, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, gap: 8 },
 
-  cardActions:  { flexDirection: 'row', gap: 8, justifyContent: 'flex-end' },
+  cardActions:  { flexDirection: 'row', gap: 8 },
   actionBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, flex: 1 },
   actionIcon:   { fontSize: 13 },
   actionLabel:  { fontSize: 12, fontFamily: fonts.semibold },

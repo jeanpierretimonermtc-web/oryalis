@@ -22,6 +22,7 @@ import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
 import { useDemoState } from '@/features/demo/DemoProvider'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
 import type { LineIconName } from '@/shared/components/ui/LineIcon'
+import { getMyAppRole, type AppRole } from '@/features/admin/adminService'
 
 const SETTINGS_WIDE_BREAKPOINT = 900
 
@@ -32,7 +33,9 @@ function nameInitials(name: string) {
   return (p[0][0] + p[p.length - 1][0]).toUpperCase()
 }
 
-function NavRow({ icon, title, desc, meta, onPress, styles, colors, danger }: {
+interface Accent { fg: string; bg: string }
+
+function NavRow({ icon, title, desc, meta, onPress, styles, colors, danger, accent }: {
   icon: LineIconName
   title: string
   desc?: string
@@ -41,11 +44,14 @@ function NavRow({ icon, title, desc, meta, onPress, styles, colors, danger }: {
   styles: ReturnType<typeof makeStyles>
   colors: ThemeColors
   danger?: boolean
+  accent?: Accent
 }) {
+  const iconBg = danger ? colors.dangerLight : accent?.bg ?? colors.bgDim
+  const iconFg = danger ? colors.danger : accent?.fg ?? colors.primary
   return (
     <TouchableOpacity style={styles.navRow} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.navIconWrap, danger && { backgroundColor: colors.dangerLight }]}>
-        <LineIcon name={icon} size={18} color={danger ? colors.danger : colors.primary} strokeWidth={2.15} />
+      <View style={[styles.navIconWrap, { backgroundColor: iconBg }]}>
+        <LineIcon name={icon} size={18} color={iconFg} strokeWidth={2.15} />
       </View>
       <View style={styles.navBody}>
         <Text style={[styles.navTitle, danger && { color: colors.danger }]}>{title}</Text>
@@ -57,8 +63,13 @@ function NavRow({ icon, title, desc, meta, onPress, styles, colors, danger }: {
   )
 }
 
-function GroupLabel({ label, styles }: { label: string; styles: ReturnType<typeof makeStyles> }) {
-  return <Text style={styles.groupLabel}>{label.toUpperCase()}</Text>
+function GroupLabel({ label, styles, dotColor }: { label: string; styles: ReturnType<typeof makeStyles>; dotColor?: string }) {
+  return (
+    <View style={styles.groupLabelRow}>
+      {dotColor ? <View style={[styles.groupDot, { backgroundColor: dotColor }]} /> : null}
+      <Text style={styles.groupLabel}>{label.toUpperCase()}</Text>
+    </View>
+  )
 }
 
 export default function SettingsMenuScreen() {
@@ -84,6 +95,13 @@ export default function SettingsMenuScreen() {
   const [timezone, setTimezone] = useState('Europe/Paris')
   const [plan, setPlan] = useState('free')
   const [loading, setLoading] = useState(true)
+  const [appRole, setAppRole] = useState<AppRole | null>(null)
+
+  useFocusEffect(useCallback(() => {
+    let active = true
+    getMyAppRole().then(role => { if (active) setAppRole(role) }).catch(() => {})
+    return () => { active = false }
+  }, []))
 
   const loadProfile = useCallback(() => {
     if (!session?.user.id) {
@@ -158,6 +176,12 @@ export default function SettingsMenuScreen() {
         <View style={[styles.shell, isWide && styles.shellWide]}>
           <View style={[styles.profileColumn, isWide && styles.profileColumnWide]}>
             <View style={styles.hero}>
+              <View style={styles.heroBrandStrip}>
+                <View style={[styles.heroBrandSeg, { backgroundColor: colors.secondary }]} />
+                <View style={[styles.heroBrandSeg, { backgroundColor: colors.primary }]} />
+                <View style={[styles.heroBrandSeg, { backgroundColor: colors.tertiary }]} />
+              </View>
+              <View style={styles.heroBody}>
               <View style={styles.heroTop}>
                 {avatarUrl ? (
                   <Image source={{ uri: avatarUrl }} style={styles.heroAvatar} />
@@ -196,6 +220,7 @@ export default function SettingsMenuScreen() {
                   </Text>
                 </View>
               </View>
+              </View>
             </View>
 
             <View style={styles.completionCard}>
@@ -229,21 +254,21 @@ export default function SettingsMenuScreen() {
           <View style={styles.settingsColumn}>
             <View style={styles.statusGrid}>
               <View style={styles.statusCard}>
-                <View style={styles.statusIcon}><LineIcon name="modules" size={16} color={colors.primary} strokeWidth={2.2} /></View>
+                <View style={[styles.statusIcon, { backgroundColor: colors.tertiaryLight }]}><LineIcon name="modules" size={16} color={colors.tertiary} strokeWidth={2.2} /></View>
                 <View>
                   <Text style={styles.statusValue}>{activeModulesCount}</Text>
                   <Text style={styles.statusLabel}>{t('settings.active_modules')}</Text>
                 </View>
               </View>
               <View style={styles.statusCard}>
-                <View style={styles.statusIcon}><LineIcon name="calendar" size={16} color={colors.primary} strokeWidth={2.2} /></View>
+                <View style={[styles.statusIcon, { backgroundColor: colors.secondaryLight }]}><LineIcon name="calendar" size={16} color={colors.secondary} strokeWidth={2.2} /></View>
                 <View>
                   <Text style={styles.statusValue}>{gcConnected ? t('settings.yes_short') : t('settings.no_short')}</Text>
                   <Text style={styles.statusLabel}>Google Agenda</Text>
                 </View>
               </View>
               <View style={styles.statusCard}>
-                <View style={styles.statusIcon}><LineIcon name="subscription" size={16} color={colors.primary} strokeWidth={2.2} /></View>
+                <View style={[styles.statusIcon, { backgroundColor: colors.primaryLight }]}><LineIcon name="subscription" size={16} color={colors.primary} strokeWidth={2.2} /></View>
                 <View>
                   <Text style={styles.statusValue}>{planLabel}</Text>
                   <Text style={styles.statusLabel}>{t('settings.current_plan')}</Text>
@@ -252,7 +277,7 @@ export default function SettingsMenuScreen() {
             </View>
 
             <View style={styles.group}>
-              <GroupLabel label={t('settings.nav_profile')} styles={styles} />
+              <GroupLabel label={t('settings.nav_profile')} styles={styles} dotColor={colors.primary} />
               <NavRow icon="identity" title={t('settings.section_identity')} desc={t('settings.identity_desc')} meta={missingIdentity ? t('settings.to_complete') : undefined} onPress={nav('/(app)/settings-identity')} styles={styles} colors={colors} />
               <View style={styles.sep} />
               <NavRow icon="contact" title={t('settings.section_contact')} desc={t('settings.contact_desc')} onPress={nav('/(app)/settings-contact')} styles={styles} colors={colors} />
@@ -263,28 +288,31 @@ export default function SettingsMenuScreen() {
             </View>
 
             <View style={styles.group}>
-              <GroupLabel label={t('settings.nav_crm')} styles={styles} />
-              <NavRow icon="activity" title={t('settings.section_activity')} desc={t('settings.activity_desc')} onPress={nav('/(app)/settings-activity')} styles={styles} colors={colors} />
+              <GroupLabel label={t('settings.nav_crm')} styles={styles} dotColor={colors.tertiary} />
+              <NavRow icon="activity" title={t('settings.section_activity')} desc={t('settings.activity_desc')} onPress={nav('/(app)/settings-activity')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
-              <NavRow icon="modules" title={t('settings.section_modules')} desc={t('settings.modules_desc')} meta={String(activeModulesCount)} onPress={nav('/(app)/settings-modules')} styles={styles} colors={colors} />
-              <NavRow icon="activity" title={t('settings.section_automations')} desc={t('settings.automations_desc')} onPress={nav('/(app)/settings-automations')} styles={styles} colors={colors} />
+              <NavRow icon="modules" title={t('settings.section_modules')} desc={t('settings.modules_desc')} meta={String(activeModulesCount)} onPress={nav('/(app)/settings-modules')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
-              <NavRow icon="labels" title={t('settings.section_labels')} desc={t('settings.labels_desc')} onPress={nav('/(app)/settings-labels')} styles={styles} colors={colors} />
+              <NavRow icon="activity" title={t('settings.section_automations')} desc={t('settings.automations_desc')} onPress={nav('/(app)/settings-automations')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
-              <NavRow icon="import" title={t('settings.nav_import')} desc={t('settings.import_short_desc')} onPress={nav('/(app)/import')} styles={styles} colors={colors} />
+              <NavRow icon="labels" title={t('settings.section_labels')} desc={t('settings.labels_desc')} onPress={nav('/(app)/settings-labels')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
+              <View style={styles.sep} />
+              <NavRow icon="import" title={t('settings.nav_import')} desc={t('settings.import_short_desc')} onPress={nav('/(app)/import')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
+              <View style={styles.sep} />
+              <NavRow icon="import" title={t('settings.export_contacts')} desc={t('settings.export_contacts_desc')} onPress={nav('/(app)/export')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               {isModuleActive('goals') && (
                 <>
                   <View style={styles.sep} />
-                  <NavRow icon="goals" title={t('goals.title')} desc={t('settings.nav_goals_desc')} onPress={nav('/(app)/goals')} styles={styles} colors={colors} />
+                  <NavRow icon="goals" title={t('goals.title')} desc={t('settings.nav_goals_desc')} onPress={nav('/(app)/goals')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
                 </>
               )}
             </View>
 
             <View style={styles.group}>
-              <GroupLabel label={t('settings.nav_integrations')} styles={styles} />
-              <NavRow icon="calendar" title="Google Agenda" desc={gcConnected ? t('settings.connected') : t('settings.not_connected')} meta={gcConnected ? t('settings.ok_short') : undefined} onPress={nav('/(app)/settings-google')} styles={styles} colors={colors} />
+              <GroupLabel label={t('settings.nav_integrations')} styles={styles} dotColor={colors.secondary} />
+              <NavRow icon="calendar" title="Google Agenda" desc={gcConnected ? t('settings.connected') : t('settings.not_connected')} meta={gcConnected ? t('settings.ok_short') : undefined} onPress={nav('/(app)/settings-google')} styles={styles} colors={colors} accent={{ fg: colors.secondary, bg: colors.secondaryLight }} />
               <View style={styles.sep} />
-              <NavRow icon="catalogs" title={t('settings.section_catalogs')} desc={t('settings.catalogs_desc')} onPress={nav('/(app)/settings-catalogs')} styles={styles} colors={colors} />
+              <NavRow icon="catalogs" title={t('settings.section_catalogs')} desc={t('settings.catalogs_desc')} onPress={nav('/(app)/settings-catalogs')} styles={styles} colors={colors} accent={{ fg: colors.secondary, bg: colors.secondaryLight }} />
             </View>
 
             <View style={styles.group}>
@@ -314,6 +342,14 @@ export default function SettingsMenuScreen() {
 
             <View style={[styles.group, { marginBottom: 8 }]}>
               <GroupLabel label={t('settings.section_account')} styles={styles} />
+              <NavRow icon="shield" title={t('settings.support_access_title')} desc={t('settings.support_access_desc')} onPress={nav('/(app)/settings-support-access')} styles={styles} colors={colors} />
+              {appRole === 'owner' ? (
+                <>
+                  <View style={styles.sep} />
+                  <NavRow icon="shield" title={t('settings.owner_admin_title')} desc={t('settings.owner_admin_desc')} meta="OWNER" onPress={nav('/(app)/settings-owner')} styles={styles} colors={colors} />
+                </>
+              ) : null}
+              <View style={styles.sep} />
               <NavRow icon="logout" title={t('auth.logout')} onPress={() => supabase.auth.signOut()} styles={styles} colors={colors} danger />
             </View>
           </View>
@@ -348,14 +384,13 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 18,
-    gap: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
+    overflow: 'hidden',
+    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.04)' }],
     elevation: 2,
   },
+  heroBrandStrip: { flexDirection: 'row', height: 4 },
+  heroBrandSeg:   { flex: 1 },
+  heroBody:       { padding: 18, gap: 16 },
   heroTop: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   heroAvatar: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: colors.primaryLight },
   heroAvatarPlaceholder: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
@@ -418,20 +453,23 @@ function makeStyles(colors: ThemeColors) {
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 5,
+    boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 5, color: 'rgba(0, 0, 0, 0.03)' }],
     elevation: 1,
   },
+  groupLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingTop: 13,
+    paddingBottom: 5,
+  },
+  groupDot: { width: 6, height: 6, borderRadius: 3 },
   groupLabel: {
     fontSize: 11,
     fontFamily: fonts.bold,
     color: colors.textTertiary,
     letterSpacing: 0.8,
-    paddingHorizontal: 16,
-    paddingTop: 13,
-    paddingBottom: 5,
   },
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 62 },
 

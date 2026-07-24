@@ -4,15 +4,19 @@ import { Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useClientFollowups } from '@/features/followups/useFollowups'
+import { useClient } from '@/features/clients/useClient'
 import { createFollowup, toggleFollowupDone, deleteFollowup } from '@/features/followups/followupService'
 import { Input } from '@/shared/components/ui/Input'
+import { DateInput } from '@/shared/components/ui/DateInput'
 import { Button } from '@/shared/components/ui/Button'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { Card } from '@/shared/components/ui/Card'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { Followup, NextActionType } from '@/shared/lib/types'
+import { PIPELINE_STAGES } from '@/shared/lib/types'
+import type { Followup, NextActionType, PipelineStage } from '@/shared/lib/types'
+import { formatDate } from '@/shared/lib/dateFormat'
 
 const ACTION_TYPES: NextActionType[] = ['call', 'whatsapp', 'sms', 'email', 'rdv']
 const ACTION_ICONS: Record<NextActionType, string> = {
@@ -26,6 +30,7 @@ export default function ClientFollowupsScreen() {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { followups, loading, refresh } = useClientFollowups(id)
+  const { client } = useClient(id)
   const [showModal, setShowModal] = useState(false)
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
@@ -71,7 +76,7 @@ export default function ClientFollowupsScreen() {
                       {item.title ? <Text style={[styles.title, item.done && styles.doneText]}>{item.title}</Text> : null}
                       {item.content ? <Text style={[styles.content, item.done && styles.doneText]} numberOfLines={2}>{item.content}</Text> : null}
                       <Text style={styles.date}>
-                        {new Date(item.due_date).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })}
+                        {formatDate(item.due_date, locale)}
                       </Text>
                     </View>
                     {confirmId === item.id ? (
@@ -101,6 +106,7 @@ export default function ClientFollowupsScreen() {
         <FollowupModal
           clientId={id}
           userId={session?.user.id ?? ''}
+          currentPipeline={client?.pipeline_stage ?? 'new_lead'}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); refresh() }}
         />
@@ -109,13 +115,14 @@ export default function ClientFollowupsScreen() {
   )
 }
 
-function FollowupModal({ clientId, userId, onClose, onSaved }: {
-  clientId: string; userId: string; onClose: () => void; onSaved: () => void
+function FollowupModal({ clientId, userId, currentPipeline, onClose, onSaved }: {
+  clientId: string; userId: string; currentPipeline: PipelineStage; onClose: () => void; onSaved: () => void
 }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const [actionType, setActionType] = useState<NextActionType | null>(null)
+  const [pipelineStage, setPipelineStage] = useState<PipelineStage>(currentPipeline)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [dueDate, setDueDate] = useState(new Date().toISOString().split('T')[0])
@@ -136,6 +143,7 @@ function FollowupModal({ clientId, userId, onClose, onSaved }: {
         due_date: dueDate,
         done: false,
         action_type: actionType,
+        pipeline_stage: pipelineStage,
       })
       onSaved()
     } catch (e) {
@@ -154,6 +162,16 @@ function FollowupModal({ clientId, userId, onClose, onSaved }: {
         <Button label={t('common.save')} size="sm" onPress={handleSave} loading={loading} />
       </View>
       <ScrollView style={{ padding: 16 }} contentContainerStyle={{ gap: 12 }}>
+        <View style={{ gap: 8 }}>
+          <Text style={styles.fieldLabel}>{t('clients.fields.pipeline_stage')}</Text>
+          <View style={styles.actionTypeRow}>
+            {PIPELINE_STAGES.map(stage => (
+              <TouchableOpacity key={stage} style={[styles.actionTypeChip, pipelineStage === stage && styles.actionTypeChipActive]} onPress={() => setPipelineStage(stage)}>
+                <Text style={[styles.actionTypeChipLabel, pipelineStage === stage && styles.actionTypeChipLabelActive]}>{t(`pipeline_stages.${stage}`)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
         <View style={{ gap: 8 }}>
           <Text style={styles.fieldLabel}>{t('followups.action_type')}</Text>
           <View style={styles.actionTypeRow}>
@@ -174,7 +192,7 @@ function FollowupModal({ clientId, userId, onClose, onSaved }: {
         </View>
         <Input label={t('followups.title_label')} value={title} onChangeText={setTitle} />
         <Input label={`${t('followups.description')} (${t('common.optional')})`} value={content} onChangeText={setContent} />
-        <Input label={t('followups.due_date')} value={dueDate} onChangeText={setDueDate} placeholder="YYYY-MM-DD" />
+        <DateInput label={t('followups.due_date')} value={dueDate} onChangeValue={setDueDate} />
         {errorMsg ? <Text style={styles.errorMsg}>{errorMsg}</Text> : null}
       </ScrollView>
     </Modal>

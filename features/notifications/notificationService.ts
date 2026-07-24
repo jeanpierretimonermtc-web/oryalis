@@ -7,6 +7,7 @@ import * as Device from 'expo-device'
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
+    shouldShowList:   true,
     shouldPlaySound:  false,
     shouldSetBadge:   true,
   }),

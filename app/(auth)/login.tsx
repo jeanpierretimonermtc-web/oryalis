@@ -11,13 +11,15 @@ import {
   View,
 } from 'react-native'
 import { Link } from 'expo-router'
+import { Eye, EyeOff } from 'lucide-react-native'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '@/shared/lib/supabase'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { fonts } from '@/shared/theme/fonts'
 import type { ThemeColors } from '@/shared/theme/colors'
 
-const RESET_REDIRECT = 'https://crm-bienetre.vercel.app/reset-password'
+const APP_URL = (process.env.EXPO_PUBLIC_APP_URL ?? 'https://oryalis.vercel.app').replace(/\/+$/, '')
+const RESET_REDIRECT = `${APP_URL}/reset-password`
 
 type Mode = 'login' | 'forgot'
 
@@ -30,6 +32,7 @@ export default function LoginScreen() {
 
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
   const [loading,  setLoading]  = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -201,15 +204,29 @@ export default function LoginScreen() {
                 <Text style={styles.forgotLink}>{t('auth.forgot_password')}</Text>
               </TouchableOpacity>
             </View>
-            <TextInput
-              style={styles.input}
-              placeholder="••••••••"
-              placeholderTextColor={colors.textTertiary}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoComplete="password"
-            />
+            <View style={styles.passwordInputWrap}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="••••••••"
+                placeholderTextColor={colors.textTertiary}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!passwordVisible}
+                autoComplete="password"
+              />
+              <TouchableOpacity
+                style={styles.passwordToggle}
+                onPress={() => setPasswordVisible(visible => !visible)}
+                accessibilityRole="button"
+                accessibilityLabel={t(passwordVisible ? 'auth.hide_password' : 'auth.show_password')}
+                hitSlop={4}
+              >
+                {passwordVisible
+                  ? <EyeOff size={20} color={colors.textSecondary} strokeWidth={2} />
+                  : <Eye size={20} color={colors.textSecondary} strokeWidth={2} />
+                }
+              </TouchableOpacity>
+            </View>
           </View>
 
           {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
@@ -269,10 +286,7 @@ function makeStyles(colors: ThemeColors) {
       paddingHorizontal: isWeb ? 40 : 24,
       gap: 20,
       ...(isWeb && {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 24,
+        boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 24, color: 'rgba(0, 0, 0, 0.06)' }],
       }),
     },
 
@@ -343,6 +357,28 @@ function makeStyles(colors: ThemeColors) {
       fontSize: 15,
       fontFamily: fonts.body,
       color: colors.text,
+    },
+    passwordInputWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.bgDim,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+    },
+    passwordInput: {
+      flex: 1,
+      paddingLeft: 14,
+      paddingVertical: 13,
+      fontSize: 15,
+      fontFamily: fonts.body,
+      color: colors.text,
+    },
+    passwordToggle: {
+      width: 44,
+      alignSelf: 'stretch',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
 
     // ── Error ────────────────────────────────────────────────────────────────────

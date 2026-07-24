@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Modal, View, Text, TouchableOpacity, ScrollView,
-  StyleSheet, Linking, Platform,
+  StyleSheet, Linking, Platform, TextInput,
 } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useTheme } from '@/shared/theme/ThemeProvider'
@@ -14,6 +14,10 @@ import {
 } from '@/features/messages/templates'
 import type { TemplateCategory, MessageTemplate } from '@/features/messages/templates'
 import type { Client } from '@/shared/lib/types'
+import { formatDate } from '@/shared/lib/dateFormat'
+import { useEntitlements } from '@/features/subscriptions/useEntitlements'
+import { useAuth } from '@/features/auth/AuthProvider'
+import { createCustomTemplate, getCustomTemplates } from '@/features/messages/customTemplateService'
 
 const CATEGORIES: TemplateCategory[] = ['prospection', 'lrp', 'recrutement', 'suivi']
 
@@ -29,6 +33,14 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const { isAdvisor } = useEntitlements()
+  const { session } = useAuth()
+  const [customTemplates, setCustomTemplates] = useState<MessageTemplate[]>([])
+  const [creating, setCreating] = useState(false)
+  const [customName, setCustomName] = useState('')
+  const [customBody, setCustomBody] = useState('')
+
+  useEffect(() => { if (visible && isAdvisor) getCustomTemplates().then(setCustomTemplates).catch(() => {}) }, [visible, isAdvisor])
 
   const [activeCategory, setActiveCategory] = useState<TemplateCategory>('prospection')
   const [selected, setSelected] = useState<MessageTemplate | null>(null)
@@ -36,13 +48,14 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
 
   const prénom = client?.first_name || client?.full_name?.split(' ')[0] || ''
   const date_lrp = client?.next_lrp_date
-    ? new Date(client.next_lrp_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long' })
+    ? formatDate(client.next_lrp_date, 'fr-FR')
     : ''
   const mon_prénom = advisorName.split(' ')[0] || advisorName
 
   const vars = { prénom, nom_complet: client?.full_name ?? '', date_lrp, produit: lastProduct ?? '', mon_prénom }
 
-  const templates = BUILT_IN_TEMPLATES.filter(t => t.category === activeCategory)
+  const allowedTemplates = isAdvisor ? [...BUILT_IN_TEMPLATES, ...customTemplates] : BUILT_IN_TEMPLATES.slice(0, 3)
+  const templates = allowedTemplates.filter(t => t.category === activeCategory)
   const rendered  = selected ? renderTemplate(selected.body, vars) : ''
 
   async function handleCopy() {
@@ -103,6 +116,13 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
     onClose()
   }
 
+  async function startCreating() { setCreating(true); setCustomName(''); setCustomBody(''); if (!customTemplates.length) setCustomTemplates(await getCustomTemplates().catch(() => [])) }
+  async function saveCustom() {
+    if (!session || !customName.trim() || !customBody.trim()) return
+    const created = await createCustomTemplate(session.user.id, { category: activeCategory, channel: 'all', name: customName.trim(), body: customBody.trim() })
+    setCustomTemplates(prev => [...prev, created]); setCreating(false)
+  }
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={styles.overlay}>
@@ -140,6 +160,8 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
 
               {/* Template list */}
               <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+                {isAdvisor && !creating ? <TouchableOpacity style={styles.newTemplateBtn} onPress={startCreating}><Text style={styles.newTemplateText}>{t('messages.new_template')}</Text></TouchableOpacity> : null}
+                {creating ? <View style={styles.customForm}><TextInput style={styles.customInput} value={customName} onChangeText={setCustomName} placeholder={t('messages.template_name')} placeholderTextColor={colors.textTertiary} /><TextInput style={[styles.customInput, { minHeight: 110 }]} value={customBody} onChangeText={setCustomBody} placeholder={t('messages.template_body')} placeholderTextColor={colors.textTertiary} multiline /><TouchableOpacity style={styles.actionBtn} onPress={saveCustom}><Text style={styles.actionBtnText}>{t('common.save')}</Text></TouchableOpacity></View> : null}
                 {templates.map(tpl => (
                   <TouchableOpacity
                     key={tpl.id}
@@ -244,6 +266,9 @@ function makeStyles(colors: ThemeColors) {
   channelBadge:{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   channelText: { fontSize: 10, fontFamily: fonts.bold },
   tplPreview:  { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18 },
+  newTemplateBtn: { padding: 12, borderRadius: 10, backgroundColor: colors.primaryLight, alignItems: 'center', marginBottom: 10 },
+  newTemplateText: { color: colors.primary, fontFamily: fonts.semibold },
+  customForm: { gap: 10, marginBottom: 12 }, customInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, backgroundColor: colors.bg },
 
   renderedCard: {
     backgroundColor: colors.bg,

@@ -20,15 +20,19 @@ export function CatalogPrefsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!userId) return
-    supabase
-      .from('profiles')
-      .select('active_catalog_slugs')
-      .eq('id', userId)
-      .single()
-      .then(({ data }) => {
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('active_catalog_slugs')
+          .eq('id', userId)
+          .single()
+        if (error) throw error
         setActiveSlugsState((data as any)?.active_catalog_slugs ?? null)
-      })
-      .catch(console.error)
+      } catch (error) {
+        console.error('[catalog.prefs.load]', error)
+      }
+    })()
   }, [userId])
 
   function setActiveSlugs(slugs: string[] | null) {

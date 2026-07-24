@@ -51,7 +51,7 @@ export async function computeCurrentValues(
   const from = new Date(y, m - 1, 1).toISOString()
   const to   = new Date(y, m, 0, 23, 59, 59).toISOString()
 
-  const [newClientsRes, newDistRes, revenueRes, appointmentsRes] = await Promise.all([
+  const [newClientsRes, newDistRes, revenueRes, appointmentsRes, presentationsRes, followupsRes] = await Promise.all([
     supabase
       .from('clients')
       .select('*', { count: 'exact', head: true })
@@ -69,6 +69,7 @@ export async function computeCurrentValues(
       .from('orders')
       .select('amount')
       .eq('user_id', userId)
+      .neq('order_type', 'personal')
       .gte('order_date', from.split('T')[0])
       .lte('order_date', to.split('T')[0]),
     supabase
@@ -78,6 +79,21 @@ export async function computeCurrentValues(
       .eq('status', 'completed')
       .gte('start_at', from)
       .lte('start_at', to),
+    supabase
+      .from('appointments')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .eq('appointment_type', 'product_presentation')
+      .gte('start_at', from)
+      .lte('start_at', to),
+    supabase
+      .from('followups')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('done', true)
+      .gte('due_date', from.split('T')[0])
+      .lte('due_date', to.split('T')[0]),
   ])
 
   const revenue = (revenueRes.data ?? []).reduce((s, r) => s + (r.amount ?? 0), 0)
@@ -87,5 +103,7 @@ export async function computeCurrentValues(
     new_distributors: newDistRes.count ?? 0,
     revenue:          Math.round(revenue),
     appointments:     appointmentsRes.count ?? 0,
+    presentations:    presentationsRes.count ?? 0,
+    followups:        followupsRes.count ?? 0,
   }
 }

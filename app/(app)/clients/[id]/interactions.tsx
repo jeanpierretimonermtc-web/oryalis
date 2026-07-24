@@ -14,6 +14,7 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { InteractionType, InterestLevel } from '@/shared/lib/types'
+import { formatDate } from '@/shared/lib/dateFormat'
 
 const INTERACTION_TYPES: InteractionType[] = [
   'call', 'whatsapp', 'rdv', 'visio', 'sms', 'email', 'workshop', 'group_meeting', 'product_followup',
@@ -88,7 +89,7 @@ export default function ClientInteractionsScreen() {
                 const isDone = !!item.completed_at
                 const ic = getInterestColors(item.interest_level, colors)
                 const dateStr = item.scheduled_at
-                  ? new Date(item.scheduled_at).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })
+                  ? formatDate(item.scheduled_at, locale)
                   : null
                 return (
                   <Card style={isDone ? styles.done : undefined}>

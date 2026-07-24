@@ -7,6 +7,7 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
+import { AdvisorGate } from '@/features/subscriptions/AdvisorGate'
 
 export default function GoogleSettingsScreen() {
   const { t } = useTranslation()
@@ -17,6 +18,7 @@ export default function GoogleSettingsScreen() {
   return (
     <>
       <Stack.Screen options={settingsScreenOptions('Google Agenda')} />
+      <AdvisorGate feature={t('subscription.features.calendar')}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         <View style={styles.statusCard}>
@@ -56,6 +58,7 @@ export default function GoogleSettingsScreen() {
         </View>
         <View style={{ height: 40 }} />
       </ScrollView>
+      </AdvisorGate>
     </>
   )
 }

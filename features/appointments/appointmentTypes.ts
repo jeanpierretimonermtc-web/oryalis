@@ -18,17 +18,8 @@ export type AppointmentStatus =
   | 'no_show'
   | 'rescheduled'
 
-export type PipelineStage =
-  | 'new_lead'
-  | 'contacted'
-  | 'presentation_scheduled'
-  | 'presentation_completed'
-  | 'follow_up'
-  | 'proposal_sent'
-  | 'customer'
-  | 'distributor'
-  | 'inactive'
-  | 'lost'
+export type { PipelineStage } from '@/shared/lib/types'
+import type { PipelineStage } from '@/shared/lib/types'
 
 export type ProspectTemperature = 'cold' | 'warm' | 'hot' | 'very_hot'
 

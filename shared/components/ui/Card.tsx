@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
-import { View, StyleSheet, ViewStyle } from 'react-native'
+import { View, StyleSheet, type StyleProp, type ViewStyle } from 'react-native'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 
 interface Props {
   children: React.ReactNode
-  style?: ViewStyle
+  style?: StyleProp<ViewStyle>
   padding?: number
 }
 
@@ -26,10 +26,7 @@ function makeStyles(colors: ThemeColors) {
       borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.04,
-      shadowRadius: 3,
+      boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 3, color: 'rgba(0, 0, 0, 0.04)' }],
       elevation: 1,
     },
   })

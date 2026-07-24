@@ -19,7 +19,7 @@ export function useOrders(filters: OrderFilters = {}) {
       setLoading(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.client_id, filters.from, filters.to, filters.is_lrp, filters.status])
+  }, [filters.client_id, filters.from, filters.to, filters.is_lrp, filters.status, filters.order_type])
 
   useEffect(() => { load() }, [load])
 
@@ -45,7 +45,9 @@ export function useOrders(filters: OrderFilters = {}) {
     }
   }, [])
 
-  const totalAmount = orders.reduce((sum, o) => sum + (o.amount ?? 0), 0)
+  const totalAmount = orders
+    .filter(o => o.order_type !== 'personal')
+    .reduce((sum, o) => sum + (o.amount ?? 0), 0)
 
   return { orders, loading, error, reload: load, add, remove, totalAmount }
 }

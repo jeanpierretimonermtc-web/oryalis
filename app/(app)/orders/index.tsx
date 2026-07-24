@@ -7,6 +7,8 @@ import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
+import { formatDate } from '@/shared/lib/dateFormat'
+import { AdvisorGate } from '@/features/subscriptions/AdvisorGate'
 
 function getMonthOptions(): { label: string; value: string }[] {
   const now = new Date()
@@ -47,6 +49,7 @@ export default function OrdersScreen() {
   return (
     <>
       <Stack.Screen options={{ title: t('orders.title'), headerBackTitle: '' }} />
+      <AdvisorGate feature={t('subscription.features.orders')}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         {/* ── Filtre mois ────────────────────────────────────────── */}
@@ -93,11 +96,21 @@ export default function OrdersScreen() {
               <View style={styles.cardTop}>
                 <View style={styles.cardLeft}>
                   <Text style={styles.cardDate}>
-                    {new Date(order.order_date).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {formatDate(order.order_date, locale)}
                   </Text>
                   <Text style={styles.cardProduct} numberOfLines={1}>{order.product_name}</Text>
                 </View>
                 <View style={styles.cardRight}>
+                  {order.order_type === 'personal' ? (
+                    <View style={[styles.badge, { backgroundColor: colors.bgDim }]}>
+                      <Text style={[styles.badgeText, { color: colors.textSecondary }]}>{t('orders.order_types.personal')}</Text>
+                    </View>
+                  ) : null}
+                  {order.status === 'returned' ? (
+                    <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
+                      <Text style={[styles.badgeText, { color: colors.danger }]}>{t('orders.status_returned')}</Text>
+                    </View>
+                  ) : null}
                   {order.is_lrp ? (
                     <View style={[styles.badge, { backgroundColor: colors.secondaryLight }]}>
                       <Text style={[styles.badgeText, { color: colors.secondary }]}>{t('orders.lrp')}</Text>
@@ -115,6 +128,7 @@ export default function OrdersScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      </AdvisorGate>
     </>
   )
 }

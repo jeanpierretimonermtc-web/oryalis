@@ -5,22 +5,20 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { createClient } from '@/features/clients/clientService'
 import { Input } from '@/shared/components/ui/Input'
+import { DateInput } from '@/shared/components/ui/DateInput'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { ClientStatus, JourneyStage, NextActionType, NetworkPotential, ContactRole } from '@/shared/lib/types'
+import { PIPELINE_STAGES } from '@/shared/lib/types'
+import type { ClientStatus, NetworkPotential, ContactRole, PipelineStage } from '@/shared/lib/types'
+import { useContactQuota } from '@/features/clients/useContactQuota'
+import { isContactQuotaError } from '@/features/clients/quotaService'
 
 const STATUSES: ClientStatus[] = ['prospect', 'new_client', 'active', 'loyal', 'inactive', 'vip', 'advisor']
 const CONTACT_ROLES: ContactRole[] = ['prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive']
-const JOURNEY_STAGES: JourneyStage[] = [
-  'discovery', 'evaluation', 'first_recommendation', 'first_order',
-  'onboarding', 'followup_7d', 'followup_30d', 'loyal',
-]
-const NEXT_ACTION_TYPES: NextActionType[] = ['call', 'whatsapp', 'sms', 'email', 'rdv']
-const ACTION_ICONS: Record<NextActionType, string> = { call: '📞', whatsapp: '💬', sms: '📱', email: '✉️', rdv: '📅' }
 const NETWORK_POTENTIALS: NetworkPotential[] = ['low', 'medium', 'high']
 
 function SectionCard({ icon, titleKey, children }: { icon: string; titleKey: string; children: React.ReactNode }) {
@@ -44,6 +42,7 @@ export default function NewClientScreen() {
   const { getStatusLabel, isModuleActive } = useAppConfig()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
+  const { quota } = useContactQuota()
   const { width } = useWindowDimensions()
   const isWide = width >= 768
 
@@ -63,14 +62,12 @@ export default function NewClientScreen() {
   const [particularities, setParticularities] = useState('')
   const [medicalTreatment, setMedicalTreatment] = useState(false)
   const [medicalNotes, setMedicalNotes]     = useState('')
-  const [journeyStage, setJourneyStage]     = useState<JourneyStage | null>(null)
-  const [nextActionType, setNextActionType] = useState<NextActionType | null>(null)
-  const [nextActionDate, setNextActionDate] = useState('')
   const [networkPotential, setNetworkPotential] = useState<NetworkPotential | null>(null)
   const [doterraId, setDoterraId]           = useState('')
   const [loyaltyNotes, setLoyaltyNotes]     = useState('')
   const [address, setAddress]               = useState('')
   const [contactRole, setContactRole]       = useState<ContactRole>('customer')
+  const [pipelineStage, setPipelineStage]   = useState<PipelineStage>('new_lead')
   const [loading, setLoading]               = useState(false)
   const [errorMsg, setErrorMsg]             = useState<string | null>(null)
 
@@ -80,6 +77,7 @@ export default function NewClientScreen() {
     setErrorMsg(null)
     if (!firstName.trim() && !lastName.trim()) { setErrorMsg(t('clients.error_name_required')); return }
     if (!session) { setErrorMsg(t('clients.error_session')); return }
+    if (quota?.reached) { setErrorMsg(t('clients.quota_reached')); return }
     setLoading(true)
     try {
       const interestList = interests.split(',').map(s => s.trim()).filter(Boolean)
@@ -109,18 +107,19 @@ export default function NewClientScreen() {
         first_contact_date: null,
         first_purchase_date: null,
         acquisition_source: null,
-        journey_stage: journeyStage,
-        next_action_date: nextActionDate || null,
-        next_action_type: nextActionType,
+        journey_stage: null, // retiré du formulaire, remplacé par pipeline_stage
+        next_action_date: null,
+        next_action_type: null,
         referrals_count: 0,
         referral_count: 0,
         network_potential: networkPotential,
         contact_role: contactRole,
+        pipeline_stage: pipelineStage,
         sponsor_id: null,
       })
       router.back()
     } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : t('common.error'))
+      setErrorMsg(isContactQuotaError(e) ? t('clients.quota_reached') : e instanceof Error ? e.message : t('common.error'))
       console.error('[createClient]', e)
     } finally {
       setLoading(false)
@@ -135,6 +134,11 @@ export default function NewClientScreen() {
         contentContainerStyle={[styles.content, isWide && styles.contentWide]}
         showsVerticalScrollIndicator={false}
       >
+        {quota?.limit != null && (
+          <View style={styles.quotaCard}>
+            <Text style={styles.quotaText}>{t('clients.quota_count', { count: quota.activeCount, limit: quota.limit })}</Text>
+          </View>
+        )}
         {/* ── Identité ───────────────────────────────────────────── */}
         <SectionCard icon="👤" titleKey="clients.sections.personal">
           <View style={isWide ? styles.fieldRow : undefined}>
@@ -167,10 +171,10 @@ export default function NewClientScreen() {
           />
           <View style={isWide ? styles.fieldRow : undefined}>
             <View style={isWide ? styles.fieldHalf : undefined}>
-              <Input label={t('clients.fields.inscription_date')} value={inscriptionDate} onChangeText={setInscriptionDate} placeholder="YYYY-MM-DD" />
+              <DateInput label={t('clients.fields.inscription_date')} value={inscriptionDate} onChangeValue={setInscriptionDate} />
             </View>
             <View style={isWide ? styles.fieldHalf : undefined}>
-              <Input label={`${t('clients.fields.birth_date')} (${t('common.optional')})`} value={birthDate} onChangeText={setBirthDate} placeholder="YYYY-MM-DD" />
+              <DateInput label={`${t('clients.fields.birth_date')} (${t('common.optional')})`} value={birthDate} onChangeValue={setBirthDate} />
             </View>
           </View>
         </SectionCard>
@@ -257,52 +261,18 @@ export default function NewClientScreen() {
         {/* ── Parcours ───────────────────────────────────────────── */}
         <SectionCard icon="🗺" titleKey="clients.sections.journey">
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>{t('clients.fields.journey_stage')}</Text>
+            <Text style={styles.fieldLabel}>{t('clients.fields.pipeline_stage')}</Text>
             <View style={styles.chipRow}>
-              {JOURNEY_STAGES.map(stage => {
-                const active = journeyStage === stage
+              {PIPELINE_STAGES.map(stage => {
+                const active = pipelineStage === stage
                 return (
-                  <TouchableOpacity
-                    key={stage}
-                    style={[styles.smallChip, active && styles.smallChipActive]}
-                    onPress={() => setJourneyStage(journeyStage === stage ? null : stage)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>
-                      {t(`journey_stages.${stage}`)}
-                    </Text>
+                  <TouchableOpacity key={stage} style={[styles.smallChip, active && styles.smallChipActive]} onPress={() => setPipelineStage(stage)} activeOpacity={0.7}>
+                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{t(`pipeline_stages.${stage}`)}</Text>
                   </TouchableOpacity>
                 )
               })}
             </View>
           </View>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>{t('clients.fields.next_action_type')}</Text>
-            <View style={styles.chipRow}>
-              {NEXT_ACTION_TYPES.map(at => {
-                const active = nextActionType === at
-                return (
-                  <TouchableOpacity
-                    key={at}
-                    style={[styles.smallChip, active && styles.smallChipActive]}
-                    onPress={() => setNextActionType(nextActionType === at ? null : at)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.smallChipIcon}>{ACTION_ICONS[at]}</Text>
-                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>
-                      {t(`next_action_types.${at}`)}
-                    </Text>
-                  </TouchableOpacity>
-                )
-              })}
-            </View>
-          </View>
-          <Input
-            label={`${t('clients.fields.next_action_date')} (${t('common.optional')})`}
-            value={nextActionDate}
-            onChangeText={setNextActionDate}
-            placeholder="YYYY-MM-DD"
-          />
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>{t('clients.fields.network_potential')}</Text>
             <View style={styles.chipRow}>
@@ -346,6 +316,8 @@ function makeStyles(colors: ThemeColors) {
   container:   { flex: 1, backgroundColor: colors.bg },
   content:     { padding: 16, gap: 14, paddingBottom: 40 },
   contentWide: { maxWidth: 720, alignSelf: 'center', width: '100%', paddingHorizontal: 24 },
+  quotaCard: { backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, marginBottom: 12 },
+  quotaText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
   fieldRow:    { flexDirection: 'row', gap: 12 },
   fieldHalf:   { flex: 1 },
 
@@ -356,10 +328,7 @@ function makeStyles(colors: ThemeColors) {
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
+    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 6, color: 'rgba(0, 0, 0, 0.05)' }],
     elevation: 2,
   },
   cardHeader: {

@@ -53,6 +53,7 @@ export interface UserBusinessProfile {
   activity_type: ActivityType
   custom_brand_name: string | null
   active_modules: ModuleKey[]
+  automation_delays: Record<string, number>
   created_at: string
   updated_at: string
 }
@@ -119,11 +120,28 @@ export type ContactRole =
   | 'team_member'
   | 'inactive'
 
+export type PipelineStage =
+  | 'new_lead'
+  | 'contacted'
+  | 'presentation_scheduled'
+  | 'presentation_completed'
+  | 'follow_up'
+  | 'customer'
+  | 'distributor'
+  | 'lost'
+
+export const PIPELINE_STAGES: PipelineStage[] = [
+  'new_lead', 'contacted', 'presentation_scheduled', 'presentation_completed',
+  'follow_up', 'customer', 'distributor', 'lost',
+]
+
 export type NextActionType = 'call' | 'whatsapp' | 'sms' | 'email' | 'rdv'
+export type NextActionSource = 'appointment' | 'interaction' | 'followup'
 
-export type OrderStatus = 'pending' | 'ordered' | 'delivered' | 'cancelled'
+export type OrderStatus = 'pending' | 'ordered' | 'delivered' | 'cancelled' | 'returned'
+export type OrderType = 'customer' | 'personal'
 
-export type GoalMetric = 'new_clients' | 'new_distributors' | 'revenue' | 'appointments'
+export type GoalMetric = 'new_clients' | 'new_distributors' | 'revenue' | 'appointments' | 'presentations' | 'followups'
 
 export interface Goal {
   id: string
@@ -234,6 +252,8 @@ export interface Client {
   // ── MLM réseau (migrate15) ────────────────────────────────────────────────
   sponsor_id: string | null
   contact_role: ContactRole
+  pipeline_stage: PipelineStage
+  pipeline_stage_updated_at: string | null
   // ── CRM International (migrate13) ─────────────────────────────────────────
   country: string | null
   first_contact_date: string | null
@@ -242,13 +262,23 @@ export interface Client {
   journey_stage: JourneyStage | null
   next_action_date: string | null
   next_action_type: NextActionType | null
+  next_action_at: string | null
+  next_action_source: NextActionSource | null
+  next_action_source_id: string | null
+  last_interaction_at: string | null
   referrals_count: number
   referral_count: number
   network_potential: NetworkPotential | null
+  archived_at: string | null
   // ──────────────────────────────────────────────────────────────────────────
   created_at: string
   updated_at: string | null
 }
+
+/** Lightweight projection of Client used by list screens, to keep egress low. */
+export type ClientListItem = Pick<Client,
+  'id' | 'full_name' | 'email' | 'phone' | 'status' | 'pipeline_stage' | 'contact_role' | 'last_interaction_at'
+>
 
 export interface UplineNode {
   id: string
@@ -366,6 +396,7 @@ export interface Order {
   is_lrp: boolean
   products: OrderProduct[] | null
   // ─────────────────────────────────────────────────────────────────────────
+  order_type: OrderType
   created_at: string
   updated_at: string | null
 }
@@ -386,7 +417,7 @@ export interface NetworkNode extends Pick<Client,
 }
 
 export interface FollowupWithClient extends Followup {
-  client: Pick<Client, 'id' | 'full_name' | 'status' | 'contact_role'>
+  client: Pick<Client, 'id' | 'full_name' | 'status' | 'contact_role' | 'pipeline_stage'>
 }
 
 export interface InteractionWithClient extends Interaction {

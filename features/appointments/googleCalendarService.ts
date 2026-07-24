@@ -54,17 +54,46 @@ export async function deleteGcToken(userId: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+export async function refreshGcAccessToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string
+): Promise<{ access_token: string; expires_at: string | null }> {
+  const params = new URLSearchParams({
+    refresh_token:  refreshToken,
+    client_id:      clientId,
+    client_secret:  clientSecret,
+    grant_type:     'refresh_token',
+  })
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body:    params.toString(),
+  })
+  if (!res.ok) throw new Error(`gc_refresh_failed: ${res.status}`)
+  const data = await res.json()
+  return {
+    access_token: data.access_token,
+    expires_at:   data.expires_in ? new Date(Date.now() + data.expires_in * 1000).toISOString() : null,
+  }
+}
+
 // ── Google Calendar API helpers ───────────────────────────────────────────────
 
 async function gcFetch(path: string, accessToken: string, options?: RequestInit) {
-  const response = await fetch(`${GC_API}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(options?.headers ?? {}),
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${GC_API}${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(options?.headers ?? {}),
+      },
+    })
+  } catch (e) {
+    throw new Error(`gc_network_error: ${e instanceof Error ? e.message : String(e)}`)
+  }
   if (response.status === 401) throw new Error('gc_token_expired')
   if (!response.ok) {
     const body = await response.text()

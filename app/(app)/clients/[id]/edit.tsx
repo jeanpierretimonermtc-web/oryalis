@@ -5,22 +5,18 @@ import { useTranslation } from 'react-i18next'
 import { updateClient, deleteClient } from '@/features/clients/clientService'
 import { useClient } from '@/features/clients/useClient'
 import { Input } from '@/shared/components/ui/Input'
+import { DateInput } from '@/shared/components/ui/DateInput'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { Client, ClientStatus, JourneyStage, NextActionType, NetworkPotential, ContactRole } from '@/shared/lib/types'
+import { PIPELINE_STAGES } from '@/shared/lib/types'
+import type { Client, ClientStatus, NetworkPotential, ContactRole, PipelineStage } from '@/shared/lib/types'
 
 const STATUSES: ClientStatus[] = ['prospect', 'new_client', 'active', 'loyal', 'inactive', 'vip', 'advisor']
 const CONTACT_ROLES: ContactRole[] = ['prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive']
-const JOURNEY_STAGES: JourneyStage[] = [
-  'discovery', 'evaluation', 'first_recommendation', 'first_order',
-  'onboarding', 'followup_7d', 'followup_30d', 'loyal',
-]
-const NEXT_ACTION_TYPES: NextActionType[] = ['call', 'whatsapp', 'sms', 'email', 'rdv']
-const ACTION_ICONS: Record<NextActionType, string> = { call: '📞', whatsapp: '💬', sms: '📱', email: '✉️', rdv: '📅' }
 const NETWORK_POTENTIALS: NetworkPotential[] = ['low', 'medium', 'high']
 
 function SectionCard({ icon, titleKey, children }: { icon: string; titleKey: string; children: React.ReactNode }) {
@@ -65,14 +61,12 @@ export default function EditClientScreen() {
   const [particularities, setParticularities] = useState('')
   const [medicalTreatment, setMedicalTreatment] = useState(false)
   const [medicalNotes, setMedicalNotes]     = useState('')
-  const [journeyStage, setJourneyStage]     = useState<JourneyStage | null>(null)
-  const [nextActionType, setNextActionType] = useState<NextActionType | null>(null)
-  const [nextActionDate, setNextActionDate] = useState('')
   const [networkPotential, setNetworkPotential] = useState<NetworkPotential | null>(null)
   const [doterraId, setDoterraId]           = useState('')
   const [loyaltyNotes, setLoyaltyNotes]     = useState('')
   const [address, setAddress]               = useState('')
   const [contactRole, setContactRole]       = useState<ContactRole>('customer')
+  const [pipelineStage, setPipelineStage]   = useState<PipelineStage>('new_lead')
 
   const [saving, setSaving]         = useState(false)
   const [errorMsg, setErrorMsg]     = useState<string | null>(null)
@@ -102,11 +96,9 @@ export default function EditClientScreen() {
     setDoterraId(client.doterra_id ?? '')
     setLoyaltyNotes(client.loyalty_notes ?? '')
     setAddress(client.address ?? '')
-    setJourneyStage(client.journey_stage ?? null)
-    setNextActionType(client.next_action_type ?? null)
-    setNextActionDate(client.next_action_date ?? '')
     setNetworkPotential(client.network_potential ?? null)
     setContactRole(client.contact_role ?? 'customer')
+    setPipelineStage(client.pipeline_stage ?? 'new_lead')
   }, [client])
 
   async function handleSave() {
@@ -137,11 +129,10 @@ export default function EditClientScreen() {
         doterra_id: doterraId.trim() || null,
         loyalty_notes: loyaltyNotes.trim() || null,
         address: address.trim() || null,
-        journey_stage: journeyStage,
-        next_action_type: nextActionType,
-        next_action_date: nextActionDate || null,
+        journey_stage: client?.journey_stage ?? null, // retiré du formulaire, remplacé par pipeline_stage — valeur existante préservée
         network_potential: networkPotential,
         contact_role: contactRole,
+        pipeline_stage: pipelineStage,
       })
       router.back()
     } catch (e: unknown) {
@@ -216,10 +207,10 @@ export default function EditClientScreen() {
           />
           <View style={isWide ? styles.fieldRow : undefined}>
             <View style={isWide ? styles.fieldHalf : undefined}>
-              <Input label={t('clients.fields.inscription_date')} value={inscriptionDate} onChangeText={setInscriptionDate} placeholder="YYYY-MM-DD" />
+              <DateInput label={t('clients.fields.inscription_date')} value={inscriptionDate} onChangeValue={setInscriptionDate} />
             </View>
             <View style={isWide ? styles.fieldHalf : undefined}>
-              <Input label={`${t('clients.fields.birth_date')} (${t('common.optional')})`} value={birthDate} onChangeText={setBirthDate} placeholder="YYYY-MM-DD" />
+              <DateInput label={`${t('clients.fields.birth_date')} (${t('common.optional')})`} value={birthDate} onChangeValue={setBirthDate} />
             </View>
           </View>
         </SectionCard>
@@ -306,52 +297,18 @@ export default function EditClientScreen() {
         {/* ── Parcours ───────────────────────────────────────────── */}
         <SectionCard icon="🗺" titleKey="clients.sections.journey">
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>{t('clients.fields.journey_stage')}</Text>
+            <Text style={styles.fieldLabel}>{t('clients.fields.pipeline_stage')}</Text>
             <View style={styles.chipRow}>
-              {JOURNEY_STAGES.map(stage => {
-                const active = journeyStage === stage
+              {PIPELINE_STAGES.map(stage => {
+                const active = pipelineStage === stage
                 return (
-                  <TouchableOpacity
-                    key={stage}
-                    style={[styles.smallChip, active && styles.smallChipActive]}
-                    onPress={() => setJourneyStage(journeyStage === stage ? null : stage)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>
-                      {t(`journey_stages.${stage}`)}
-                    </Text>
+                  <TouchableOpacity key={stage} style={[styles.smallChip, active && styles.smallChipActive]} onPress={() => setPipelineStage(stage)} activeOpacity={0.7}>
+                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{t(`pipeline_stages.${stage}`)}</Text>
                   </TouchableOpacity>
                 )
               })}
             </View>
           </View>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>{t('clients.fields.next_action_type')}</Text>
-            <View style={styles.chipRow}>
-              {NEXT_ACTION_TYPES.map(at => {
-                const active = nextActionType === at
-                return (
-                  <TouchableOpacity
-                    key={at}
-                    style={[styles.smallChip, active && styles.smallChipActive]}
-                    onPress={() => setNextActionType(nextActionType === at ? null : at)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.smallChipIcon}>{ACTION_ICONS[at]}</Text>
-                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>
-                      {t(`next_action_types.${at}`)}
-                    </Text>
-                  </TouchableOpacity>
-                )
-              })}
-            </View>
-          </View>
-          <Input
-            label={`${t('clients.fields.next_action_date')} (${t('common.optional')})`}
-            value={nextActionDate}
-            onChangeText={setNextActionDate}
-            placeholder="YYYY-MM-DD"
-          />
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>{t('clients.fields.network_potential')}</Text>
             <View style={styles.chipRow}>
@@ -428,10 +385,7 @@ function makeStyles(colors: ThemeColors) {
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
+    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 6, color: 'rgba(0, 0, 0, 0.05)' }],
     elevation: 2,
   },
   cardHeader: {

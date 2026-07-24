@@ -16,7 +16,7 @@ import {
   PROTOCOLS, CATEGORIES_BY_BRAND, ROLE_LABELS, ROLE_COLORS,
 } from '@/features/protocols/protocols'
 import type { Protocol, ProtocolProduct, ProtocolBrand } from '@/features/protocols/protocols'
-import type { Client } from '@/shared/lib/types'
+import type { ClientListItem } from '@/shared/lib/types'
 
 const BRAND_LABELS: Record<string, string> = {
   doterra: 'doTERRA',
@@ -138,7 +138,7 @@ function ClientPicker({
   const { session } = useAuth()
   const { clients, loading } = useClients()
   const [query, setQuery]           = useState('')
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null)
+  const [selectedClient, setSelectedClient] = useState<ClientListItem | null>(null)
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set())
   const [saving, setSaving]         = useState(false)
   const [done, setDone]             = useState(false)
@@ -168,17 +168,17 @@ function ClientPicker({
     try {
       for (const idx of selectedProducts) {
         const prod = protocol.products[idx]
-        await createRecommendation({
-          client_id:    selectedClient.id,
-          product_name: prod.name,
-          reason:       `Protocole ${protocol.title} — ${prod.usage} (${prod.frequency})`,
-          status:       'advised',
-          catalog_id:   null,
-          product_id:   null,
-          quantity:     1,
-          objective:    null,
-          recommendation_date: new Date().toISOString().split('T')[0],
-        })
+        await createRecommendation(
+          session.user.id,
+          selectedClient.id,
+          prod.name,
+          `Protocole ${protocol.title} — ${prod.usage} (${prod.frequency})`,
+          'advised',
+          null,
+          null,
+          1,
+          null,
+        )
       }
       setDone(true)
     } catch (e) {
@@ -444,10 +444,7 @@ function makeStyles(colors: ThemeColors) {
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
+    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.04)' }],
     elevation: 2,
   },
   cardHeader: {

@@ -41,7 +41,7 @@ export async function fetchAppointmentById(id: string): Promise<AppointmentFull 
   if (apptError) throw new Error(apptError.message)
   if (!appt) return null
 
-  const [notesRes, bizRes, tasksRes, attendeesRes] = await Promise.all([
+  const [notesRes, bizRes, tasksRes, attendeesRes, clientPipelineRes] = await Promise.all([
     supabase.from('appointment_notes')
       .select('id, appointment_id, client_notes, internal_notes, objections, needs_identified, products_discussed, created_at, updated_at')
       .eq('appointment_id', id).maybeSingle(),
@@ -54,17 +54,33 @@ export async function fetchAppointmentById(id: string): Promise<AppointmentFull 
     supabase.from('appointment_attendees')
       .select('id, appointment_id, client_id, external_name, external_email, status, created_at')
       .eq('appointment_id', id),
+    appt.client_id
+      ? supabase.from('clients').select('pipeline_stage').eq('id', appt.client_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ])
 
   if (notesRes.error)     throw new Error(notesRes.error.message)
   if (bizRes.error)       throw new Error(bizRes.error.message)
   if (tasksRes.error)     throw new Error(tasksRes.error.message)
   if (attendeesRes.error) throw new Error(attendeesRes.error.message)
+  if (clientPipelineRes.error) throw new Error(clientPipelineRes.error.message)
+
+  const currentPipeline = clientPipelineRes.data?.pipeline_stage ?? null
+  const businessContext = currentPipeline
+    ? {
+        ...(bizRes.data ?? {
+          id: '', appointment_id: id, brand_id: null, catalog_id: null, main_product_id: null,
+          prospect_temperature: null, commercial_intent: null, estimated_value: null,
+          currency: 'EUR', created_at: '', updated_at: '',
+        }),
+        pipeline_stage: currentPipeline,
+      }
+    : (bizRes.data ?? null)
 
   return {
     ...appt,
     notes: notesRes.data ?? null,
-    business_context: bizRes.data ?? null,
+    business_context: businessContext,
     tasks: tasksRes.data ?? [],
     attendees: attendeesRes.data ?? [],
   }

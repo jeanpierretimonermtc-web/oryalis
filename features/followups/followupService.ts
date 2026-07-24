@@ -2,8 +2,14 @@ import { supabase } from '@/shared/lib/supabase'
 import type { Followup, FollowupWithClient } from '@/shared/lib/types'
 
 export type FollowupInput =
-  Omit<Followup, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'auto_generated' | 'priority_score'>
-  & { auto_generated?: boolean; priority_score?: number | null }
+  Omit<Followup, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'auto_generated' | 'priority_score' | 'pipeline_stage' | 'prospect_temperature' | 'product_context'>
+  & {
+    auto_generated?: boolean
+    priority_score?: number | null
+    pipeline_stage?: Followup['pipeline_stage']
+    prospect_temperature?: Followup['prospect_temperature']
+    product_context?: Followup['product_context']
+  }
 
 export async function getFollowupsByClient(clientId: string) {
   const { data, error } = await supabase
@@ -18,7 +24,7 @@ export async function getFollowupsByClient(clientId: string) {
 export async function getPendingFollowups(userId: string) {
   const { data, error } = await supabase
     .from('followups')
-    .select('*, client:clients(id, full_name, status, contact_role)')
+    .select('*, client:clients(id, full_name, status, contact_role, pipeline_stage)')
     .eq('user_id', userId)
     .eq('done', false)
     .order('due_date')
@@ -53,7 +59,8 @@ export function computeFollowupPriority(f: FollowupWithClient, today: string): n
   let score = 0
   if (f.prospect_temperature === 'very_hot') score += 40
   if (f.due_date < today) score += 30
-  if (f.pipeline_stage === 'follow_up' || f.pipeline_stage === 'proposal_sent') score += 20
+  const pipelineStage = f.client?.pipeline_stage ?? f.pipeline_stage
+  if (pipelineStage === 'follow_up') score += 20
   if (
     f.client?.status === 'vip' ||
     f.client?.contact_role === 'distributor' ||
