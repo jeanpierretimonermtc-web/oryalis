@@ -57,7 +57,7 @@ app/
 features/
   auth/AuthProvider.tsx
   clients/                 clientService.ts · useClients.ts · useClient.ts
-  appointments/            appointmentService.ts · useAppointments.ts
+  appointments/            appointmentTypes.ts (source de vérité TS) · appointmentService.ts · useAppointments.ts · googleCalendarService.ts · useGoogleCalendar.ts
   notes/                   noteService.ts · useNotes.ts
   followups/               followupService.ts · useFollowups.ts
   recommendations/         recommendationService.ts · useRecommendations.ts
@@ -209,14 +209,31 @@ clients           id, user_id, full_name, first_name, email, phone, status, sour
                   birth_date, inscription_date, profession, children, interests[], client_type,
                   medical_treatment, medical_notes, particularities, welcome_email_sent,
                   doterra_id, next_lrp_date, created_at, updated_at
-appointments      id, client_id, user_id, appointment_number, appointment_date,
-                  themes_discussed, solutions_proposed, recap_sent, next_appointment_date
+appointments      id, user_id, client_id, title, appointment_type, status, start_at, end_at,
+                  duration_minutes (généré), timezone, location, meeting_url, provider,
+                  external_calendar_id, external_event_id, last_synced_at, sync_status,
+                  cancelled_at, cancellation_reason, created_at, updated_at
 notes             id, client_id, user_id, content, created_at
 followups         id, client_id, user_id, title, content, due_date, done, updated_at
 recommendations   id, client_id, user_id, product_name, reason, status, catalog_id, product_id
 catalogs          id, slug (UNIQUE), name, brand, type (official|custom), user_id, color, icon, created_at
 catalog_products  id, catalog_id, sku, name, category, created_at
 ```
+
+Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
+Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
+`solutions_proposed`, `recap_sent`, `next_appointment_date`, `native_event_id` : elles n'existent plus
+dans le schéma live (ancien modèle, retiré).
+
+### Calendriers
+
+- V1 : **Google Calendar** est la seule intégration calendrier externe.
+- La synchronisation avec le calendrier natif du téléphone a été retirée (plus de dépendance à `expo-calendar`).
+- `appointments` reste la source de vérité métier des rendez-vous Oryalis.
+- `google_calendar_events` sert de table de correspondance (mapping `appointment_id` ↔ `google_event_id`).
+- `google_calendar_tokens` stocke la connexion OAuth Google (access/refresh token) par utilisateur.
+- Google Calendar est une copie externe synchronisée : il ne stocke jamais de données CRM internes
+  (pipeline, notes internes, objections, tâches, débrief, intention commerciale).
 
 ### RLS
 

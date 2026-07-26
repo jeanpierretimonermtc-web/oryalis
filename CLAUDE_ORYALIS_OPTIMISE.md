@@ -663,7 +663,7 @@ Claude doit respecter ces règles :
 - pas de boucle qui déclenche des requêtes multiples non contrôlées
 - pagination au-delà de 100 lignes potentielles
 - colonnes sélectionnées explicitement
-- indexes sur colonnes filtrées : `user_id`, `client_id`, `due_date`, `appointment_date`, `catalog_id`, `status`
+- indexes sur colonnes filtrées : `user_id`, `client_id`, `due_date`, `start_at`, `catalog_id`, `status`
 - éviter les re-renders inutiles via `useMemo` / `useCallback` seulement quand utile
 - ne pas optimiser prématurément au détriment de la lisibilité
 
