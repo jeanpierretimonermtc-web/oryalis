@@ -139,15 +139,20 @@ export default function AgendaScreen() {
   const fetchRange = useCallback(async () => {
     if (!session) return
     setLoadingRange(true)
-    const { data } = await supabase
-      .from('appointments')
-      .select('id, user_id, client_id, title, appointment_type, status, start_at, end_at, client:clients(id, full_name, status)')
-      .eq('user_id', session.user.id)
-      .gte('start_at', rangeStart.toISOString())
-      .lt('start_at', rangeEnd.toISOString())
-      .order('start_at')
-    setRangeAppts((data ?? []) as unknown as CalAppt[])
-    setLoadingRange(false)
+    try {
+      const { data } = await supabase
+        .from('appointments')
+        .select('id, user_id, client_id, title, appointment_type, status, start_at, end_at, client:clients(id, full_name, status)')
+        .eq('user_id', session.user.id)
+        .gte('start_at', rangeStart.toISOString())
+        .lt('start_at', rangeEnd.toISOString())
+        .order('start_at')
+      setRangeAppts((data ?? []) as unknown as CalAppt[])
+    } catch (e) {
+      console.error('[Agenda.fetchRange]', e)
+    } finally {
+      setLoadingRange(false)
+    }
   }, [session, rangeStart, rangeEnd])
 
   useFocusEffect(useCallback(() => { fetchRange() }, [fetchRange]))

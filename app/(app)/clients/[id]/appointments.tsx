@@ -209,7 +209,7 @@ function AppointmentCard({ appt, locale, confirmId, onPress, onDeleteRequest, on
           </View>
           <View style={[styles.statusBadge, { backgroundColor: (statusColor[appt.status] ?? colors.textSecondary) + '22' }]}>
             <Text style={[styles.statusText, { color: statusColor[appt.status] ?? colors.textSecondary }]} numberOfLines={1}>
-              {t(`appointment_types.${appt.appointment_type}` as any)}
+              {t(`appointment_statuses.${appt.status}` as any)}
             </Text>
           </View>
         </TouchableOpacity>
