@@ -2,7 +2,6 @@ import { Platform } from 'react-native'
 import * as Linking from 'expo-linking'
 import { supabase } from '@/shared/lib/supabase'
 import type { Client } from '@/shared/lib/types'
-import { completeAppointment } from '@/features/appointments/appointmentService'
 import { toggleFollowupDone } from '@/features/followups/followupService'
 import { markInteractionDone } from '@/features/interactions/interactionService'
 
@@ -15,25 +14,20 @@ function requireSource(client: Client) {
 
 export type CompleteNextActionResult = {
   appointmentId: string
-  needsDebrief: boolean
 } | void
 
-// Orchestre la complétion de la prochaine action en délégant au service dédié à
-// chaque ressource — aucune logique post-RDV n'est dupliquée ici : pour un
-// rendez-vous, le chemin métier unique appointmentService.completeAppointment()
-// est utilisé, garantissant les mêmes effets (relances, tâche objections, etc.)
-// que depuis la fiche RDV.
+// Orchestre la prochaine action en délégant au service dédié à chaque ressource.
+// Pour un rendez-vous : la fiche Contact ne complète JAMAIS le RDV elle-même — elle
+// renvoie uniquement l'identifiant du RDV pour navigation vers sa fiche, où le débrief
+// est confirmé PUIS le RDV complété (appointmentService.completeAppointment), que le
+// RDV soit déjà completed (débrief affiché en lecture) ou pas encore (confirmation
+// suivie de la complétion). Aucune logique post-RDV n'est dupliquée ici.
+// Pour followup/interaction : délégation inchangée vers leur service dédié.
 export async function completeNextAction(client: Client): Promise<CompleteNextActionResult> {
   const { source, id } = requireSource(client)
 
   if (source === 'appointment') {
-    const result = await completeAppointment(id)
-    const { data: biz } = await supabase
-      .from('appointment_business_context')
-      .select('commercial_intent')
-      .eq('appointment_id', id)
-      .maybeSingle()
-    return { appointmentId: id, needsDebrief: !biz?.commercial_intent }
+    return { appointmentId: id }
   }
 
   if (source === 'interaction') {

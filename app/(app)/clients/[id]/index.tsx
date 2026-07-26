@@ -319,8 +319,12 @@ export default function ClientDetailScreen() {
                   disabled={actionBusy}
                   style={[styles.qaBtn, actionBusy && { opacity: 0.6 }]}
                   onPress={() => {
+                    // Pour un rendez-vous : jamais de complétion directe depuis la fiche
+                    // Contact — navigation vers la fiche RDV, où le débrief est confirmé
+                    // PUIS le RDV complété (RDV déjà completed : débrief affiché en lecture,
+                    // aucune nouvelle complétion tentée).
                     runNextAction(() => completeNextAction(client)).then(result => {
-                      if (result?.needsDebrief) {
+                      if (result?.appointmentId) {
                         router.push(`/(app)/appointments/${result.appointmentId}?debrief=1` as any)
                       }
                     })
@@ -330,7 +334,9 @@ export default function ClientDetailScreen() {
                   {actionBusy
                     ? <ActivityIndicator size="small" color={colors.text} />
                     : <Text style={styles.qaIcon}>✓</Text>}
-                  <Text style={styles.qaLabel}>Terminer</Text>
+                  <Text style={styles.qaLabel}>
+                    {client.next_action_source === 'appointment' ? t('clients.finish_action_debrief') : 'Terminer'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity disabled={actionBusy} style={styles.qaBtn} onPress={() => runNextAction(() => postponeNextAction(client))} activeOpacity={0.8}>
                   <Text style={styles.qaIcon}>＋1</Text><Text style={styles.qaLabel}>Reporter</Text>

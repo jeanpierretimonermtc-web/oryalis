@@ -1,16 +1,22 @@
 import { supabase } from '@/shared/lib/supabase'
 import { triggerAppointmentCompleted } from '@/features/automations/automationService'
-import type {
-  Appointment,
-  AppointmentFull,
-  AppointmentTask,
-  AppointmentFilters,
-  CreateAppointmentPayload,
-  UpdateAppointmentPayload,
-  UpdateAppointmentNotesPayload,
-  UpdateBusinessContextPayload,
-  CreateTaskPayload,
-  CompleteAppointmentResult,
+import {
+  AppointmentCompletionError,
+  type Appointment,
+  type AppointmentFull,
+  type AppointmentNote,
+  type AppointmentBusinessContext,
+  type AppointmentTask,
+  type AppointmentFilters,
+  type CreateAppointmentPayload,
+  type UpdateAppointmentPayload,
+  type UpdateAppointmentNotesPayload,
+  type UpdateBusinessContextPayload,
+  type CreateTaskPayload,
+  type CompleteAppointmentResult,
+  type PostCompletionResult,
+  type PostCompletionWarningCode,
+  type DebriefState,
 } from './appointmentTypes'
 
 const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, created_at, updated_at'
@@ -132,30 +138,39 @@ export async function updateAppointment(id: string, payload: UpdateAppointmentPa
 }
 
 // Seul chemin métier public pour passer un rendez-vous à l'état "completed".
-// La transition est conditionnelle (WHERE status <> 'completed') : sous concurrence,
-// Postgres verrouille la ligne et une seule requête peut réellement transitionner ;
-// les effets post-complétion ne sont donc déclenchés qu'une fois, même en cas de
-// double appel rapproché (double-clic, appel depuis deux écrans, etc.).
+// La transition est conditionnelle (WHERE status IN ('scheduled','rescheduled')) : sous
+// concurrence, Postgres verrouille la ligne et une seule requête peut réellement
+// transitionner ; les effets post-complétion ne sont donc déclenchés qu'une fois, même en
+// cas de double appel rapproché (double-clic, appel depuis deux écrans, etc.).
+// 'rescheduled' est traité comme un RDV actif à honorer (même ligne déplacée à une nouvelle
+// date, cf. nextActionService.postponeNextAction et les requêtes d'agenda qui le groupent
+// systématiquement avec 'scheduled') — donc complétable au même titre.
+// 'cancelled' et 'no_show' sont explicitement exclus : voir AppointmentCompletionError.
 export async function completeAppointment(id: string): Promise<CompleteAppointmentResult> {
   const { data, error } = await supabase
     .from('appointments')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
     .eq('id', id)
-    .neq('status', 'completed')
+    .in('status', ['scheduled', 'rescheduled'])
     .select(APPT_COLS)
     .maybeSingle()
 
   if (error) throw new Error(error.message)
 
   if (data) {
+    let postCompletion: PostCompletionResult = { success: true, warnings: [] }
     if (data.client_id) {
-      triggerPostCompletionActions(id, data.client_id, data.user_id).catch(console.error)
+      try {
+        postCompletion = await ensurePostCompletionActions(id, data.client_id, data.user_id)
+      } catch (e) {
+        console.error('[completeAppointment.postCompletion]', e)
+        postCompletion = { success: false, warnings: ['automation_failed'] }
+      }
     }
-    return { appointment: data, transitioned: true, alreadyCompleted: false }
+    return { appointment: data, transitioned: true, alreadyCompleted: false, postCompletion }
   }
 
-  // Rien n'a été transitionné : soit déjà completed, soit id inconnu (auquel cas
-  // .single() ci-dessous lève une erreur explicite).
+  // Rien n'a été transitionné : soit déjà completed, soit cancelled/no_show, soit id inconnu.
   const { data: existing, error: fetchError } = await supabase
     .from('appointments')
     .select(APPT_COLS)
@@ -164,15 +179,27 @@ export async function completeAppointment(id: string): Promise<CompleteAppointme
 
   if (fetchError) throw new Error(fetchError.message)
 
-  return { appointment: existing, transitioned: false, alreadyCompleted: existing.status === 'completed' }
+  if (existing.status === 'completed') {
+    return { appointment: existing, transitioned: false, alreadyCompleted: true, postCompletion: { success: true, warnings: [] } }
+  }
+
+  if (existing.status === 'cancelled') throw new AppointmentCompletionError('cannot_complete_cancelled')
+  if (existing.status === 'no_show')   throw new AppointmentCompletionError('cannot_complete_no_show')
+
+  throw new Error(`Cannot complete appointment with status "${existing.status}".`)
 }
 
-async function triggerPostCompletionActions(
+// Rejeu idempotent des effets post-complétion : ne recrée que ce qui manque, retourne des
+// codes d'avertissement exploitables par l'UI (jamais de texte traduit ici). Appelable à la
+// fois juste après la première transition et lors d'un nouvel essai explicite après échec
+// partiel — jamais lancée automatiquement à chaque simple consultation d'un RDV completed.
+export async function ensurePostCompletionActions(
   appointmentId: string,
   clientId: string,
   userId: string,
-): Promise<void> {
-  // Fetch business_context, notes, and existing auto followup in parallel
+): Promise<PostCompletionResult> {
+  const warnings: PostCompletionWarningCode[] = []
+
   const [bizRes, notesRes, existingRes] = await Promise.all([
     supabase
       .from('appointment_business_context')
@@ -204,30 +231,37 @@ async function triggerPostCompletionActions(
 
   // Create followup if no pending auto followup exists for this client
   if (biz && !hasExistingAuto) {
-    if (biz.commercial_intent === 'buy_product') {
-      await supabase.from('followups').insert({
-        client_id:            clientId,
-        user_id:              userId,
-        title:                'Relance suite RDV — achat produit',
-        due_date:             dueDate(3),
-        done:                 false,
-        auto_generated:       true,
-        prospect_temperature: biz.prospect_temperature ?? null,
-        pipeline_stage:       biz.pipeline_stage ?? null,
-        product_context:      notes?.products_discussed ?? null,
-      })
-    } else if (biz.commercial_intent === 'become_distributor') {
-      await supabase.from('followups').insert({
-        client_id:            clientId,
-        user_id:              userId,
-        title:                'Relance suite RDV — recrutement distributeur',
-        due_date:             dueDate(2),
-        done:                 false,
-        auto_generated:       true,
-        prospect_temperature: biz.prospect_temperature ?? null,
-        pipeline_stage:       biz.pipeline_stage ?? null,
-        product_context:      null,
-      })
+    try {
+      if (biz.commercial_intent === 'buy_product') {
+        const { error } = await supabase.from('followups').insert({
+          client_id:            clientId,
+          user_id:              userId,
+          title:                'Relance suite RDV — achat produit',
+          due_date:             dueDate(3),
+          done:                 false,
+          auto_generated:       true,
+          prospect_temperature: biz.prospect_temperature ?? null,
+          pipeline_stage:       biz.pipeline_stage ?? null,
+          product_context:      notes?.products_discussed ?? null,
+        })
+        if (error) throw error
+      } else if (biz.commercial_intent === 'become_distributor') {
+        const { error } = await supabase.from('followups').insert({
+          client_id:            clientId,
+          user_id:              userId,
+          title:                'Relance suite RDV — recrutement distributeur',
+          due_date:             dueDate(2),
+          done:                 false,
+          auto_generated:       true,
+          prospect_temperature: biz.prospect_temperature ?? null,
+          pipeline_stage:       biz.pipeline_stage ?? null,
+          product_context:      null,
+        })
+        if (error) throw error
+      }
+    } catch (e) {
+      console.error('[ensurePostCompletionActions.followup]', e)
+      warnings.push('followup_failed')
     }
   }
 
@@ -239,40 +273,89 @@ async function triggerPostCompletionActions(
   // et empêcherait la création automatique. Voir rapport de phase pour la migration future
   // recommandée (colonne auto_generated ou task_type dédié).
   if (notes?.objections?.trim()) {
-    const { count: openFollowUpCount } = await supabase
-      .from('appointment_tasks')
-      .select('id', { count: 'exact', head: true })
-      .eq('appointment_id', appointmentId)
-      .eq('task_type', 'follow_up')
-      .in('status', ['pending', 'in_progress'])
+    try {
+      const { count: openFollowUpCount } = await supabase
+        .from('appointment_tasks')
+        .select('id', { count: 'exact', head: true })
+        .eq('appointment_id', appointmentId)
+        .eq('task_type', 'follow_up')
+        .in('status', ['pending', 'in_progress'])
 
-    if (!openFollowUpCount) {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        await supabase.from('appointment_tasks').insert({
-          appointment_id: appointmentId,
-          client_id:      clientId,
-          user_id:        user.id,
-          title:          'Répondre aux objections détectées',
-          task_type:      'follow_up',
-          priority:       'high',
-          status:         'pending',
-          due_at:         new Date(Date.now() + 86400000).toISOString(),
-        })
+      if (!openFollowUpCount) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { error } = await supabase.from('appointment_tasks').insert({
+            appointment_id: appointmentId,
+            client_id:      clientId,
+            user_id:        user.id,
+            title:          'Répondre aux objections détectées',
+            task_type:      'follow_up',
+            priority:       'high',
+            status:         'pending',
+            due_at:         new Date(Date.now() + 86400000).toISOString(),
+          })
+          if (error) throw error
+        }
       }
+    } catch (e) {
+      console.error('[ensurePostCompletionActions.objectionTask]', e)
+      warnings.push('objection_task_failed')
     }
   }
 
   // Automation : relance générique J+7 après tout RDV complété
-  const { data: clientData } = await supabase
-    .from('clients')
-    .select('first_name, full_name')
-    .eq('id', clientId)
-    .single()
-  if (clientData) {
-    const prénom = clientData.first_name || clientData.full_name.split(' ')[0]
-    triggerAppointmentCompleted(userId, clientId, prénom).catch(console.error)
+  try {
+    const { data: clientData, error: clientError } = await supabase
+      .from('clients')
+      .select('first_name, full_name')
+      .eq('id', clientId)
+      .single()
+    if (clientError) throw clientError
+    if (clientData) {
+      const prénom = clientData.first_name || clientData.full_name.split(' ')[0]
+      await triggerAppointmentCompleted(userId, clientId, prénom)
+    }
+  } catch (e) {
+    console.error('[ensurePostCompletionActions.automation]', e)
+    warnings.push('automation_failed')
   }
+
+  return { success: warnings.length === 0, warnings }
+}
+
+// Preuve principale du débrief en V1 = confirmation utilisateur (un RDV completed a
+// nécessairement été confirmé, puisque c'est désormais le seul chemin vers ce statut).
+// Pour un RDV pas encore completed, on ne peut que constater si des données ont déjà été
+// saisies (aucun champ n'est obligatoire — cf. rapport de phase).
+export function evaluateAppointmentDebrief(
+  appointmentStatus: Appointment['status'],
+  notes: Pick<AppointmentNote, 'client_notes' | 'internal_notes' | 'objections' | 'needs_identified' | 'products_discussed'> | null,
+  businessContext: Pick<AppointmentBusinessContext, 'commercial_intent' | 'prospect_temperature' | 'estimated_value'> | null,
+): DebriefState {
+  if (appointmentStatus === 'completed') return 'confirmed'
+  const hasAnyNotes = !!notes && Boolean(
+    notes.client_notes || notes.internal_notes || notes.objections || notes.needs_identified || notes.products_discussed,
+  )
+  const hasAnyBusinessContext = !!businessContext && Boolean(
+    businessContext.commercial_intent || businessContext.prospect_temperature || businessContext.estimated_value != null,
+  )
+  return hasAnyNotes || hasAnyBusinessContext ? 'partial' : 'none'
+}
+
+export async function hasAppointmentDebrief(appointmentId: string): Promise<DebriefState> {
+  const [apptRes, notesRes, bizRes] = await Promise.all([
+    supabase.from('appointments').select('status').eq('id', appointmentId).single(),
+    supabase.from('appointment_notes')
+      .select('client_notes, internal_notes, objections, needs_identified, products_discussed')
+      .eq('appointment_id', appointmentId).maybeSingle(),
+    supabase.from('appointment_business_context')
+      .select('commercial_intent, prospect_temperature, estimated_value')
+      .eq('appointment_id', appointmentId).maybeSingle(),
+  ])
+
+  if (apptRes.error) throw new Error(apptRes.error.message)
+
+  return evaluateAppointmentDebrief(apptRes.data.status, notesRes.data ?? null, bizRes.data ?? null)
 }
 
 export async function cancelAppointment(id: string, reason?: string): Promise<void> {

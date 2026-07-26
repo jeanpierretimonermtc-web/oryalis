@@ -6,6 +6,7 @@ import {
   createAppointment,
   updateAppointment,
   completeAppointment,
+  ensurePostCompletionActions,
   cancelAppointment,
   deleteAppointment,
   upsertAppointmentNotes,
@@ -26,6 +27,7 @@ import type {
   UpdateBusinessContextPayload,
   CreateTaskPayload,
   CompleteAppointmentResult,
+  PostCompletionResult,
 } from './appointmentTypes'
 
 export function useAppointments(filters: AppointmentFilters = {}) {
@@ -196,17 +198,26 @@ export function useAppointmentDetail(id: string | null) {
   }, [id])
 
   // Seul chemin de complétion : voir appointmentService.completeAppointment().
-  const complete = useCallback(async (): Promise<CompleteAppointmentResult | null> => {
-    if (!id) return null
+  // Rejette (throw) pour cancelled/no_show — l'appelant décide de l'affichage exact
+  // (AppointmentCompletionError.code), plutôt que d'être avalé ici en simple booléen.
+  const complete = useCallback(async (): Promise<CompleteAppointmentResult> => {
+    if (!id) throw new Error('No appointment id')
+    const result = await completeAppointment(id)
+    setAppointment(prev => prev ? { ...prev, ...result.appointment } : prev)
+    return result
+  }, [id])
+
+  // Rejeu explicite des effets post-complétion après un échec partiel — ne recomplète pas
+  // le RDV, ne recrée que ce qui manque encore (idempotent).
+  const retryPostCompletion = useCallback(async (): Promise<PostCompletionResult | null> => {
+    if (!id || !appointment?.client_id) return null
     try {
-      const result = await completeAppointment(id)
-      setAppointment(prev => prev ? { ...prev, ...result.appointment } : prev)
-      return result
+      return await ensurePostCompletionActions(id, appointment.client_id, appointment.user_id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur de complétion')
+      setError(err instanceof Error ? err.message : 'Erreur lors du nouvel essai')
       return null
     }
-  }, [id])
+  }, [id, appointment?.client_id, appointment?.user_id])
 
   const cancel = useCallback(async (reason?: string): Promise<boolean> => {
     if (!id) return false
@@ -220,7 +231,7 @@ export function useAppointmentDetail(id: string | null) {
     }
   }, [id])
 
-  return { appointment, loading, error, reload: load, saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, complete, cancel }
+  return { appointment, loading, error, reload: load, saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, complete, retryPostCompletion, cancel }
 }
 
 export function useAppointmentTasks() {

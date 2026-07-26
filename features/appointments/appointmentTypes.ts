@@ -204,8 +204,34 @@ export interface AppointmentFilters {
   appointment_type?: AppointmentType
 }
 
+// Codes exploitables par l'UI (jamais de texte traduit dans le service).
+export type PostCompletionWarningCode = 'followup_failed' | 'objection_task_failed' | 'automation_failed'
+
+export interface PostCompletionResult {
+  success: boolean
+  warnings: PostCompletionWarningCode[]
+}
+
 export interface CompleteAppointmentResult {
   appointment: Appointment
   transitioned: boolean
   alreadyCompleted: boolean
+  postCompletion: PostCompletionResult
 }
+
+// Rejet métier contrôlé — un RDV cancelled ou no_show ne peut jamais devenir completed.
+export type AppointmentCompletionErrorCode = 'cannot_complete_cancelled' | 'cannot_complete_no_show'
+
+export class AppointmentCompletionError extends Error {
+  code: AppointmentCompletionErrorCode
+  constructor(code: AppointmentCompletionErrorCode) {
+    super(`Cannot complete appointment: ${code}`)
+    this.name = 'AppointmentCompletionError'
+    this.code = code
+  }
+}
+
+// Débrief : preuve principale = confirmation utilisateur (un RDV completed a nécessairement
+// été confirmé, car c'est désormais le seul chemin vers ce statut). Pour un RDV pas encore
+// completed, on ne peut que constater la présence ou l'absence de données déjà saisies.
+export type DebriefState = 'none' | 'partial' | 'confirmed'

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, Platform, Modal, useWindowDimensions,
@@ -7,7 +7,8 @@ import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '@/shared/lib/supabase'
 import { useAppointmentDetail } from '@/features/appointments/useAppointments'
-import type { AppointmentStatus, AppointmentTask, ProspectTemperature, CommercialIntent } from '@/features/appointments/appointmentTypes'
+import { AppointmentCompletionError } from '@/features/appointments/appointmentTypes'
+import type { AppointmentStatus, AppointmentTask, ProspectTemperature, CommercialIntent, PostCompletionWarningCode } from '@/features/appointments/appointmentTypes'
 import { PIPELINE_STAGES, type PipelineStage } from '@/shared/lib/types'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
@@ -147,7 +148,7 @@ export default function AppointmentDetailScreen() {
 
   const {
     appointment, loading,
-    saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, complete, cancel,
+    saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, complete, retryPostCompletion, cancel,
   } = useAppointmentDetail(id ?? null)
 
   const [clientNotes,       setClientNotes]       = useState('')
@@ -162,6 +163,9 @@ export default function AppointmentDetailScreen() {
   const [taskError,         setTaskError]          = useState<string | null>(null)
   const [showDebrief,       setShowDebrief]        = useState(false)
   const [isCompleting,      setIsCompleting]       = useState(false)
+  const [postWarnings,      setPostWarnings]       = useState<PostCompletionWarningCode[]>([])
+  const [retrying,          setRetrying]           = useState(false)
+  const debriefParamHandled = useRef(false)
   const [showCancelConfirm, setShowCancelConfirm]  = useState(false)
   const [cancelling,        setCancelling]         = useState(false)
   const [inlineError,       setInlineError]        = useState<string | null>(null)
@@ -203,11 +207,18 @@ export default function AppointmentDetailScreen() {
     })
   }, [])
 
-  // Navigation depuis la fiche Contact (Terminer) quand le débrief n'était pas encore
-  // renseigné : ouvre directement la même modale de débrief que la complétion locale.
+  // Navigation depuis la fiche Contact ("Terminer et débriefer") : ouvre la modale de
+  // débrief, que le RDV soit déjà completed (lecture/édition) ou pas encore (confirmation
+  // puis complétion). Le paramètre est consommé une seule fois (ref) puis neutralisé via
+  // router.setParams, pour éviter toute réouverture en boucle et permettre une réouverture
+  // volontaire ultérieure depuis l'interface (pill "Completed").
   useEffect(() => {
-    if (debrief === '1' && appointment?.status === 'completed') setShowDebrief(true)
-  }, [debrief, appointment?.status])
+    if (debrief === '1' && appointment && !debriefParamHandled.current) {
+      debriefParamHandled.current = true
+      setShowDebrief(true)
+      router.setParams({ debrief: undefined } as any)
+    }
+  }, [debrief, appointment])
 
   useEffect(() => {
     const cid = appointment?.client_id
@@ -229,8 +240,8 @@ export default function AppointmentDetailScreen() {
     return (v: string) => { setter(v); setNotesDirty(true) }
   }
 
-  async function handleSaveNotes() {
-    if (!notesDirty) return
+  async function handleSaveNotes(): Promise<boolean> {
+    if (!notesDirty) return true
     setSaving(true)
     setInlineError(null)
     const ok = await saveNotes({
@@ -241,8 +252,9 @@ export default function AppointmentDetailScreen() {
       products_discussed: productsDiscussed || undefined,
     })
     setSaving(false)
-    if (!ok) setInlineError(t('appointments.error_save_notes'))
-    else setNotesDirty(false)
+    if (!ok) { setInlineError(t('appointments.error_save_notes')); return false }
+    setNotesDirty(false)
+    return true
   }
 
   async function handleStatusChange(status: AppointmentStatus) {
@@ -251,21 +263,71 @@ export default function AppointmentDetailScreen() {
     setInlineError(null)
 
     if (status === 'completed') {
-      setIsCompleting(true)
-      try {
-        const result = await complete()
-        if (!result) { setInlineError(t('appointments.error_update_status')); return }
-        // transitioned=true uniquement lors du premier passage réel à completed :
-        // les effets post-RDV (relances, tâche objections) ne se déclenchent qu'ici.
-        if (result.transitioned) setShowDebrief(true)
-      } finally {
-        setIsCompleting(false)
+      // Un RDV cancelled/no_show ne peut jamais être complété — refus immédiat côté UI,
+      // en plus du rejet contrôlé côté service (défense en profondeur).
+      if (appointment?.status === 'cancelled') { setInlineError(t('appointments.error_cannot_complete_cancelled')); return }
+      if (appointment?.status === 'no_show')   { setInlineError(t('appointments.error_cannot_complete_no_show'));   return }
+
+      // On ne complète JAMAIS directement au clic : le débrief doit être confirmé d'abord.
+      // Les notes déjà saisies (objections incluses) sont sauvegardées avant d'ouvrir la
+      // modale, pour que la confirmation du débrief parte d'un état à jour.
+      if (notesDirty) {
+        const ok = await handleSaveNotes()
+        if (!ok) return
       }
+      setPostWarnings([])
+      setShowDebrief(true)
       return
     }
 
     const ok = await update({ status })
     if (!ok) { setInlineError(t('appointments.error_update_status')); return }
+  }
+
+  // Confirmation du débrief : sauvegarde déjà faite (notes + contexte commercial, ce
+  // dernier pill par pill au fur et à mesure) → seulement ensuite completeAppointment().
+  // Idempotent pour un RDV déjà completed (alreadyCompleted, aucune erreur).
+  async function handleConfirmDebrief() {
+    if (isCompleting) return // empêche une double soumission
+    if (notesDirty) {
+      const ok = await handleSaveNotes()
+      if (!ok) return // erreur déjà affichée, modale conservée avec la saisie
+    }
+    setIsCompleting(true)
+    setInlineError(null)
+    try {
+      const result = await complete()
+      if (result.postCompletion && !result.postCompletion.success) {
+        setPostWarnings(result.postCompletion.warnings)
+      } else {
+        setPostWarnings([])
+      }
+      setShowDebrief(false) // fermeture uniquement si la complétion principale réussit
+    } catch (err) {
+      if (err instanceof AppointmentCompletionError) {
+        setInlineError(t(
+          err.code === 'cannot_complete_cancelled'
+            ? 'appointments.error_cannot_complete_cancelled'
+            : 'appointments.error_cannot_complete_no_show',
+        ))
+      } else {
+        setInlineError(t('appointments.error_update_status'))
+      }
+      // Statut inchangé, modale conservée, saisie déjà persistée (pills/notes) → nouvel essai possible.
+    } finally {
+      setIsCompleting(false)
+    }
+  }
+
+  async function handleRetryPostCompletion() {
+    if (retrying) return
+    setRetrying(true)
+    try {
+      const result = await retryPostCompletion()
+      if (result) setPostWarnings(result.warnings)
+    } finally {
+      setRetrying(false)
+    }
   }
 
   async function handlePipelineChange(stage: PipelineStage) {
@@ -583,13 +645,17 @@ export default function AppointmentDetailScreen() {
   )
 
   const debriefModal = (
-    <Modal visible={showDebrief} transparent animationType="slide" onRequestClose={() => setShowDebrief(false)}>
+    <Modal visible={showDebrief} transparent animationType="slide" onRequestClose={() => { if (!isCompleting) setShowDebrief(false) }}>
       <View style={styles.debriefOverlay}>
         <View style={styles.debriefSheet}>
           <View style={styles.debriefHandle} />
           <View style={styles.debriefHeader}>
             <Text style={styles.debriefTitle}>{t('appointments.debrief_title')}</Text>
-            <TouchableOpacity onPress={() => setShowDebrief(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <TouchableOpacity
+              onPress={() => { if (!isCompleting) setShowDebrief(false) }}
+              disabled={isCompleting}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
               <Text style={styles.debriefClose}>✕</Text>
             </TouchableOpacity>
           </View>
@@ -654,8 +720,21 @@ export default function AppointmentDetailScreen() {
             </View>
           </ScrollView>
 
-          <TouchableOpacity style={styles.debriefDoneBtn} onPress={() => setShowDebrief(false)} activeOpacity={0.85}>
-            <Text style={styles.debriefDoneBtnText}>{t('appointments.debrief_done')}</Text>
+          {inlineError && showDebrief ? <Text style={styles.errorText}>{inlineError}</Text> : null}
+
+          <TouchableOpacity
+            style={[styles.debriefDoneBtn, isCompleting && { opacity: 0.6 }]}
+            onPress={appointment?.status === 'completed' ? () => setShowDebrief(false) : handleConfirmDebrief}
+            disabled={isCompleting}
+            activeOpacity={0.85}
+          >
+            {isCompleting
+              ? <ActivityIndicator color="#ffffff" size="small" />
+              : (
+                <Text style={styles.debriefDoneBtnText}>
+                  {appointment?.status === 'completed' ? t('appointments.debrief_done') : t('appointments.debrief_confirm_complete')}
+                </Text>
+              )}
           </TouchableOpacity>
         </View>
       </View>
@@ -746,9 +825,21 @@ export default function AppointmentDetailScreen() {
     </View>
   )
 
-  const errorBanner = inlineError ? (
-    <Text style={styles.errorText}>{inlineError}</Text>
-  ) : null
+  const errorBanner = (
+    <>
+      {inlineError && !showDebrief ? <Text style={styles.errorText}>{inlineError}</Text> : null}
+      {postWarnings.length > 0 ? (
+        <View style={styles.warningBanner}>
+          <Text style={styles.warningBannerText}>{t('appointments.warning_post_completion_partial')}</Text>
+          <TouchableOpacity onPress={handleRetryPostCompletion} disabled={retrying} activeOpacity={0.75}>
+            {retrying
+              ? <ActivityIndicator size="small" color={colors.warning} />
+              : <Text style={styles.warningBannerRetry}>{t('appointments.warning_post_completion_retry')}</Text>}
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </>
+  )
 
   const headerRight = () => (
     <View style={styles.headerBtns}>
@@ -1026,6 +1117,10 @@ function makeStyles(colors: ThemeColors) {
     taskErrorText:     { fontSize: 12, fontFamily: fonts.medium, color: colors.danger, marginTop: 6 },
 
     errorText: { fontSize: 13, fontFamily: fonts.body, color: colors.danger, textAlign: 'center', paddingHorizontal: 4 },
+
+    warningBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 4 },
+    warningBannerText: { fontSize: 13, fontFamily: fonts.body, color: colors.warning, textAlign: 'center' },
+    warningBannerRetry: { fontSize: 13, fontFamily: fonts.semibold, color: colors.warning, textDecorationLine: 'underline' },
 
     // Header
     headerBackBtn:        { paddingHorizontal: 12 },
