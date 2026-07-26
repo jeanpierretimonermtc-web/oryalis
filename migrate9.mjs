@@ -5,12 +5,15 @@
 import pg from 'pg'
 const { Client } = pg
 
-const password = encodeURIComponent('Smallville!0945!')
+if (!process.env.SUPABASE_DB_PASSWORD) throw new Error('Missing SUPABASE_DB_PASSWORD')
+
+const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD)
 const client = new Client({
-  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`
+  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`,
 })
 
 await client.connect()
+try {
 console.log('Connecté à Supabase')
 
 // 1. Ajout des nouvelles colonnes
@@ -165,4 +168,6 @@ for (const [sku, unit, retail, wholesale, pv, latin, desc] of products) {
 }
 
 console.log(`\nMise à jour terminée : ${updated} produits enrichis, ${notFound} SKU introuvables`)
-await client.end()
+} finally {
+  await client.end()
+}

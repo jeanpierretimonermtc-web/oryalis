@@ -8,8 +8,8 @@ import { router, Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { supabase } from '@/shared/lib/supabase'
-import { createAppointment } from '@/features/appointments/appointmentService'
-import type { AppointmentType, PipelineStage, ProspectTemperature, CommercialIntent } from '@/features/appointments/appointmentTypes'
+import { createAppointment, updateAppointment, fetchAppointmentById } from '@/features/appointments/appointmentService'
+import type { AppointmentType } from '@/features/appointments/appointmentTypes'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
 import { useTheme } from '@/shared/theme/ThemeProvider'
@@ -315,11 +315,13 @@ export default function NewAppointmentScreen() {
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
-  const { date: paramDate, time: paramTime, clientId: paramClientId } =
-    useLocalSearchParams<{ date?: string; time?: string; clientId?: string }>()
+  const { date: paramDate, time: paramTime, clientId: paramClientId, id: editId } =
+    useLocalSearchParams<{ date?: string; time?: string; clientId?: string; id?: string }>()
   const { width } = useWindowDimensions()
   const isWide = width >= 768
+  const isEdit = !!editId
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
+  const [loadingAppt, setLoadingAppt] = useState(isEdit)
 
   const defaultDate = paramDate ?? new Date().toISOString().split('T')[0]
   const defaultTime = paramTime ?? '09:00'
@@ -338,10 +340,6 @@ export default function NewAppointmentScreen() {
   const [meetingUrl,    setMeetingUrl]    = useState('')
   const [clientNotes,   setClientNotes]   = useState('')
   const [internalNotes, setInternalNotes] = useState('')
-  const [pipelineStage, setPipelineStage] = useState<PipelineStage | null>(null)
-  const [temperature,   setTemperature]   = useState<ProspectTemperature | null>(null)
-  const [intent,        setIntent]        = useState<CommercialIntent | null>(null)
-  const [estValue,      setEstValue]      = useState('')
 
   const [showClientPicker, setShowClientPicker] = useState(false)
   const [showStartCal,     setShowStartCal]     = useState(false)
@@ -355,13 +353,30 @@ export default function NewAppointmentScreen() {
     if (!paramClientId || !session) return
     supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('id', paramClientId).single()
       .then(({ data }) => {
-        if (data) {
-          const selected = data as Client
-          setSelectedClient(selected)
-          setPipelineStage(selected.pipeline_stage)
-        }
+        if (data) setSelectedClient(data as Client)
       })
   }, [paramClientId, session])
+
+  useEffect(() => {
+    if (!editId) return
+    setLoadingAppt(true)
+    fetchAppointmentById(editId).then(async appt => {
+      if (!appt) { setLoadingAppt(false); return }
+      setTitle(appt.title)
+      setApptType(appt.appointment_type)
+      const [sd, stRaw] = appt.start_at.split('T')
+      const [ed, etRaw] = appt.end_at.split('T')
+      setStartDate(sd); setStartTime(stRaw.slice(0, 5))
+      setEndDate(ed); setEndTime(etRaw.slice(0, 5))
+      setLocation(appt.location ?? '')
+      setMeetingUrl(appt.meeting_url ?? '')
+      if (appt.client_id) {
+        const { data } = await supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('id', appt.client_id).single()
+        if (data) setSelectedClient(data as Client)
+      }
+      setLoadingAppt(false)
+    }).catch(() => setLoadingAppt(false))
+  }, [editId])
 
   function formatDate(dateStr: string) {
     return new Date(dateStr + 'T12:00:00').toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -374,7 +389,6 @@ export default function NewAppointmentScreen() {
 
   function handleSelectClient(client: Client) {
     setSelectedClient(client)
-    setPipelineStage(client.pipeline_stage)
   }
 
   function handleStartTimeConfirm(time: string) {
@@ -400,26 +414,29 @@ export default function NewAppointmentScreen() {
     if (!session) return
     setSaving(true)
     try {
-      await createAppointment({
-        title:            title.trim(),
-        appointment_type: apptType,
-        start_at,
-        end_at,
-        client_id:   selectedClient?.id,
-        location:    location.trim() || undefined,
-        meeting_url: meetingUrl.trim() || undefined,
-        notes: (clientNotes.trim() || internalNotes.trim())
-          ? { client_notes: clientNotes.trim() || undefined, internal_notes: internalNotes.trim() || undefined }
-          : undefined,
-        business_context: pipelineStage
-          ? {
-              pipeline_stage:      pipelineStage,
-              prospect_temperature: temperature ?? undefined,
-              commercial_intent:    intent ?? undefined,
-              estimated_value:      estValue ? parseFloat(estValue) : undefined,
-            }
-          : undefined,
-      })
+      if (isEdit && editId) {
+        await updateAppointment(editId, {
+          title:            title.trim(),
+          appointment_type: apptType,
+          start_at,
+          end_at,
+          location:    location.trim() || undefined,
+          meeting_url: meetingUrl.trim() || undefined,
+        })
+      } else {
+        await createAppointment({
+          title:            title.trim(),
+          appointment_type: apptType,
+          start_at,
+          end_at,
+          client_id:   selectedClient?.id,
+          location:    location.trim() || undefined,
+          meeting_url: meetingUrl.trim() || undefined,
+          notes: (clientNotes.trim() || internalNotes.trim())
+            ? { client_notes: clientNotes.trim() || undefined, internal_notes: internalNotes.trim() || undefined }
+            : undefined,
+        })
+      }
       router.back()
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : t('common.error'))
@@ -445,37 +462,20 @@ export default function NewAppointmentScreen() {
     { value: 'other',                label: t('appointment_types.other') },
   ]
 
-  const pipelineOptions: { value: PipelineStage; label: string }[] = [
-    { value: 'new_lead',                 label: t('pipeline_stages.new_lead') },
-    { value: 'contacted',                label: t('pipeline_stages.contacted') },
-    { value: 'presentation_scheduled',   label: t('pipeline_stages.presentation_scheduled') },
-    { value: 'presentation_completed',   label: t('pipeline_stages.presentation_completed') },
-    { value: 'follow_up',                label: t('pipeline_stages.follow_up') },
-    { value: 'customer',                 label: t('pipeline_stages.customer') },
-    { value: 'distributor',              label: t('pipeline_stages.distributor') },
-    { value: 'lost',                     label: t('pipeline_stages.lost') },
-  ]
-
-  const tempOptions: { value: ProspectTemperature; label: string }[] = [
-    { value: 'cold',     label: t('prospect_temperatures.cold') },
-    { value: 'warm',     label: t('prospect_temperatures.warm') },
-    { value: 'hot',      label: t('prospect_temperatures.hot') },
-    { value: 'very_hot', label: t('prospect_temperatures.very_hot') },
-  ]
-
-  const intentOptions: { value: CommercialIntent; label: string }[] = [
-    { value: 'buy_product',          label: t('commercial_intents.buy_product') },
-    { value: 'become_customer',      label: t('commercial_intents.become_customer') },
-    { value: 'become_distributor',   label: t('commercial_intents.become_distributor') },
-    { value: 'build_team',           label: t('commercial_intents.build_team') },
-    { value: 'training',             label: t('commercial_intents.training') },
-    { value: 'support',              label: t('commercial_intents.support') },
-    { value: 'other',                label: t('commercial_intents.other') },
-  ]
+  if (loadingAppt) {
+    return (
+      <>
+        <Stack.Screen options={{ title: t('appointments.edit_title'), headerBackTitle: '' }} />
+        <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      </>
+    )
+  }
 
   return (
     <>
-      <Stack.Screen options={{ title: t('appointments.new_title'), headerBackTitle: '' }} />
+      <Stack.Screen options={{ title: isEdit ? t('appointments.edit_title') : t('appointments.new_title'), headerBackTitle: '' }} />
       <ScrollView style={styles.container} contentContainerStyle={[styles.content, isWide && styles.contentWide]} keyboardShouldPersistTaps="handled">
 
         {/* ── Section 1 : Informations ─────────────────────────────── */}
@@ -505,11 +505,13 @@ export default function NewAppointmentScreen() {
                   <Text style={[styles.selectedName, { color: colors.text }]}>{selectedClient.full_name}</Text>
                   {selectedClient.email ? <Text style={[styles.selectedEmail, { color: colors.textSecondary }]}>{selectedClient.email}</Text> : null}
                 </View>
-                <TouchableOpacity onPress={() => setSelectedClient(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                  <Text style={{ fontSize: 18, color: colors.textTertiary }}>✕</Text>
-                </TouchableOpacity>
+                {!isEdit && (
+                  <TouchableOpacity onPress={() => setSelectedClient(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                    <Text style={{ fontSize: 18, color: colors.textTertiary }}>✕</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-            ) : (
+            ) : isEdit ? null : (
               <TouchableOpacity style={[styles.pickerTrigger, { borderColor: colors.border }]} onPress={() => setShowClientPicker(true)} activeOpacity={0.7}>
                 <Text style={{ fontSize: 15, fontFamily: fonts.body, color: colors.textTertiary }}>{t('clients.search')}</Text>
                 <Text style={{ fontSize: 20, color: colors.textTertiary }}>›</Text>
@@ -552,31 +554,17 @@ export default function NewAppointmentScreen() {
           </Field>
         </SectionCard>
 
-        {/* ── Section 2 : Contexte commercial ──────────────────────── */}
-        <SectionCard icon="📈" title={t('appointments.section_commercial')} colors={colors} styles={styles}>
-          <Field label={t('appointments.field_pipeline')}>
-            <SelectPill options={pipelineOptions} value={pipelineStage} onChange={setPipelineStage} colors={colors} />
-          </Field>
-          <Field label={`${t('appointments.field_temperature')} (${t('common.optional')})`}>
-            <SelectPill options={tempOptions} value={temperature} onChange={setTemperature} colors={colors} />
-          </Field>
-          <Field label={`${t('appointments.field_intent')} (${t('common.optional')})`}>
-            <SelectPill options={intentOptions} value={intent} onChange={setIntent} colors={colors} />
-          </Field>
-          <Field label={`${t('appointments.field_value')} (${t('common.optional')})`}>
-            <TextInput style={[styles.textField, { color: colors.text, borderColor: colors.border }]} value={estValue} onChangeText={setEstValue} placeholder="0.00" placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
-          </Field>
-        </SectionCard>
-
-        {/* ── Section 3 : Notes ────────────────────────────────────── */}
-        <SectionCard icon="📝" title={t('appointments.section_notes')} colors={colors} styles={styles}>
-          <Field label={`${t('appointments.field_client_notes')} (${t('common.optional')})`}>
-            <TextArea label="" value={clientNotes} onChangeText={setClientNotes} minHeight={72} />
-          </Field>
-          <Field label={`${t('appointments.field_internal_notes')} (${t('common.optional')})`}>
-            <TextArea label="" value={internalNotes} onChangeText={setInternalNotes} minHeight={72} />
-          </Field>
-        </SectionCard>
+        {!isEdit && (
+          /* ── Section 2 : Notes ────────────────────────────────────── */
+          <SectionCard icon="📝" title={t('appointments.section_notes')} colors={colors} styles={styles}>
+            <Field label={`${t('appointments.field_client_notes')} (${t('common.optional')})`}>
+              <TextArea label="" value={clientNotes} onChangeText={setClientNotes} minHeight={72} />
+            </Field>
+            <Field label={`${t('appointments.field_internal_notes')} (${t('common.optional')})`}>
+              <TextArea label="" value={internalNotes} onChangeText={setInternalNotes} minHeight={72} />
+            </Field>
+          </SectionCard>
+        )}
 
         {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
         <Button label={t('common.save')} onPress={handleSave} loading={saving} />

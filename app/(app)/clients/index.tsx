@@ -8,9 +8,11 @@ import { useLastRdvMap } from '@/features/appointments/useAppointments'
 import { archiveClient, computeProspectScore, deleteClient } from '@/features/clients/clientService'
 import { useContactQuota } from '@/features/clients/useContactQuota'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
+import { LinearGradient } from 'expo-linear-gradient'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
+import { LineIcon } from '@/shared/components/ui/LineIcon'
 import { useTheme } from '@/shared/theme/ThemeProvider'
-import { hexToRgba, type ThemeColors } from '@/shared/theme/colors'
+import { colors as brandColors, hexToRgba, type ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { ClientListItem, ClientStatus, PipelineStage } from '@/shared/lib/types'
 import { formatDate } from '@/shared/lib/dateFormat'
@@ -73,44 +75,46 @@ function ClientCard({ client, lastRdv, onMenuPress }: { client: ClientListItem; 
 
   return (
     <View style={styles.card}>
-      {/* Top: avatar + name/badge + score + menu */}
-      <View style={styles.cardTop}>
-        <ClientAvatar name={client.full_name} status={client.status} />
-        <View style={styles.cardTitle}>
-          <Text style={styles.cardName}>{client.full_name}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <StatusPill status={client.status} />
-            <View style={styles.pipelineMiniPill}>
-              <Text style={styles.pipelineMiniText}>{t(`pipeline_stages.${client.pipeline_stage}`)}</Text>
+      <View style={styles.cardBody}>
+        {/* Top: avatar + name/badge + score + menu */}
+        <View style={styles.cardTop}>
+          <ClientAvatar name={client.full_name} status={client.status} />
+          <View style={styles.cardTitle}>
+            <Text style={styles.cardName}>{client.full_name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <StatusPill status={client.status} />
+              <View style={styles.pipelineMiniPill}>
+                <Text style={styles.pipelineMiniText}>{t(`pipeline_stages.${client.pipeline_stage}`)}</Text>
+              </View>
+              <ScoreBadge score={score} />
             </View>
-            <ScoreBadge score={score} />
           </View>
+          <TouchableOpacity
+            style={styles.menuBtn}
+            onPress={() => onMenuPress(client)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.menuDots}>⋮</Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.menuBtn}
-          onPress={() => onMenuPress(client)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.menuDots}>⋮</Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Info rows */}
-      {client.email ? (
+        {/* Info rows */}
+        {client.email ? (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoIcon}>✉</Text>
+            <Text style={styles.infoText} numberOfLines={1}>{client.email}</Text>
+          </View>
+        ) : null}
+        {client.phone ? (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoIcon}>📞</Text>
+            <Text style={styles.infoText}>{client.phone}</Text>
+          </View>
+        ) : null}
         <View style={styles.infoRow}>
-          <Text style={styles.infoIcon}>✉</Text>
-          <Text style={styles.infoText} numberOfLines={1}>{client.email}</Text>
+          <Text style={styles.infoIcon}>🕐</Text>
+          <Text style={[styles.infoText, !lastRdv && styles.infoMuted]}>{rdvText}</Text>
         </View>
-      ) : null}
-      {client.phone ? (
-        <View style={styles.infoRow}>
-          <Text style={styles.infoIcon}>📞</Text>
-          <Text style={styles.infoText}>{client.phone}</Text>
-        </View>
-      ) : null}
-      <View style={styles.infoRow}>
-        <Text style={styles.infoIcon}>🕐</Text>
-        <Text style={[styles.infoText, !lastRdv && styles.infoMuted]}>{rdvText}</Text>
       </View>
 
       {/* Actions */}
@@ -120,6 +124,7 @@ function ClientCard({ client, lastRdv, onMenuPress }: { client: ClientListItem; 
           onPress={() => router.push(`/(app)/clients/${client.id}`)}
           activeOpacity={0.7}
         >
+          <LineIcon name="eye" size={15} color={colors.text} strokeWidth={2} />
           <Text style={styles.btnOutlineText}>{t('clients.view')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -127,6 +132,7 @@ function ClientCard({ client, lastRdv, onMenuPress }: { client: ClientListItem; 
           onPress={() => router.push(`/(app)/clients/${client.id}/appointments`)}
           activeOpacity={0.8}
         >
+          <LineIcon name="calendarPlus" size={15} color={colors.textInverse} strokeWidth={2} />
           <Text style={styles.btnFillText}>{t('clients.add_appt')}</Text>
         </TouchableOpacity>
       </View>
@@ -225,6 +231,22 @@ export default function ClientsScreen() {
           <TouchableOpacity style={styles.archiveLink} onPress={() => router.push('/(app)/clients/archived' as any)}>
             <Text style={styles.archiveLinkText}>{t('clients.archived_title')}</Text>
           </TouchableOpacity>
+          {isWide && (
+            <TouchableOpacity
+              onPress={() => router.push(quota?.reached ? '/(app)/settings-display' : '/(app)/clients/new')}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={brandColors.gradients.brand}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.newClientBtn}
+              >
+                <LineIcon name="plus" size={16} color="#fff" strokeWidth={2.5} />
+                <Text style={styles.newClientBtnText}>{t('clients.add')}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
         </View>
 
         {quota?.limit != null && (
@@ -270,14 +292,14 @@ export default function ClientsScreen() {
             const active = statusFilter === s
             const cs = s === 'all' ? null : (statusColors[s] ?? null)
             const bg     = active
-              ? (cs ? cs.bg    : '#2563eb')
-              : (cs ? cs.bg + '55' : '#dbeafe')
+              ? (cs ? cs.bg    : colors.primary)
+              : colors.card
             const txtClr = active
               ? (cs ? cs.text  : '#ffffff')
-              : (cs ? cs.text  : '#1e40af')
+              : (cs ? cs.text  : colors.primary)
             const border = active
-              ? (cs ? cs.text  : '#2563eb')
-              : (cs ? cs.bg    : '#bfdbfe')
+              ? (cs ? cs.text  : colors.primary)
+              : (cs ? cs.bg    : colors.primaryLight)
             return (
               <TouchableOpacity
                 style={[styles.chip, { backgroundColor: bg, borderColor: border }]}
@@ -313,6 +335,8 @@ export default function ClientsScreen() {
                   message={t('clients.empty')}
                   icon="👥"
                   actionLabel={t('clients.add')}
+                  actionVariant="gradient"
+                  actionIcon="personPlus"
                   onAction={() => router.push('/(app)/clients/new')}
                 />
               }
@@ -325,14 +349,16 @@ export default function ClientsScreen() {
 
         </View>
 
-        {/* FAB */}
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => router.push(quota?.reached ? '/(app)/settings-display' : '/(app)/clients/new')}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.fabIcon}>+</Text>
-        </TouchableOpacity>
+        {/* FAB (mobile uniquement — sur web la CTA est dans l'en-tête) */}
+        {!isWide && (
+          <TouchableOpacity
+            style={styles.fab}
+            onPress={() => router.push(quota?.reached ? '/(app)/settings-display' : '/(app)/clients/new')}
+            activeOpacity={0.85}
+          >
+            <LineIcon name="plus" size={26} color={colors.textInverse} strokeWidth={2.5} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* ── Context menu ──────────────────────────────────────────── */}
@@ -411,7 +437,7 @@ export default function ClientsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container:  { flex: 1, backgroundColor: colors.bg },
+  container:  { flex: 1, backgroundColor: colors.bgDim },
   inner:      { flex: 1, width: '100%' },
   innerWide:  { maxWidth: 1100, alignSelf: 'center' },
 
@@ -422,6 +448,13 @@ function makeStyles(colors: ThemeColors) {
   countText:  { fontSize: 13, fontFamily: fonts.bold, color: colors.primaryAction },
   archiveLink: { marginLeft: 'auto', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 7 },
   archiveLinkText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.textSecondary },
+  newClientBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9,
+    boxShadow: [{ offsetX: 0, offsetY: 3, blurRadius: 12, color: hexToRgba('#3B82F6', 0.35) }],
+    elevation: 3,
+  },
+  newClientBtnText: { fontSize: 13, fontFamily: fonts.semibold, color: '#fff' },
   quotaBanner: { marginHorizontal: 16, marginBottom: 10, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   quotaBannerReached: { borderColor: colors.warning, backgroundColor: colors.warningLight },
   quotaBannerText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
@@ -442,22 +475,27 @@ function makeStyles(colors: ThemeColors) {
   chipText: { fontSize: 13 },
 
   // ── FlatList ───────────────────────────────────────────────────────────────
-  list:          { padding: 16, gap: 12, paddingBottom: 100 },
+  list:          { padding: 16, gap: 14, paddingBottom: 100 },
   listWide:      { paddingHorizontal: 0 },
   listEmpty:     { flex: 1 },
   loader:        { marginTop: 48 },
-  columnWrapper: { gap: 12, paddingHorizontal: 20 },
+  columnWrapper: { gap: 14, paddingHorizontal: 20 },
   colCard:       { flex: 1 },
 
   // ── Card ───────────────────────────────────────────────────────────────────
   card: {
+    flex: 1,
     backgroundColor: colors.card,
     borderRadius: 16,
     padding: 16,
-    gap: 10,
-    boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 20, color: 'rgba(28, 26, 23, 0.04)' }],
+    gap: 14,
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 16, color: 'rgba(28, 26, 23, 0.06)' }],
     elevation: 2,
   },
+  cardBody:  { gap: 10 },
   cardTop:   { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   cardTitle: { flex: 1, gap: 5 },
   cardName:  { fontSize: 16, fontFamily: fonts.semibold, color: colors.text, lineHeight: 20 },
@@ -484,9 +522,18 @@ function makeStyles(colors: ThemeColors) {
 
   // ── Action buttons ─────────────────────────────────────────────────────────
   cardActions:    { flexDirection: 'row', gap: 10, marginTop: 2 },
-  btnOutline:     { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center' },
+  btnOutline:     {
+    flex: 1, flexDirection: 'row', gap: 6, paddingVertical: 10, borderRadius: 10,
+    borderWidth: 1.5, borderColor: colors.borderStrong, backgroundColor: colors.bgDim,
+    alignItems: 'center', justifyContent: 'center',
+  },
   btnOutlineText: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
-  btnFill:        { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: colors.primaryAction, alignItems: 'center' },
+  btnFill:        {
+    flex: 1, flexDirection: 'row', gap: 6, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: colors.primaryAction, alignItems: 'center', justifyContent: 'center',
+    boxShadow: [{ offsetX: 0, offsetY: 3, blurRadius: 8, color: 'rgba(37, 99, 235, 0.3)' }],
+    elevation: 2,
+  },
   btnFillText:    { fontSize: 14, fontFamily: fonts.semibold, color: colors.textInverse },
 
   // ── Context menu modal ────────────────────────────────────────────────────
@@ -562,6 +609,5 @@ function makeStyles(colors: ThemeColors) {
     boxShadow: [{ offsetX: 0, offsetY: 6, blurRadius: 14, color: hexToRgba(colors.primaryAction, 0.4) }],
     elevation: 8,
   },
-  fabIcon: { fontSize: 28, color: colors.textInverse, lineHeight: 32 },
   })
 }

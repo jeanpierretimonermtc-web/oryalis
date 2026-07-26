@@ -320,6 +320,18 @@ export async function loadDemoData(userId: string): Promise<void> {
       auto_generated: true,
       priority_score: 45,
     },
+    // Relance automatique J+7 attendue après le "Suivi LRP" complété il y a 28j (non traitée) — EN RETARD
+    {
+      user_id: userId, client_id: isabelleId,
+      title: 'Feedback RDV Isabelle — des questions ?',
+      due_date: dateStr(-21),
+      done: false,
+      prospect_temperature: 'warm',
+      pipeline_stage: 'customer',
+      product_context: null,
+      auto_generated: true,
+      priority_score: 55,
+    },
     {
       user_id: userId, client_id: lucasId,
       title: 'Réactiver Lucas — distributeur endormi depuis 2 mois',

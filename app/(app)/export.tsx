@@ -105,7 +105,7 @@ export default function ExportScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1, backgroundColor: colors.bgDim },
     content:   { padding: 16, gap: 14, maxWidth: 720, alignSelf: 'center', width: '100%' },
 
     introCard: { backgroundColor: colors.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: colors.border },

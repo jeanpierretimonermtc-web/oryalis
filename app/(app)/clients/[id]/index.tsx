@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Linking, Platform } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Linking, Platform, useWindowDimensions } from 'react-native'
 import { router, Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
+import * as Clipboard from 'expo-clipboard'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useClient } from '@/features/clients/useClient'
 import { useClientAppointments } from '@/features/appointments/useAppointments'
@@ -16,6 +17,7 @@ import { callContact, completeNextAction, openWhatsApp, postponeNextAction } fro
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { MessageModal } from '@/shared/components/ui/MessageModal'
+import { LineIcon } from '@/shared/components/ui/LineIcon'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { ClientStatus, ContactRole } from '@/shared/lib/types'
@@ -96,8 +98,11 @@ export default function ClientDetailScreen() {
   const [activeTab, setActiveTab]       = useState<Tab>('apercu')
   const [messageOpen, setMessageOpen]   = useState(false)
   const [actionBusy, setActionBusy]     = useState(false)
+  const [phoneCopied, setPhoneCopied]   = useState(false)
   const { getStatusLabel, isModuleActive } = useAppConfig()
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
+  const { width: screenW } = useWindowDimensions()
+  const isDesktopWeb = Platform.OS === 'web' && screenW >= 768
 
   const TABS = useMemo(() => {
     const isNetworkRole = client?.contact_role === 'distributor' || client?.contact_role === 'leader'
@@ -106,12 +111,6 @@ export default function ClientDetailScreen() {
     if (isNetworkRole) tabs.push({ key: 'team' as Tab, labelKey: 'clients.tab_team' })
     return tabs
   }, [client?.contact_role, isModuleActive])
-
-  const userInitials = (() => {
-    const name = session?.user?.user_metadata?.full_name
-    if (name) return nameInitials(name)
-    return (session?.user?.email ?? 'ME').slice(0, 2).toUpperCase()
-  })()
 
   if (loading || !client) {
     return (
@@ -194,6 +193,16 @@ export default function ClientDetailScreen() {
     }
   }
 
+  async function copyPhone(phone: string) {
+    await Clipboard.setStringAsync(phone)
+    setPhoneCopied(true)
+    setTimeout(() => setPhoneCopied(false), 2000)
+  }
+
+  function openMeet() {
+    Linking.openURL('https://meet.google.com/new')
+  }
+
   const sc = statusColors[client.status as ClientStatus] ?? { bg: colors.surfaceContainerHigh, text: colors.textSecondary }
 
   // Prospect score — uses full data available in this screen
@@ -230,15 +239,6 @@ export default function ClientDetailScreen() {
             <Text style={styles.backArrow}>←</Text>
             <Text style={styles.navTitle}>{t('clients.profile_title')}</Text>
           </TouchableOpacity>
-          <View style={styles.navRight}>
-            <TouchableOpacity
-              style={styles.userChip}
-              onPress={() => router.push(`/(app)/clients/${id}/edit`)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.userChipText}>{userInitials}</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -266,8 +266,8 @@ export default function ClientDetailScreen() {
                 )
               })() : null}
               {client.client_type ? (
-                <View style={[styles.heroPill, { backgroundColor: colors.surfaceContainerHighest }]}>
-                  <Text style={[styles.heroPillText, { color: colors.textSecondary }]}>
+                <View style={[styles.heroPill, { backgroundColor: colors.surfaceContainerHighest, maxWidth: 200 }]}>
+                  <Text style={[styles.heroPillText, { color: colors.textSecondary }]} numberOfLines={1}>
                     {client.client_type.toUpperCase()}
                   </Text>
                 </View>
@@ -295,6 +295,11 @@ export default function ClientDetailScreen() {
               <View style={styles.kpiCol}>
                 <Text style={styles.kpiLabel}>{t('clients.kpi_next')}</Text>
                 <Text style={styles.kpiValue}>{fmtShort(nextDate, locale)}</Text>
+                {client.next_action_source && (
+                  <Text style={styles.kpiSourceLabel}>
+                    {t(`clients.next_action_source_${client.next_action_source}`)}
+                  </Text>
+                )}
               </View>
             </View>
           </View>
@@ -313,24 +318,42 @@ export default function ClientDetailScreen() {
             ) : null}
             {client.phone ? (
               <>
-                <TouchableOpacity style={styles.qaBtn} onPress={() => callContact(client.phone!)} activeOpacity={0.8}>
-                  <Text style={styles.qaIcon}>☎</Text><Text style={styles.qaLabel}>Appeler</Text>
-                </TouchableOpacity>
+                {isDesktopWeb ? (
+                  <>
+                    <TouchableOpacity style={styles.qaBtn} onPress={() => copyPhone(client.phone!)} activeOpacity={0.8}>
+                      <LineIcon name="copy" size={18} color={colors.text} strokeWidth={2} />
+                      <Text style={styles.qaLabel}>{phoneCopied ? t('clients.phone_copied') : t('clients.copy_phone')}</Text>
+                      <Text style={styles.qaSubLabel}>Numéro de tél.</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.qaBtn} onPress={openMeet} activeOpacity={0.8}>
+                      <LineIcon name="video" size={18} color={colors.text} strokeWidth={2} />
+                      <Text style={styles.qaLabel}>Meet</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity style={styles.qaBtn} onPress={() => callContact(client.phone!)} activeOpacity={0.8}>
+                    <LineIcon name="phone" size={18} color={colors.text} strokeWidth={2} />
+                    <Text style={styles.qaLabel}>Appeler</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity style={styles.qaBtn} onPress={() => openWhatsApp(client.phone!)} activeOpacity={0.8}>
-                  <Text style={styles.qaIcon}>WA</Text><Text style={styles.qaLabel}>WhatsApp</Text>
+                  <LineIcon name="whatsapp" size={20} color={colors.text} strokeWidth={2} />
+                  <Text style={styles.qaLabel}>WhatsApp</Text>
                 </TouchableOpacity>
               </>
             ) : null}
             <TouchableOpacity style={styles.qaBtn} onPress={() => setMessageOpen(true)} activeOpacity={0.8}>
-              <Text style={styles.qaIcon}>💬</Text>
+              <LineIcon name="message" size={18} color={colors.text} strokeWidth={2} />
               <Text style={styles.qaLabel}>Message</Text>
+              <Text style={styles.qaSubLabel}>Modèles à envoyer</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.qaBtn} onPress={() => router.push(`/(app)/clients/${id}/appointments` as any)} activeOpacity={0.8}>
-              <Text style={styles.qaIcon}>📅</Text>
+              <LineIcon name="calendarPlus" size={18} color={colors.text} strokeWidth={2} />
               <Text style={styles.qaLabel}>RDV</Text>
+              <Text style={styles.qaSubLabel}>Créer, voir, historique</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.qaBtn} onPress={() => router.push(`/(app)/clients/${id}/edit` as any)} activeOpacity={0.8}>
-              <Text style={styles.qaIcon}>✏️</Text>
+              <LineIcon name="edit" size={18} color={colors.text} strokeWidth={2} />
               <Text style={styles.qaLabel}>Modifier</Text>
             </TouchableOpacity>
           </View>
@@ -863,15 +886,6 @@ export default function ClientDetailScreen() {
 
           </View>
         </ScrollView>
-
-        {/* ── FAB ──────────────────────────────────────────────────── */}
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => router.push(`/(app)/clients/${id}/edit`)}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.fabIcon}>✎</Text>
-        </TouchableOpacity>
       </View>
 
       <MessageModal
@@ -892,7 +906,7 @@ const CARD_SHADOW = {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  root:   { flex: 1, backgroundColor: colors.bg },
+  root:   { flex: 1, backgroundColor: colors.bgDim },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 100, maxWidth: 900, alignSelf: 'center', width: '100%' },
@@ -910,18 +924,15 @@ function makeStyles(colors: ThemeColors) {
   backRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   backArrow:    { fontSize: 22, color: colors.text, lineHeight: 26 },
   navTitle:     { fontSize: 16, fontFamily: fonts.semibold, color: colors.text },
-  navRight:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
   navIconBtn:   { padding: 4 },
   navIconText:  { fontSize: 18 },
-  userChip:     { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primaryAction, alignItems: 'center', justifyContent: 'center' },
-  userChipText: { fontSize: 11, fontFamily: fonts.bold, color: colors.textInverse },
 
   // ── Hero ───────────────────────────────────────────────────────────────────
   hero:          { alignItems: 'center', paddingHorizontal: 24, paddingBottom: 4 },
   bigAvatar:     { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   bigAvatarText: { fontSize: 28, fontFamily: fonts.bold },
   heroName:      { fontSize: 26, fontFamily: fonts.display, color: colors.text, textAlign: 'center', marginBottom: 10 },
-  heroBadges:    { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  heroBadges:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   heroPill:      { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 9999 },
   heroPillText:  { fontSize: 11, fontFamily: fonts.bold, letterSpacing: 0.8 },
 
@@ -930,12 +941,14 @@ function makeStyles(colors: ThemeColors) {
   kpiDivider:{ width: 1, height: 32, backgroundColor: colors.border },
   kpiLabel:  { fontSize: 11, fontFamily: fonts.medium, color: colors.textTertiary },
   kpiValue:  { fontSize: 17, fontFamily: fonts.bold, color: colors.text },
+  kpiSourceLabel: { fontSize: 10, fontFamily: fonts.medium, color: colors.textTertiary, marginTop: 1 },
 
   // ── Quick actions ──────────────────────────────────────────────────────────
-  quickActions: { flexDirection: 'row', justifyContent: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 },
-  qaBtn:  { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 12, borderWidth: 1, borderColor: colors.border },
+  quickActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 },
+  qaBtn:  { flexGrow: 1, flexBasis: 112, minWidth: 100, maxWidth: 160, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 12, borderWidth: 1, borderColor: colors.border },
   qaIcon: { fontSize: 20 },
   qaLabel:{ fontSize: 12, fontFamily: fonts.semibold, color: colors.textSecondary },
+  qaSubLabel: { fontSize: 9.5, fontFamily: fonts.body, color: colors.textTertiary, textAlign: 'center' },
 
   // ── Tab bar ────────────────────────────────────────────────────────────────
   tabScroll: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.border, marginTop: 20 },
@@ -1010,21 +1023,5 @@ function makeStyles(colors: ThemeColors) {
 
   addRowBtn:     { marginTop: 4, paddingVertical: 13, borderRadius: 10, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center' },
   addRowBtnText: { fontSize: 14, fontFamily: fonts.semibold, color: colors.primaryAction },
-
-  // FAB
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 20,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 12, color: 'rgba(28, 26, 23, 0.25)' }],
-    elevation: 6,
-  },
-  fabIcon: { fontSize: 22, color: colors.textInverse, lineHeight: 26 },
   })
 }

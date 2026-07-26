@@ -135,7 +135,7 @@ export default function OrdersScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bgDim },
   content:   { padding: 16, gap: 12, maxWidth: 800, alignSelf: 'center', width: '100%' },
 
   monthRow: { gap: 8, paddingBottom: 4 },

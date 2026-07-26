@@ -415,7 +415,7 @@ export default function ProtocolsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container:  { flex: 1, backgroundColor: colors.bg },
+  container:  { flex: 1, backgroundColor: colors.bgDim },
 
   searchWrap:  { flexDirection: 'row', alignItems: 'center', margin: 16, marginBottom: 8, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12 },
   searchIcon:  { fontSize: 14, marginRight: 8, opacity: 0.6 },

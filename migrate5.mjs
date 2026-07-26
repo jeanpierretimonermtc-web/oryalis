@@ -3,12 +3,15 @@
 import pg from 'pg'
 const { Client } = pg
 
-const password = encodeURIComponent('Smallville!0945!')
+if (!process.env.SUPABASE_DB_PASSWORD) throw new Error('Missing SUPABASE_DB_PASSWORD')
+
+const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD)
 const client = new Client({
-  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`
+  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`,
 })
 
 await client.connect()
+try {
 console.log('Connected.')
 
 // Get all demo client IDs
@@ -41,5 +44,7 @@ if (demoClients.length > 0) {
   console.log('No demo data to delete.')
 }
 
-await client.end()
-console.log('Done.')
+  console.log('Done.')
+} finally {
+  await client.end()
+}

@@ -6,12 +6,15 @@ import pg from 'pg'
 const { Client } = pg
 import { randomUUID } from 'crypto'
 
-const password = encodeURIComponent('Smallville!0945!')
+if (!process.env.SUPABASE_DB_PASSWORD) throw new Error('Missing SUPABASE_DB_PASSWORD')
+
+const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD)
 const client = new Client({
-  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`
+  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`,
 })
 
 await client.connect()
+try {
 console.log('Connecté à Supabase')
 
 const CATALOG_ID = 'e36a2738-e1b9-4c37-aa95-4f6aef4d13e8'
@@ -210,4 +213,6 @@ for (const [sku, name, category, unit, retail, wholesale, pv, latin, desc] of ne
 }
 
 console.log(`\nTerminé : ${inserted} produits insérés, ${skipped} déjà présents`)
-await client.end()
+} finally {
+  await client.end()
+}

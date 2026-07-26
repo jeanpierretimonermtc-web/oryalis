@@ -174,7 +174,7 @@ export default function UplineScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1, backgroundColor: colors.bgDim },
     content:   { padding: 16, gap: 12, paddingBottom: 60 },
 
     infoCard: { backgroundColor: colors.primaryLight, borderRadius: 12, padding: 14 },

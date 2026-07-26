@@ -577,7 +577,7 @@ export default function CatalogScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container:  { flex: 1, backgroundColor: colors.bg },
+  container:  { flex: 1, backgroundColor: colors.bgDim },
   loader:     { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listLoader: { marginTop: 48 },
   list:       { paddingBottom: 80 },

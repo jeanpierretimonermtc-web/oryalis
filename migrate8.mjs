@@ -3,12 +3,15 @@
 import pg from 'pg'
 const { Client } = pg
 
-const password = encodeURIComponent('Smallville!0945!')
+if (!process.env.SUPABASE_DB_PASSWORD) throw new Error('Missing SUPABASE_DB_PASSWORD')
+
+const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD)
 const client = new Client({
-  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`
+  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`,
 })
 
 await client.connect()
+try {
 console.log('Connected to Supabase')
 
 await client.query(`
@@ -17,5 +20,7 @@ await client.query(`
 `)
 console.log('✓ Colonne active_catalog_slugs sur profiles (null = tous les catalogues)')
 
-await client.end()
-console.log('\n✅ Migration 8 terminée')
+  console.log('\n✅ Migration 8 terminée')
+} finally {
+  await client.end()
+}

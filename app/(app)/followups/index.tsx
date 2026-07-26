@@ -269,7 +269,7 @@ export default function FollowupsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bgDim },
   inner:     { flex: 1, width: '100%' },
   innerWide: { maxWidth: 900, alignSelf: 'center' },
 

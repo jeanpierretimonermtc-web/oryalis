@@ -90,7 +90,7 @@ export default function ArchivedClientsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1, backgroundColor: colors.bgDim },
     quotaCard: { margin: 16, marginBottom: 4, borderRadius: 12, padding: 14, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.border, gap: 3 },
     quotaText: { fontSize: 13, fontFamily: fonts.bold, color: colors.primary },
     quotaHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary },

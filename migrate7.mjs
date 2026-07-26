@@ -1,12 +1,16 @@
 // migrate7.mjs — Ajoute profiles.specialty
 import pg from 'pg'
 const { Client } = pg
-const password = encodeURIComponent('Smallville!0945!')
+
+if (!process.env.SUPABASE_DB_PASSWORD) throw new Error('Missing SUPABASE_DB_PASSWORD')
+
+const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD)
 const client = new Client({
-  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`
+  connectionString: `postgresql://postgres.nhpvjfyjyculnijipzoa:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`,
 })
 
 await client.connect()
+try {
 console.log('Connected.')
 
 await client.query(`
@@ -18,5 +22,7 @@ console.log('✅ profiles.specialty added')
 await client.query(`SELECT pg_notify('pgrst', 'reload schema')`)
 console.log('✅ PostgREST schema cache reloaded')
 
-await client.end()
-console.log('Done.')
+  console.log('Done.')
+} finally {
+  await client.end()
+}

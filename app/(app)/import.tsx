@@ -392,7 +392,7 @@ export default function ImportScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bgDim },
   content:   { padding: 16, gap: 14, maxWidth: 800, alignSelf: 'center', width: '100%' },
   quotaCard: { backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.primary, borderRadius: 12, padding: 14, gap: 3 },
   quotaTitle: { fontSize: 13, fontFamily: fonts.bold, color: colors.primary },

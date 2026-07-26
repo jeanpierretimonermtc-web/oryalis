@@ -1,3 +1,4 @@
+import { Platform } from 'react-native'
 import * as Linking from 'expo-linking'
 import { supabase } from '@/shared/lib/supabase'
 import type { Client } from '@/shared/lib/types'
@@ -51,5 +52,20 @@ export async function callContact(phone: string) {
 
 export async function openWhatsApp(phone: string) {
   const digits = phone.replace(/\D/g, '')
-  await Linking.openURL(`https://wa.me/${digits}`)
+  // app_absent=0 laisse WhatsApp tenter d'ouvrir l'appli desktop/mobile installée
+  // avant de proposer WhatsApp Web (connexion par QR code) en repli.
+  const webUrl = `https://api.whatsapp.com/send?phone=${digits}&type=phone_number&app_absent=0`
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined') return
+    // Nouvel onglet sur desktop (ne quitte pas Oryalis) ; même onglet sur mobile web,
+    // seule méthode fiable pour déclencher le deep link vers l'appli WhatsApp mobile.
+    if (window.innerWidth >= 768) window.open(webUrl, '_blank', 'noopener,noreferrer')
+    else window.location.href = webUrl
+    return
+  }
+  try {
+    await Linking.openURL(`whatsapp://send?phone=${digits}`)
+  } catch {
+    await Linking.openURL(webUrl)
+  }
 }

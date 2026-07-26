@@ -19,14 +19,26 @@ const STATUSES: ClientStatus[] = ['prospect', 'new_client', 'active', 'loyal', '
 const CONTACT_ROLES: ContactRole[] = ['prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive']
 const NETWORK_POTENTIALS: NetworkPotential[] = ['low', 'medium', 'high']
 
+const SECTION_ACCENTS: Record<string, (colors: ThemeColors) => { fg: string; bg: string }> = {
+  'clients.sections.personal': c => ({ fg: c.primary,   bg: c.primaryLight }),
+  'clients.sections.status':   c => ({ fg: c.tertiary,  bg: c.tertiaryLight }),
+  'clients.sections.profile':  c => ({ fg: c.secondary, bg: c.secondaryLight }),
+  'clients.sections.medical':  c => ({ fg: c.danger,    bg: c.dangerLight }),
+  'clients.sections.journey':  c => ({ fg: c.warning,   bg: c.warningLight }),
+  'clients.sections.doterra':  c => ({ fg: c.success,   bg: c.successLight }),
+}
+
 function SectionCard({ icon, titleKey, children }: { icon: string; titleKey: string; children: React.ReactNode }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const accent = (SECTION_ACCENTS[titleKey] ?? (() => ({ fg: colors.primary, bg: colors.primaryLight })))(colors)
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { borderLeftWidth: 3, borderLeftColor: accent.fg }]}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardIcon}>{icon}</Text>
+        <View style={[styles.cardIconBadge, { backgroundColor: accent.bg }]}>
+          <Text style={styles.cardIcon}>{icon}</Text>
+        </View>
         <Text style={styles.cardTitle}>{t(titleKey)}</Text>
       </View>
       <View style={styles.cardBody}>{children}</View>
@@ -371,9 +383,9 @@ export default function EditClientScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  loader:      { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  container:   { flex: 1, backgroundColor: colors.bg },
-  content:     { padding: 16, gap: 14, paddingBottom: 40 },
+  loader:      { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgDim },
+  container:   { flex: 1, backgroundColor: colors.bgDim },
+  content:     { padding: 16, gap: 18, paddingBottom: 40 },
   contentWide: { maxWidth: 720, alignSelf: 'center', width: '100%', paddingHorizontal: 24 },
   fieldRow:    { flexDirection: 'row', gap: 12 },
   fieldHalf:   { flex: 1 },
@@ -385,8 +397,8 @@ function makeStyles(colors: ThemeColors) {
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 6, color: 'rgba(0, 0, 0, 0.05)' }],
-    elevation: 2,
+    boxShadow: [{ offsetX: 0, offsetY: 3, blurRadius: 10, color: 'rgba(0, 0, 0, 0.08)' }],
+    elevation: 3,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -398,7 +410,8 @@ function makeStyles(colors: ThemeColors) {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  cardIcon:  { fontSize: 14 },
+  cardIconBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  cardIcon:  { fontSize: 13 },
   cardTitle: { fontSize: 11, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.8 },
   cardBody:  { padding: 16, gap: 12 },
 

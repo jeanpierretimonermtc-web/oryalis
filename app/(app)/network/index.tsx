@@ -343,7 +343,7 @@ export default function NetworkScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bgDim },
 
   header:    { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, gap: 3 },
   title:     { fontSize: 28, fontFamily: fonts.display, color: colors.text },

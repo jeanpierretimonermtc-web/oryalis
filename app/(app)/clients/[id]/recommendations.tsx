@@ -178,7 +178,7 @@ export default function ClientRecommendationsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container:          { flex: 1, backgroundColor: colors.bg },
+  container:          { flex: 1, backgroundColor: colors.bgDim },
   list:               { padding: 12, gap: 8 },
   loader:             { marginTop: 40 },
   addBtn:             { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginRight: 8 },

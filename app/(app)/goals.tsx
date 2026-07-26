@@ -155,7 +155,7 @@ export default function GoalsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bgDim },
   content:   { padding: 16, gap: 12, maxWidth: 720, alignSelf: 'center', width: '100%' },
 
   subtitle:  { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary },

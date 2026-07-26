@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Platform,
+  StyleSheet, ActivityIndicator, Platform, Modal, useWindowDimensions,
 } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '@/shared/lib/supabase'
 import { useAppointmentDetail } from '@/features/appointments/useAppointments'
-import type { AppointmentStatus, AppointmentTask } from '@/features/appointments/appointmentTypes'
+import type { AppointmentStatus, AppointmentTask, ProspectTemperature, CommercialIntent } from '@/features/appointments/appointmentTypes'
+import { PIPELINE_STAGES, type PipelineStage } from '@/shared/lib/types'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
@@ -37,6 +38,8 @@ const TEMP_EMOJI: Record<string, string> = {
 }
 
 const STATUS_PILLS: AppointmentStatus[] = ['scheduled', 'completed', 'no_show', 'rescheduled']
+const TEMPERATURE_PILLS: ProspectTemperature[] = ['cold', 'warm', 'hot', 'very_hot']
+const INTENT_PILLS: CommercialIntent[] = ['buy_product', 'become_customer', 'become_distributor', 'build_team', 'training', 'support', 'other']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -133,13 +136,18 @@ function TaskRow({ task, colors, styles, onDone, onRemove, locale }: {
 
 export default function AppointmentDetailScreen() {
   const { t, i18n } = useTranslation()
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const { id, returnTo } = useLocalSearchParams<{ id: string; returnTo?: string }>()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
 
+  function goBack() {
+    if (returnTo) router.replace(decodeURIComponent(returnTo) as any)
+    else router.back()
+  }
+
   const {
     appointment, loading,
-    saveNotes, addTask, doneTask, removeTask, update, cancel,
+    saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, cancel,
   } = useAppointmentDetail(id ?? null)
 
   const [clientNotes,       setClientNotes]       = useState('')
@@ -150,15 +158,22 @@ export default function AppointmentDetailScreen() {
   const [notesDirty,        setNotesDirty]         = useState(false)
   const [saving,            setSaving]             = useState(false)
   const [newTaskTitle,      setNewTaskTitle]       = useState('')
+  const [addingTask,        setAddingTask]         = useState(false)
+  const [taskError,         setTaskError]          = useState<string | null>(null)
+  const [showDebrief,       setShowDebrief]        = useState(false)
   const [showCancelConfirm, setShowCancelConfirm]  = useState(false)
   const [cancelling,        setCancelling]         = useState(false)
   const [inlineError,       setInlineError]        = useState<string | null>(null)
   const [practitionerName,  setPractitionerName]   = useState('')
   const [clientInfo,        setClientInfo]         = useState<ClientInfo | null>(null)
   const [clientHistory,     setClientHistory]      = useState<HistoryItem[]>([])
+  const [estValue,          setEstValue]           = useState('')
+  const [bizValueDirty,     setBizValueDirty]      = useState(false)
+  const [savingBizValue,    setSavingBizValue]     = useState(false)
 
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
-  const isWeb  = Platform.OS === 'web'
+  const { width: screenW } = useWindowDimensions()
+  const isWeb  = Platform.OS === 'web' && screenW >= 768
 
   // ── Effects ──────────────────────────────────────────────────────────────────
 
@@ -172,6 +187,12 @@ export default function AppointmentDetailScreen() {
     setProductsDiscussed(n.products_discussed ?? '')
     setNotesDirty(false)
   }, [appointment?.notes])
+
+  useEffect(() => {
+    const biz = appointment?.business_context
+    setEstValue(biz?.estimated_value != null ? String(biz.estimated_value) : '')
+    setBizValueDirty(false)
+  }, [appointment?.business_context])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -219,17 +240,56 @@ export default function AppointmentDetailScreen() {
 
   async function handleStatusChange(status: AppointmentStatus) {
     setInlineError(null)
+    const wasCompleted = appointment?.status === 'completed'
     const ok = await update({ status })
-    if (!ok) setInlineError(t('appointments.error_update_status'))
+    if (!ok) { setInlineError(t('appointments.error_update_status')); return }
+    if (status === 'completed' && !wasCompleted) setShowDebrief(true)
+  }
+
+  async function handlePipelineChange(stage: PipelineStage) {
+    setInlineError(null)
+    const ok = await saveBusinessContext({ pipeline_stage: stage })
+    if (!ok) { setInlineError(t('appointments.error_save_business')); return }
+    // Le statut du client doit refléter la dernière étape constatée en RDV.
+    if (appointment?.client_id) {
+      await supabase.from('clients').update({ pipeline_stage: stage }).eq('id', appointment.client_id)
+    }
+  }
+
+  async function handleTemperatureChange(temp: ProspectTemperature) {
+    setInlineError(null)
+    const ok = await saveBusinessContext({ prospect_temperature: temp })
+    if (!ok) setInlineError(t('appointments.error_save_business'))
+  }
+
+  async function handleIntentChange(intent: CommercialIntent) {
+    setInlineError(null)
+    const ok = await saveBusinessContext({ commercial_intent: intent })
+    if (!ok) setInlineError(t('appointments.error_save_business'))
+  }
+
+  async function handleSaveBizValue() {
+    if (!bizValueDirty) return
+    setSavingBizValue(true)
+    setInlineError(null)
+    const trimmed = estValue.trim()
+    const payload: { estimated_value?: number } = {}
+    if (trimmed) payload.estimated_value = parseFloat(trimmed)
+    const ok = await saveBusinessContext(payload)
+    setSavingBizValue(false)
+    if (ok) setBizValueDirty(false)
+    else setInlineError(t('appointments.error_save_business'))
   }
 
   async function handleAddTask() {
     const title = newTaskTitle.trim()
-    if (!title) return
-    setInlineError(null)
+    if (!title) { setTaskError(t('appointments.error_task_title_required')); return }
+    setTaskError(null)
+    setAddingTask(true)
     const ok = await addTask({ title, task_type: 'follow_up', client_id: appointment?.client_id ?? undefined })
+    setAddingTask(false)
     if (ok) setNewTaskTitle('')
-    else setInlineError(t('appointments.error_add_task'))
+    else setTaskError(t('appointments.error_add_task'))
   }
 
   async function handleDoneTask(taskId: string) {
@@ -249,7 +309,7 @@ export default function AppointmentDetailScreen() {
     setCancelling(false)
     if (ok) {
       setShowCancelConfirm(false)
-      router.back()
+      goBack()
     } else {
       setShowCancelConfirm(false)
       setInlineError(t('appointments.error_update_status'))
@@ -408,6 +468,171 @@ export default function AppointmentDetailScreen() {
     </View>
   )
 
+  const commercialSection = (
+    <View style={styles.card}>
+      <Text style={styles.cardLabel}>{t('appointments.section_commercial')}</Text>
+
+      <Text style={styles.commercialSubLabel}>{t('appointments.field_pipeline')}</Text>
+      <View style={styles.statusPills}>
+        {PIPELINE_STAGES.map(stage => {
+          const active = biz?.pipeline_stage === stage
+          return (
+            <TouchableOpacity
+              key={stage}
+              onPress={() => handlePipelineChange(stage)}
+              style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.statusPillText, { color: active ? colors.primary : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
+                {t(`pipeline_stages.${stage}` as any)}
+              </Text>
+            </TouchableOpacity>
+          )
+        })}
+      </View>
+
+      <Text style={styles.commercialSubLabel}>{t('appointments.field_temperature')}</Text>
+      <View style={styles.statusPills}>
+        {TEMPERATURE_PILLS.map(temp => {
+          const active = biz?.prospect_temperature === temp
+          return (
+            <TouchableOpacity
+              key={temp}
+              onPress={() => handleTemperatureChange(temp)}
+              style={[styles.statusPill, active && { backgroundColor: TEMP_COLOR[temp] + '22', borderColor: TEMP_COLOR[temp] }]}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.statusPillText, { color: active ? TEMP_COLOR[temp] : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
+                {TEMP_EMOJI[temp]} {t(`prospect_temperatures.${temp}` as any)}
+              </Text>
+            </TouchableOpacity>
+          )
+        })}
+      </View>
+
+      <Text style={styles.commercialSubLabel}>{t('appointments.field_intent')}</Text>
+      <View style={styles.statusPills}>
+        {INTENT_PILLS.map(intent => {
+          const active = biz?.commercial_intent === intent
+          return (
+            <TouchableOpacity
+              key={intent}
+              onPress={() => handleIntentChange(intent)}
+              style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.statusPillText, { color: active ? colors.primary : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
+                {t(`commercial_intents.${intent}` as any)}
+              </Text>
+            </TouchableOpacity>
+          )
+        })}
+      </View>
+
+      <Text style={styles.commercialSubLabel}>{t('appointments.field_value')}</Text>
+      <TextInput
+        style={styles.bizValueInput}
+        value={estValue}
+        onChangeText={(v) => { setEstValue(v); setBizValueDirty(true) }}
+        placeholder="0.00"
+        placeholderTextColor={colors.textTertiary}
+        keyboardType="decimal-pad"
+      />
+      {bizValueDirty ? (
+        <TouchableOpacity
+          style={[styles.saveBtn, savingBizValue && styles.saveBtnDisabled]}
+          onPress={handleSaveBizValue}
+          disabled={savingBizValue}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.saveBtnText}>
+            {savingBizValue ? t('appointments.saving') : t('common.save')}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  )
+
+  const debriefModal = (
+    <Modal visible={showDebrief} transparent animationType="slide" onRequestClose={() => setShowDebrief(false)}>
+      <View style={styles.debriefOverlay}>
+        <View style={styles.debriefSheet}>
+          <View style={styles.debriefHandle} />
+          <View style={styles.debriefHeader}>
+            <Text style={styles.debriefTitle}>{t('appointments.debrief_title')}</Text>
+            <TouchableOpacity onPress={() => setShowDebrief(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.debriefClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.debriefSub}>{t('appointments.debrief_sub')}</Text>
+
+          <ScrollView style={{ maxHeight: 380 }}>
+            <Text style={styles.commercialSubLabel}>{t('appointments.field_temperature')}</Text>
+            <View style={styles.statusPills}>
+              {TEMPERATURE_PILLS.map(temp => {
+                const active = biz?.prospect_temperature === temp
+                return (
+                  <TouchableOpacity
+                    key={temp}
+                    onPress={() => handleTemperatureChange(temp)}
+                    style={[styles.statusPill, active && { backgroundColor: TEMP_COLOR[temp] + '22', borderColor: TEMP_COLOR[temp] }]}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.statusPillText, { color: active ? TEMP_COLOR[temp] : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
+                      {TEMP_EMOJI[temp]} {t(`prospect_temperatures.${temp}` as any)}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+
+            <Text style={styles.commercialSubLabel}>{t('appointments.field_intent')}</Text>
+            <View style={styles.statusPills}>
+              {INTENT_PILLS.map(intent => {
+                const active = biz?.commercial_intent === intent
+                return (
+                  <TouchableOpacity
+                    key={intent}
+                    onPress={() => handleIntentChange(intent)}
+                    style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.statusPillText, { color: active ? colors.primary : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
+                      {t(`commercial_intents.${intent}` as any)}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+
+            <Text style={styles.commercialSubLabel}>{t('appointments.field_pipeline')}</Text>
+            <View style={styles.statusPills}>
+              {PIPELINE_STAGES.map(stage => {
+                const active = biz?.pipeline_stage === stage
+                return (
+                  <TouchableOpacity
+                    key={stage}
+                    onPress={() => handlePipelineChange(stage)}
+                    style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.statusPillText, { color: active ? colors.primary : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
+                      {t(`pipeline_stages.${stage}` as any)}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          </ScrollView>
+
+          <TouchableOpacity style={styles.debriefDoneBtn} onPress={() => setShowDebrief(false)} activeOpacity={0.85}>
+            <Text style={styles.debriefDoneBtnText}>{t('appointments.debrief_done')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  )
+
   const cancelBanner = showCancelConfirm ? (
     <View style={styles.cancelBanner}>
       <Text style={styles.cancelBannerText}>{t('appointments.cancel_confirm_title')}</Text>
@@ -470,16 +695,25 @@ export default function AppointmentDetailScreen() {
         <TextInput
           style={styles.addTaskInput}
           value={newTaskTitle}
-          onChangeText={setNewTaskTitle}
+          onChangeText={(v) => { setNewTaskTitle(v); if (taskError) setTaskError(null) }}
           placeholder={t('appointments.add_task_placeholder')}
           placeholderTextColor={colors.textTertiary}
           onSubmitEditing={handleAddTask}
           returnKeyType="done"
         />
-        <TouchableOpacity style={styles.addTaskBtn} onPress={handleAddTask} activeOpacity={0.8}>
-          <Text style={styles.addTaskBtnText}>+</Text>
+        <TouchableOpacity
+          style={[styles.addTaskBtn, (addingTask || !newTaskTitle.trim()) && { opacity: 0.5 }]}
+          onPress={handleAddTask}
+          disabled={addingTask}
+          activeOpacity={0.8}
+        >
+          {addingTask
+            ? <ActivityIndicator size="small" color="#ffffff" />
+            : <Text style={styles.addTaskBtnText}>+</Text>
+          }
         </TouchableOpacity>
       </View>
+      {taskError ? <Text style={styles.taskErrorText}>{taskError}</Text> : null}
     </View>
   )
 
@@ -500,7 +734,7 @@ export default function AppointmentDetailScreen() {
       ) : null}
       <TouchableOpacity
         style={styles.headerBtnPrimary}
-        onPress={() => router.push(`/(app)/appointments/${id}/edit` as any)}
+        onPress={() => router.push(`/(app)/appointments/new?id=${id}` as any)}
         activeOpacity={0.8}
       >
         <Text style={styles.headerBtnPrimaryText}>{t('common.edit')}</Text>
@@ -602,7 +836,7 @@ export default function AppointmentDetailScreen() {
         <Stack.Screen options={{
           title: t('appointments.detail_title'),
           headerLeft: () => (
-            <TouchableOpacity onPress={() => router.back()} style={styles.headerBackBtn}>
+            <TouchableOpacity onPress={goBack} style={styles.headerBackBtn}>
               <Text style={styles.headerBackText}>‹ {t('appointments.back_agenda')}</Text>
             </TouchableOpacity>
           ),
@@ -614,11 +848,13 @@ export default function AppointmentDetailScreen() {
             {cancelBanner}
             {errorBanner}
             {statusSection}
+        {commercialSection}
             {notesSection}
             {tasksSection}
           </ScrollView>
           {sidebar}
         </View>
+        {debriefModal}
       </>
     )
   }
@@ -629,6 +865,11 @@ export default function AppointmentDetailScreen() {
       <Stack.Screen options={{
         title: t('appointments.detail_title'),
         headerBackTitle: '',
+        headerLeft: () => (
+          <TouchableOpacity onPress={goBack} style={styles.headerBackBtnMobile} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.headerBackArrowMobile}>‹</Text>
+          </TouchableOpacity>
+        ),
         headerRight,
       }} />
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
@@ -636,6 +877,7 @@ export default function AppointmentDetailScreen() {
         {cancelBanner}
         {errorBanner}
         {statusSection}
+        {commercialSection}
         {clientInfo ? (
           <TouchableOpacity
             style={styles.mobileClientCard}
@@ -656,6 +898,7 @@ export default function AppointmentDetailScreen() {
         {notesSection}
         {tasksSection}
       </ScrollView>
+      {debriefModal}
     </>
   )
 }
@@ -664,8 +907,8 @@ export default function AppointmentDetailScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container:     { flex: 1, backgroundColor: colors.bg },
-    center:        { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
+    container:     { flex: 1, backgroundColor: colors.bgDim },
+    center:        { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bgDim },
     scrollContent: { padding: 16, gap: 14, paddingBottom: 40 },
     emptyText:     { fontSize: 15, fontFamily: fonts.body, color: colors.textSecondary, textAlign: 'center' },
 
@@ -696,6 +939,10 @@ function makeStyles(colors: ThemeColors) {
     statusPill:     { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, borderWidth: 0.5, borderColor: colors.border },
     statusPillText: { fontSize: 12, fontFamily: fonts.medium },
 
+    // Commercial context
+    commercialSubLabel: { fontSize: 11, fontFamily: fonts.medium, color: colors.textTertiary, marginTop: 14, marginBottom: 8 },
+    bizValueInput: { fontSize: 14, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.bgDim, borderRadius: 8, padding: 10, maxWidth: 160 },
+
     // Cancel banner
     cancelBanner:        { backgroundColor: colors.danger + '10', borderRadius: 12, borderWidth: 1, borderColor: colors.danger + '40', padding: 14, gap: 10 },
     cancelBannerText:    { fontSize: 14, fontFamily: fonts.medium, color: colors.text, textAlign: 'center' },
@@ -715,6 +962,20 @@ function makeStyles(colors: ThemeColors) {
     saveBtnDisabled: { opacity: 0.6 },
     saveBtnText:     { fontSize: 14, fontFamily: fonts.semibold, color: '#ffffff' },
 
+    // Debrief modal
+    debriefOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+    debriefSheet: {
+      backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      paddingHorizontal: 20, paddingBottom: 32, maxHeight: '85%',
+    },
+    debriefHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
+    debriefHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
+    debriefTitle:  { fontSize: 16, fontFamily: fonts.bold, color: colors.text, flex: 1 },
+    debriefClose:  { fontSize: 16, color: colors.textTertiary, padding: 4 },
+    debriefSub:    { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, marginBottom: 12, lineHeight: 18 },
+    debriefDoneBtn:     { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+    debriefDoneBtnText: { fontSize: 15, fontFamily: fonts.semibold, color: '#ffffff' },
+
     // Tasks
     emptyTaskText:     { fontSize: 13, fontFamily: fonts.body, color: colors.textTertiary, textAlign: 'center', paddingVertical: 8 },
     taskRow:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
@@ -733,12 +994,15 @@ function makeStyles(colors: ThemeColors) {
     addTaskInput:      { flex: 1, fontSize: 13, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.bgDim, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
     addTaskBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
     addTaskBtnText:    { fontSize: 20, fontFamily: fonts.bold, color: '#ffffff', lineHeight: 24 },
+    taskErrorText:     { fontSize: 12, fontFamily: fonts.medium, color: colors.danger, marginTop: 6 },
 
     errorText: { fontSize: 13, fontFamily: fonts.body, color: colors.danger, textAlign: 'center', paddingHorizontal: 4 },
 
     // Header
     headerBackBtn:        { paddingHorizontal: 12 },
     headerBackText:       { fontSize: 14, fontFamily: fonts.medium, color: colors.primary },
+    headerBackBtnMobile:  { paddingHorizontal: 12, paddingVertical: 4 },
+    headerBackArrowMobile:{ fontSize: 24, fontFamily: fonts.medium, color: colors.primary, lineHeight: 28 },
     headerBtns:           { flexDirection: 'row', gap: 8, marginRight: 4 },
     headerBtnDanger:      { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 0.5, borderColor: colors.danger },
     headerBtnDangerText:  { fontSize: 12, fontFamily: fonts.medium, color: colors.danger },
@@ -749,7 +1013,7 @@ function makeStyles(colors: ThemeColors) {
     mobileClientCard: { backgroundColor: colors.card, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
 
     // Web layout
-    webLayout: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
+    webLayout: { flex: 1, flexDirection: 'row', backgroundColor: colors.bgDim },
     webMain:   { flex: 1 },
 
     // Sidebar

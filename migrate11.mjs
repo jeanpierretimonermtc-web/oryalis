@@ -12,16 +12,19 @@
 import pg from 'pg'
 const { Client } = pg
 
-const password = encodeURIComponent('Smallville!0945!')
+if (!process.env.SUPABASE_DB_PASSWORD) throw new Error('Missing SUPABASE_DB_PASSWORD')
+
+const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD)
 const PROJECT_REF = 'nhpvjfyjyculnijipzoa'
 const BUCKET = 'doterra-products'
 const BASE_URL = `https://${PROJECT_REF}.supabase.co/storage/v1/object/public/${BUCKET}/images`
 
 const client = new Client({
-  connectionString: `postgresql://postgres.${PROJECT_REF}:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`
+  connectionString: `postgresql://postgres.${PROJECT_REF}:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`,
 })
 
 await client.connect()
+try {
 console.log('Connecté à Supabase')
 
 await client.query(`
@@ -52,5 +55,6 @@ console.log('Sources images officielles :')
 console.log('  - https://media.doterra.com/eu/fr/pips/{product-name}.pdf')
 console.log('  - Espace Wellness Advocate dōTERRA')
 console.log('  - Site shop.doterra.com > clic droit > "Enregistrer l\'image sous"')
-
-await client.end()
+} finally {
+  await client.end()
+}

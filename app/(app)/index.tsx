@@ -26,9 +26,12 @@ import { useGoals } from '@/features/goals/useGoals'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useUpcomingAppointments } from '@/features/appointments/useAppointments'
 import { usePendingFollowups } from '@/features/followups/useFollowups'
+import { LinearGradient } from 'expo-linear-gradient'
 import { Avatar } from '@/shared/components/ui/Avatar'
+import { LineIcon } from '@/shared/components/ui/LineIcon'
+import type { LineIconName } from '@/shared/components/ui/LineIcon'
 import { useTheme } from '@/shared/theme/ThemeProvider'
-import type { ThemeColors } from '@/shared/theme/colors'
+import { colors as brandColors, type ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { FollowupWithClient, Client, PipelineStage } from '@/shared/lib/types'
 import type { Appointment } from '@/features/appointments/appointmentTypes'
@@ -50,19 +53,41 @@ function formatLocalDate(date: Date) {
 function QuickCard({
   icon,
   label,
+  variant,
   onPress,
 }: {
-  icon: string
+  icon: LineIconName
   label: string
+  variant: 'gradient' | 'tint'
   onPress: () => void
 }) {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
 
+  if (variant === 'gradient') {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.85}>
+        <LinearGradient
+          colors={brandColors.gradients.brand}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.quickCard}
+        >
+          <LineIcon name={icon} size={18} color="#fff" strokeWidth={2.2} />
+          <Text style={[styles.quickCardLabel, { color: '#fff' }]}>{label}</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    )
+  }
+
   return (
-    <TouchableOpacity style={styles.quickCard} onPress={onPress} activeOpacity={0.85}>
-      <Text style={styles.quickCardIcon}>{icon}</Text>
-      <Text style={styles.quickCardLabel}>{label}</Text>
+    <TouchableOpacity
+      style={[styles.quickCard, styles.quickCardTint]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      <LineIcon name={icon} size={18} color={colors.onSecondary} strokeWidth={2.2} />
+      <Text style={[styles.quickCardLabel, { color: colors.onSecondary }]}>{label}</Text>
     </TouchableOpacity>
   )
 }
@@ -664,13 +689,15 @@ export default function DashboardScreen() {
 
           <View style={styles.quickRow}>
             <QuickCard
-              icon="👤"
+              icon="personPlus"
               label={t('dashboard.new_client')}
+              variant="gradient"
               onPress={() => router.push('/(app)/clients/new')}
             />
             <QuickCard
-              icon="📅"
+              icon="calendarPlus"
               label={t('dashboard.quick_appointment')}
+              variant="tint"
               onPress={() => router.push('/(app)/appointments')}
             />
           </View>
@@ -1012,7 +1039,7 @@ function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: colors.bg,
+      backgroundColor: colors.bgDim,
     },
 
     content: {
@@ -1064,25 +1091,24 @@ function makeStyles(colors: ThemeColors) {
     },
 
     quickCard: {
-      backgroundColor: colors.primary,
       borderRadius: 14,
       paddingVertical: 10,
       paddingHorizontal: 14,
       alignItems: 'center',
       gap: 4,
       minWidth: 84,
-      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 6, color: 'rgba(0, 0, 0, 0.08)' }],
+      boxShadow: [{ offsetX: 0, offsetY: 3, blurRadius: 10, color: 'rgba(59, 130, 246, 0.3)' }],
       elevation: 2,
     },
 
-    quickCardIcon: {
-      fontSize: 17,
+    quickCardTint: {
+      backgroundColor: colors.secondary,
+      boxShadow: [{ offsetX: 0, offsetY: 3, blurRadius: 10, color: 'rgba(34, 211, 238, 0.35)' }],
     },
 
     quickCardLabel: {
       fontSize: 10,
       fontFamily: fonts.bold,
-      color: colors.textInverse,
       textAlign: 'center',
     },
 

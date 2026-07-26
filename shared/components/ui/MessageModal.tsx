@@ -84,9 +84,11 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
       const url = phone
         ? `https://api.whatsapp.com/send?phone=${phone}&text=${text}&type=phone_number&app_absent=0`
         : `https://api.whatsapp.com/send?text=${text}`
-      // window.location.href (même onglet) gère mieux les deep links mobiles que window.open
       if (typeof window !== 'undefined') {
-        window.location.href = url
+        // Nouvel onglet sur desktop (ne quitte pas Oryalis, laisse WhatsApp tenter
+        // d'ouvrir l'appli desktop) ; même onglet sur mobile web pour le deep link app.
+        if (window.innerWidth >= 768) window.open(url, '_blank', 'noopener,noreferrer')
+        else window.location.href = url
       }
     } else {
       const url = phone
@@ -203,9 +205,11 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
                   <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success }]} onPress={handleWhatsApp} activeOpacity={0.85}>
                     <Text style={styles.actionBtnText}>{t('messages.open_whatsapp')}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.primary }]} onPress={handleSMS} activeOpacity={0.85}>
-                    <Text style={styles.actionBtnText}>{t('messages.open_sms')}</Text>
-                  </TouchableOpacity>
+                  {Platform.OS !== 'web' && (
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.primary }]} onPress={handleSMS} activeOpacity={0.85}>
+                      <Text style={styles.actionBtnText}>{t('messages.open_sms')}</Text>
+                    </TouchableOpacity>
+                  )}
                 </>
               ) : (
                 <View style={styles.noPhoneNote}>
