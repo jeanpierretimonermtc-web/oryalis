@@ -98,6 +98,7 @@ export default function ClientDetailScreen() {
   const [activeTab, setActiveTab]       = useState<Tab>('apercu')
   const [messageOpen, setMessageOpen]   = useState(false)
   const [actionBusy, setActionBusy]     = useState(false)
+  const [actionError, setActionError]   = useState<string | null>(null)
   const [phoneCopied, setPhoneCopied]   = useState(false)
   const { getStatusLabel, isModuleActive } = useAppConfig()
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
@@ -183,11 +184,17 @@ export default function ClientDetailScreen() {
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-  async function runNextAction(action: () => Promise<void>) {
+  async function runNextAction<T>(action: () => Promise<T>): Promise<T | undefined> {
+    if (actionBusy) return undefined // garde anti-double-clic
     setActionBusy(true)
+    setActionError(null)
     try {
-      await action()
+      const result = await action()
       await refresh()
+      return result
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Erreur lors de la mise à jour. Réessayez.')
+      return undefined
     } finally {
       setActionBusy(false)
     }
@@ -308,8 +315,22 @@ export default function ClientDetailScreen() {
           <View style={styles.quickActions}>
             {client.next_action_source ? (
               <>
-                <TouchableOpacity disabled={actionBusy} style={styles.qaBtn} onPress={() => runNextAction(() => completeNextAction(client))} activeOpacity={0.8}>
-                  <Text style={styles.qaIcon}>✓</Text><Text style={styles.qaLabel}>Terminer</Text>
+                <TouchableOpacity
+                  disabled={actionBusy}
+                  style={[styles.qaBtn, actionBusy && { opacity: 0.6 }]}
+                  onPress={() => {
+                    runNextAction(() => completeNextAction(client)).then(result => {
+                      if (result?.needsDebrief) {
+                        router.push(`/(app)/appointments/${result.appointmentId}?debrief=1` as any)
+                      }
+                    })
+                  }}
+                  activeOpacity={0.8}
+                >
+                  {actionBusy
+                    ? <ActivityIndicator size="small" color={colors.text} />
+                    : <Text style={styles.qaIcon}>✓</Text>}
+                  <Text style={styles.qaLabel}>Terminer</Text>
                 </TouchableOpacity>
                 <TouchableOpacity disabled={actionBusy} style={styles.qaBtn} onPress={() => runNextAction(() => postponeNextAction(client))} activeOpacity={0.8}>
                   <Text style={styles.qaIcon}>＋1</Text><Text style={styles.qaLabel}>Reporter</Text>
@@ -357,6 +378,11 @@ export default function ClientDetailScreen() {
               <Text style={styles.qaLabel}>Modifier</Text>
             </TouchableOpacity>
           </View>
+          {actionError && (
+            <Text style={{ color: colors.danger, fontSize: 12, fontFamily: fonts.medium, marginTop: 8 }}>
+              {actionError}
+            </Text>
+          )}
 
           {/* ── Tab bar ──────────────────────────────────────────── */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll} contentContainerStyle={styles.tabRow}>

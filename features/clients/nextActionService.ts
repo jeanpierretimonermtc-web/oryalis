@@ -2,6 +2,9 @@ import { Platform } from 'react-native'
 import * as Linking from 'expo-linking'
 import { supabase } from '@/shared/lib/supabase'
 import type { Client } from '@/shared/lib/types'
+import { completeAppointment } from '@/features/appointments/appointmentService'
+import { toggleFollowupDone } from '@/features/followups/followupService'
+import { markInteractionDone } from '@/features/interactions/interactionService'
 
 function requireSource(client: Client) {
   if (!client.next_action_source || !client.next_action_source_id) {
@@ -10,16 +13,35 @@ function requireSource(client: Client) {
   return { source: client.next_action_source, id: client.next_action_source_id }
 }
 
-export async function completeNextAction(client: Client) {
+export type CompleteNextActionResult = {
+  appointmentId: string
+  needsDebrief: boolean
+} | void
+
+// Orchestre la complétion de la prochaine action en délégant au service dédié à
+// chaque ressource — aucune logique post-RDV n'est dupliquée ici : pour un
+// rendez-vous, le chemin métier unique appointmentService.completeAppointment()
+// est utilisé, garantissant les mêmes effets (relances, tâche objections, etc.)
+// que depuis la fiche RDV.
+export async function completeNextAction(client: Client): Promise<CompleteNextActionResult> {
   const { source, id } = requireSource(client)
-  const now = new Date().toISOString()
-  const operation = source === 'appointment'
-    ? supabase.from('appointments').update({ status: 'completed', updated_at: now }).eq('id', id)
-    : source === 'interaction'
-      ? supabase.from('interactions').update({ completed_at: now, updated_at: now }).eq('id', id)
-      : supabase.from('followups').update({ done: true, updated_at: now }).eq('id', id)
-  const { error } = await operation
-  if (error) throw error
+
+  if (source === 'appointment') {
+    const result = await completeAppointment(id)
+    const { data: biz } = await supabase
+      .from('appointment_business_context')
+      .select('commercial_intent')
+      .eq('appointment_id', id)
+      .maybeSingle()
+    return { appointmentId: id, needsDebrief: !biz?.commercial_intent }
+  }
+
+  if (source === 'interaction') {
+    await markInteractionDone(id)
+    return
+  }
+
+  await toggleFollowupDone(id, true)
 }
 
 export async function postponeNextAction(client: Client, days = 1) {

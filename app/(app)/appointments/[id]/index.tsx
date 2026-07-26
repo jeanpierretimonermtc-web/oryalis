@@ -136,7 +136,7 @@ function TaskRow({ task, colors, styles, onDone, onRemove, locale }: {
 
 export default function AppointmentDetailScreen() {
   const { t, i18n } = useTranslation()
-  const { id, returnTo } = useLocalSearchParams<{ id: string; returnTo?: string }>()
+  const { id, returnTo, debrief } = useLocalSearchParams<{ id: string; returnTo?: string; debrief?: string }>()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
 
@@ -147,7 +147,7 @@ export default function AppointmentDetailScreen() {
 
   const {
     appointment, loading,
-    saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, cancel,
+    saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, complete, cancel,
   } = useAppointmentDetail(id ?? null)
 
   const [clientNotes,       setClientNotes]       = useState('')
@@ -161,6 +161,7 @@ export default function AppointmentDetailScreen() {
   const [addingTask,        setAddingTask]         = useState(false)
   const [taskError,         setTaskError]          = useState<string | null>(null)
   const [showDebrief,       setShowDebrief]        = useState(false)
+  const [isCompleting,      setIsCompleting]       = useState(false)
   const [showCancelConfirm, setShowCancelConfirm]  = useState(false)
   const [cancelling,        setCancelling]         = useState(false)
   const [inlineError,       setInlineError]        = useState<string | null>(null)
@@ -202,6 +203,12 @@ export default function AppointmentDetailScreen() {
     })
   }, [])
 
+  // Navigation depuis la fiche Contact (Terminer) quand le débrief n'était pas encore
+  // renseigné : ouvre directement la même modale de débrief que la complétion locale.
+  useEffect(() => {
+    if (debrief === '1' && appointment?.status === 'completed') setShowDebrief(true)
+  }, [debrief, appointment?.status])
+
   useEffect(() => {
     const cid = appointment?.client_id
     if (!cid) return
@@ -239,11 +246,26 @@ export default function AppointmentDetailScreen() {
   }
 
   async function handleStatusChange(status: AppointmentStatus) {
+    if (isCompleting) return // garde anti-double-clic
+
     setInlineError(null)
-    const wasCompleted = appointment?.status === 'completed'
+
+    if (status === 'completed') {
+      setIsCompleting(true)
+      try {
+        const result = await complete()
+        if (!result) { setInlineError(t('appointments.error_update_status')); return }
+        // transitioned=true uniquement lors du premier passage réel à completed :
+        // les effets post-RDV (relances, tâche objections) ne se déclenchent qu'ici.
+        if (result.transitioned) setShowDebrief(true)
+      } finally {
+        setIsCompleting(false)
+      }
+      return
+    }
+
     const ok = await update({ status })
     if (!ok) { setInlineError(t('appointments.error_update_status')); return }
-    if (status === 'completed' && !wasCompleted) setShowDebrief(true)
   }
 
   async function handlePipelineChange(stage: PipelineStage) {
@@ -444,23 +466,30 @@ export default function AppointmentDetailScreen() {
       <View style={styles.statusPills}>
         {STATUS_PILLS.map(s => {
           const active = appointment.status === s
+          const showSpinner = isCompleting && s === 'completed'
           return (
             <TouchableOpacity
               key={s}
               onPress={() => handleStatusChange(s)}
+              disabled={isCompleting}
               style={[
                 styles.statusPill,
                 active && { backgroundColor: STATUS_COLOR[s] + '22', borderColor: STATUS_COLOR[s] },
+                isCompleting && { opacity: 0.6 },
               ]}
               activeOpacity={0.75}
             >
-              <Text style={[
-                styles.statusPillText,
-                { color: active ? STATUS_COLOR[s] : colors.textSecondary },
-                active && { fontFamily: fonts.semibold },
-              ]}>
-                {t(`appointment_statuses.${s}` as any)}
-              </Text>
+              {showSpinner ? (
+                <ActivityIndicator size="small" color={STATUS_COLOR[s]} />
+              ) : (
+                <Text style={[
+                  styles.statusPillText,
+                  { color: active ? STATUS_COLOR[s] : colors.textSecondary },
+                  active && { fontFamily: fonts.semibold },
+                ]}>
+                  {t(`appointment_statuses.${s}` as any)}
+                </Text>
+              )}
             </TouchableOpacity>
           )
         })}

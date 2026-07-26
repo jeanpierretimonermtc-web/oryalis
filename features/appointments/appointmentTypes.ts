@@ -203,3 +203,9 @@ export interface AppointmentFilters {
   status?: AppointmentStatus
   appointment_type?: AppointmentType
 }
+
+export interface CompleteAppointmentResult {
+  appointment: Appointment
+  transitioned: boolean
+  alreadyCompleted: boolean
+}

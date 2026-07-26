@@ -10,6 +10,7 @@ import type {
   UpdateAppointmentNotesPayload,
   UpdateBusinessContextPayload,
   CreateTaskPayload,
+  CompleteAppointmentResult,
 } from './appointmentTypes'
 
 const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, created_at, updated_at'
@@ -114,6 +115,10 @@ export async function createAppointment(payload: CreateAppointmentPayload): Prom
 }
 
 export async function updateAppointment(id: string, payload: UpdateAppointmentPayload): Promise<Appointment> {
+  if (payload.status === 'completed') {
+    throw new Error('Use completeAppointment() to transition an appointment to completed.')
+  }
+
   const { data, error } = await supabase
     .from('appointments')
     .update(payload)
@@ -123,11 +128,43 @@ export async function updateAppointment(id: string, payload: UpdateAppointmentPa
 
   if (error) throw new Error(error.message)
 
-  if (payload.status === 'completed' && data.client_id) {
-    triggerPostCompletionActions(id, data.client_id, data.user_id).catch(console.error)
+  return data
+}
+
+// Seul chemin métier public pour passer un rendez-vous à l'état "completed".
+// La transition est conditionnelle (WHERE status <> 'completed') : sous concurrence,
+// Postgres verrouille la ligne et une seule requête peut réellement transitionner ;
+// les effets post-complétion ne sont donc déclenchés qu'une fois, même en cas de
+// double appel rapproché (double-clic, appel depuis deux écrans, etc.).
+export async function completeAppointment(id: string): Promise<CompleteAppointmentResult> {
+  const { data, error } = await supabase
+    .from('appointments')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .neq('status', 'completed')
+    .select(APPT_COLS)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+
+  if (data) {
+    if (data.client_id) {
+      triggerPostCompletionActions(id, data.client_id, data.user_id).catch(console.error)
+    }
+    return { appointment: data, transitioned: true, alreadyCompleted: false }
   }
 
-  return data
+  // Rien n'a été transitionné : soit déjà completed, soit id inconnu (auquel cas
+  // .single() ci-dessous lève une erreur explicite).
+  const { data: existing, error: fetchError } = await supabase
+    .from('appointments')
+    .select(APPT_COLS)
+    .eq('id', id)
+    .single()
+
+  if (fetchError) throw new Error(fetchError.message)
+
+  return { appointment: existing, transitioned: false, alreadyCompleted: existing.status === 'completed' }
 }
 
 async function triggerPostCompletionActions(
@@ -194,20 +231,35 @@ async function triggerPostCompletionActions(
     }
   }
 
-  // Create objection task regardless of existing followups
+  // Create objection task regardless of existing followups — idempotent : ne recrée pas
+  // de tâche si une tâche "follow_up" ouverte (pending/in_progress) existe déjà pour ce RDV.
+  // Limite connue : task_type='follow_up' n'est pas un identifiant dédié aux objections
+  // (appointment_tasks n'a pas de colonne auto_generated comme followups) — une tâche
+  // "follow_up" créée manuellement par le praticien sur ce même RDV serait aussi détectée
+  // et empêcherait la création automatique. Voir rapport de phase pour la migration future
+  // recommandée (colonne auto_generated ou task_type dédié).
   if (notes?.objections?.trim()) {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await supabase.from('appointment_tasks').insert({
-        appointment_id: appointmentId,
-        client_id:      clientId,
-        user_id:        user.id,
-        title:          'Répondre aux objections détectées',
-        task_type:      'follow_up',
-        priority:       'high',
-        status:         'pending',
-        due_at:         new Date(Date.now() + 86400000).toISOString(),
-      })
+    const { count: openFollowUpCount } = await supabase
+      .from('appointment_tasks')
+      .select('id', { count: 'exact', head: true })
+      .eq('appointment_id', appointmentId)
+      .eq('task_type', 'follow_up')
+      .in('status', ['pending', 'in_progress'])
+
+    if (!openFollowUpCount) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('appointment_tasks').insert({
+          appointment_id: appointmentId,
+          client_id:      clientId,
+          user_id:        user.id,
+          title:          'Répondre aux objections détectées',
+          task_type:      'follow_up',
+          priority:       'high',
+          status:         'pending',
+          due_at:         new Date(Date.now() + 86400000).toISOString(),
+        })
+      }
     }
   }
 

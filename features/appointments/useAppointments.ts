@@ -5,6 +5,7 @@ import {
   fetchAppointmentById,
   createAppointment,
   updateAppointment,
+  completeAppointment,
   cancelAppointment,
   deleteAppointment,
   upsertAppointmentNotes,
@@ -24,6 +25,7 @@ import type {
   UpdateAppointmentNotesPayload,
   UpdateBusinessContextPayload,
   CreateTaskPayload,
+  CompleteAppointmentResult,
 } from './appointmentTypes'
 
 export function useAppointments(filters: AppointmentFilters = {}) {
@@ -193,6 +195,19 @@ export function useAppointmentDetail(id: string | null) {
     }
   }, [id])
 
+  // Seul chemin de complétion : voir appointmentService.completeAppointment().
+  const complete = useCallback(async (): Promise<CompleteAppointmentResult | null> => {
+    if (!id) return null
+    try {
+      const result = await completeAppointment(id)
+      setAppointment(prev => prev ? { ...prev, ...result.appointment } : prev)
+      return result
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur de complétion')
+      return null
+    }
+  }, [id])
+
   const cancel = useCallback(async (reason?: string): Promise<boolean> => {
     if (!id) return false
     try {
@@ -205,7 +220,7 @@ export function useAppointmentDetail(id: string | null) {
     }
   }, [id])
 
-  return { appointment, loading, error, reload: load, saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, cancel }
+  return { appointment, loading, error, reload: load, saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, complete, cancel }
 }
 
 export function useAppointmentTasks() {
