@@ -7,8 +7,6 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { supabase } from '@/shared/lib/supabase'
 import { DemoProvider, useDemoState } from '@/features/demo/DemoProvider'
 import { CatalogPrefsProvider } from '@/features/catalogs/CatalogPrefsProvider'
-import { useCalendarSetup } from '@/features/appointments/useCalendarSetup'
-import { useCalendarForegroundSync } from '@/features/appointments/useCalendarForegroundSync'
 import { useNotificationSetup } from '@/features/notifications/useNotifications'
 import { useSecurityNotifications } from '@/features/security/useSecurityNotifications'
 import { AppConfigProvider, useAppConfig } from '@/features/settings/AppConfigProvider'
@@ -230,8 +228,6 @@ export default function AppLayout() {
   const isWide = width >= SIDEBAR_BREAKPOINT
   const isRootRoute = pathname === '/' || pathname === '/clients' || pathname === '/appointments' || pathname === '/followups' || pathname === '/network' || pathname === '/catalog'
 
-  useCalendarSetup()
-  useCalendarForegroundSync()
   useNotificationSetup()
   useSecurityNotifications(session)
 

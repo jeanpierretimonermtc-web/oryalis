@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo } from 'react'
 import {
-  Platform, View, Text, ScrollView, TouchableOpacity,
+  View, Text, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator, useWindowDimensions,
 } from 'react-native'
 import { router, Stack, useFocusEffect } from 'expo-router'
@@ -11,7 +11,6 @@ import { supabase } from '@/shared/lib/supabase'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { colors as brandColors, type ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import { fetchAllNativeEvents, type NativeCalendarEvent } from '@/features/appointments/calendarSyncService'
 import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
@@ -127,7 +126,6 @@ export default function AgendaScreen() {
   const [monthAnchor, setMonthAnchor] = useState<Date>(() => new Date(today.getFullYear(), today.getMonth(), 1))
   const [rangeAppts,   setRangeAppts]   = useState<CalAppt[]>([])
   const [loadingRange, setLoadingRange] = useState(true)
-  const [nativeEvents, setNativeEvents] = useState<NativeCalendarEvent[]>([])
   const [nextAppt,     setNextAppt]     = useState<CalAppt | null>(null)
 
   const monthGridStart = useMemo(
@@ -185,13 +183,6 @@ export default function AgendaScreen() {
     await gcSyncAll()
     fetchRange()
   }, [gcConnected, gcSyncAll, fetchRange])
-
-  useFocusEffect(useCallback(() => {
-    if (Platform.OS === 'web' || !session) return
-    fetchAllNativeEvents(rangeStart, rangeEnd)
-      .then(setNativeEvents)
-      .catch(console.error)
-  }, [rangeStart, rangeEnd, session]))
 
   // ── Responsive column widths ────────────────────────────────────────────────
   const sidebarW    = screenW >= 768 ? 240 : 0
@@ -421,23 +412,6 @@ export default function AgendaScreen() {
                 })
               })}
 
-              {weekDays.map((day, dayIdx) =>
-                nativeEvents
-                  .filter(e => !e.isOryalis && isSameDay(new Date(e.startDate), day))
-                  .map(ev => {
-                    const d     = new Date(ev.startDate)
-                    const end   = new Date(ev.endDate)
-                    const topPx = (Math.max(d.getHours() + d.getMinutes() / 60, START_HOUR) - START_HOUR) * WEEK_HOUR_H
-                    const durMin = Math.max((end.getTime() - d.getTime()) / 60000, DURATION_MIN)
-                    const hPx   = Math.max((durMin / 60) * WEEK_HOUR_H - 6, 24)
-                    return (
-                      <View key={ev.id} style={[styles.weekApptBlock, { left: dayIdx * weekColW + 3, width: weekColW - 6, top: topPx + 2, height: hPx, backgroundColor: colors.bgDim, borderLeftColor: ev.calendarColor, opacity: 0.85 }]}>
-                        <Text style={[styles.weekApptName, { color: colors.textTertiary }]} numberOfLines={1}>{ev.title}</Text>
-                      </View>
-                    )
-                  })
-              )}
-
               {weekDays.map((day, dayIdx) => (
                 <TouchableOpacity key={`zone-${dayIdx}`} style={{ position: 'absolute', left: dayIdx * weekColW, width: weekColW, top: 0, height: GRID_H, zIndex: 0 }} onPress={() => selectDay(day, true)} activeOpacity={1} />
               ))}
@@ -508,31 +482,7 @@ export default function AgendaScreen() {
             )
           })}
 
-          {nativeEvents
-            .filter(e => !e.isOryalis && isSameDay(new Date(e.startDate), selectedDay))
-            .map(ev => {
-              const d   = new Date(ev.startDate)
-              const end = new Date(ev.endDate)
-              const topPx = (Math.max(d.getHours() + d.getMinutes() / 60, START_HOUR) - START_HOUR) * DAY_HOUR_H + 4
-              const durMin = Math.max((end.getTime() - d.getTime()) / 60000, DURATION_MIN)
-              const hPx = Math.max((durMin / 60) * DAY_HOUR_H - 6, 56)
-              return (
-                <View key={ev.id} style={[styles.dayApptBlock, { top: topPx, height: hPx, backgroundColor: colors.bgDim, borderLeftColor: ev.calendarColor, zIndex: 1, opacity: 0.9 }]}>
-                  <View style={styles.dayApptHeaderRow}>
-                    <Text style={[styles.dayApptTime, { color: colors.textSecondary }]}>
-                      {formatTime(d)} – {formatTime(end)}
-                    </Text>
-                    <View style={[styles.tagBadge, { backgroundColor: colors.border }]}>
-                      <Text style={[styles.tagBadgeText, { color: colors.textTertiary }]}>{t('calendar.personal')}</Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.dayApptClient, { color: colors.textSecondary, fontSize: 14 }]} numberOfLines={1}>{ev.title}</Text>
-                </View>
-              )
-            })
-          }
-
-          {dayAppts.length === 0 && !loadingRange && nativeEvents.filter(e => !e.isOryalis && isSameDay(new Date(e.startDate), selectedDay)).length === 0 && (
+          {dayAppts.length === 0 && !loadingRange && (
             <View style={styles.emptyDay}>
               <Text style={styles.emptyDayEmoji}>✨</Text>
               <Text style={styles.emptyDayTitle}>{t('appointments.free_day')}</Text>
@@ -770,8 +720,6 @@ function makeStyles(colors: ThemeColors) {
   dayApptBlock:     { position: 'absolute', left: TIME_COL_W + 4, right: 8, borderRadius: 10, borderLeftWidth: 4, paddingHorizontal: 12, paddingVertical: 8, overflow: 'hidden' },
   dayApptHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' },
   dayApptTime:      { fontSize: 11, fontFamily: fonts.medium, opacity: 0.9 },
-  tagBadge:         { borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
-  tagBadgeText:     { fontSize: 10, fontFamily: fonts.bold, letterSpacing: 0.3 },
   dayApptClient:    { fontSize: 16, fontFamily: fonts.bold, lineHeight: 20 },
   dayApptTheme:     { fontSize: 12, fontFamily: fonts.body, opacity: 0.72, marginTop: 3, lineHeight: 16 },
 

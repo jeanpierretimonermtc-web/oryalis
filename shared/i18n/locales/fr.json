@@ -690,7 +690,6 @@
     "section_prefs": "Langue & région",
     "section_display": "Affichage",
     "section_catalogs": "Catalogues produits",
-    "section_calendar": "Calendrier",
     "section_subscription": "Abonnement",
     "section_account": "Compte",
     "support_access_title": "Confidentialité & assistance",
@@ -875,21 +874,6 @@
       "templates": "Modèles de messages personnalisés",
       "reports": "Objectifs et rapports complets"
     }
-  },
-  "calendar": {
-    "section": "Calendrier",
-    "syncAll": "Synchroniser avec le calendrier",
-    "syncing": "Synchronisation…",
-    "syncSuccess": "Calendrier synchronisé",
-    "permissionDenied": "Accès calendrier refusé. Autorisez-le dans les réglages de votre téléphone.",
-    "personal": "Personnel",
-    "oryalis": "Rendez-vous Oryalis",
-    "pull": "Récupérer depuis le calendrier",
-    "pulling": "Récupération…",
-    "pull_done": "{{count}} rendez-vous mis à jour",
-    "pull_up_to_date": "Agenda à jour",
-    "colorLabel": "Couleur du calendrier Oryalis",
-    "colorChanged": "Couleur mise à jour"
   },
   "onboarding": {
     "title": "Bienvenue sur Oryalis",

@@ -690,7 +690,6 @@
     "section_prefs": "Language & region",
     "section_display": "Display",
     "section_catalogs": "Product catalogs",
-    "section_calendar": "Calendar",
     "section_subscription": "Subscription",
     "section_account": "Account",
     "support_access_title": "Privacy & support",
@@ -875,21 +874,6 @@
       "templates": "Custom message templates",
       "reports": "Complete goals and reports"
     }
-  },
-  "calendar": {
-    "section": "Calendar",
-    "syncAll": "Sync with device calendar",
-    "syncing": "Syncing…",
-    "syncSuccess": "Calendar synced",
-    "permissionDenied": "Calendar access denied. Please allow it in your device settings.",
-    "personal": "Personal",
-    "oryalis": "Oryalis appointment",
-    "pull": "Import changes from calendar",
-    "pulling": "Importing…",
-    "pull_done": "{{count}} appointment(s) updated from calendar",
-    "pull_up_to_date": "Calendar is up to date",
-    "colorLabel": "Oryalis calendar color",
-    "colorChanged": "Color updated"
   },
   "onboarding": {
     "title": "Welcome to Oryalis",

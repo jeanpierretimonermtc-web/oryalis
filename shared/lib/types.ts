@@ -319,21 +319,6 @@ export interface Followup {
   updated_at: string | null
 }
 
-export interface Appointment {
-  id: string
-  client_id: string
-  user_id: string
-  appointment_number: number
-  appointment_date: string
-  themes_discussed: string | null
-  solutions_proposed: string | null
-  recap_sent: boolean
-  next_appointment_date: string | null
-  native_event_id: string | null
-  created_at: string
-  updated_at: string | null
-}
-
 export interface Recommendation {
   id: string
   client_id: string
@@ -402,10 +387,6 @@ export interface Order {
 }
 
 // ── Joined types ──────────────────────────────────────────────────────────────
-
-export interface AppointmentWithClient extends Appointment {
-  client: Pick<Client, 'id' | 'full_name' | 'status'>
-}
 
 export interface NetworkNode extends Pick<Client,
   'id' | 'full_name' | 'first_name' | 'email' | 'phone' |
