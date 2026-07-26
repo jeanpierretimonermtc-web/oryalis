@@ -58,6 +58,7 @@
     "next_action_source_appointment": "Appt.",
     "next_action_source_followup": "Follow-up",
     "next_action_source_interaction": "Interaction",
+    "finish_action": "Complete",
     "finish_action_debrief": "Complete & debrief",
     "copy_phone": "Copy",
     "phone_copied": "Copied!",

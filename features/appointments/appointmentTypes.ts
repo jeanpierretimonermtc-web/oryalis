@@ -231,7 +231,15 @@ export class AppointmentCompletionError extends Error {
   }
 }
 
-// Débrief : preuve principale = confirmation utilisateur (un RDV completed a nécessairement
-// été confirmé, car c'est désormais le seul chemin vers ce statut). Pour un RDV pas encore
-// completed, on ne peut que constater la présence ou l'absence de données déjà saisies.
-export type DebriefState = 'none' | 'partial' | 'confirmed'
+// Rejet métier contrôlé — le rejeu des actions post-complétion n'est autorisé que pour un
+// rendez-vous déjà completed (garde imposée au niveau service, pas seulement dans l'UI).
+export type PostCompletionRetryErrorCode = 'not_completed' | 'not_found'
+
+export class PostCompletionRetryError extends Error {
+  code: PostCompletionRetryErrorCode
+  constructor(code: PostCompletionRetryErrorCode) {
+    super(`Cannot retry post-completion actions: ${code}`)
+    this.name = 'PostCompletionRetryError'
+    this.code = code
+  }
+}

@@ -6,7 +6,7 @@ import {
   createAppointment,
   updateAppointment,
   completeAppointment,
-  ensurePostCompletionActions,
+  retryPostCompletionActions,
   cancelAppointment,
   deleteAppointment,
   upsertAppointmentNotes,
@@ -208,16 +208,18 @@ export function useAppointmentDetail(id: string | null) {
   }, [id])
 
   // Rejeu explicite des effets post-complétion après un échec partiel — ne recomplète pas
-  // le RDV, ne recrée que ce qui manque encore (idempotent).
+  // le RDV, ne recrée que ce qui manque encore (idempotent). La garde "completed" est
+  // imposée par retryPostCompletionActions() au niveau service (relit le statut réel en
+  // base), pas seulement ici.
   const retryPostCompletion = useCallback(async (): Promise<PostCompletionResult | null> => {
-    if (!id || !appointment?.client_id) return null
+    if (!id) return null
     try {
-      return await ensurePostCompletionActions(id, appointment.client_id, appointment.user_id)
+      return await retryPostCompletionActions(id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur lors du nouvel essai')
       return null
     }
-  }, [id, appointment?.client_id, appointment?.user_id])
+  }, [id])
 
   const cancel = useCallback(async (reason?: string): Promise<boolean> => {
     if (!id) return false

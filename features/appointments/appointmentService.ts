@@ -2,10 +2,9 @@ import { supabase } from '@/shared/lib/supabase'
 import { triggerAppointmentCompleted } from '@/features/automations/automationService'
 import {
   AppointmentCompletionError,
+  PostCompletionRetryError,
   type Appointment,
   type AppointmentFull,
-  type AppointmentNote,
-  type AppointmentBusinessContext,
   type AppointmentTask,
   type AppointmentFilters,
   type CreateAppointmentPayload,
@@ -16,7 +15,6 @@ import {
   type CompleteAppointmentResult,
   type PostCompletionResult,
   type PostCompletionWarningCode,
-  type DebriefState,
 } from './appointmentTypes'
 
 const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, created_at, updated_at'
@@ -323,39 +321,23 @@ export async function ensurePostCompletionActions(
   return { success: warnings.length === 0, warnings }
 }
 
-// Preuve principale du débrief en V1 = confirmation utilisateur (un RDV completed a
-// nécessairement été confirmé, puisque c'est désormais le seul chemin vers ce statut).
-// Pour un RDV pas encore completed, on ne peut que constater si des données ont déjà été
-// saisies (aucun champ n'est obligatoire — cf. rapport de phase).
-export function evaluateAppointmentDebrief(
-  appointmentStatus: Appointment['status'],
-  notes: Pick<AppointmentNote, 'client_notes' | 'internal_notes' | 'objections' | 'needs_identified' | 'products_discussed'> | null,
-  businessContext: Pick<AppointmentBusinessContext, 'commercial_intent' | 'prospect_temperature' | 'estimated_value'> | null,
-): DebriefState {
-  if (appointmentStatus === 'completed') return 'confirmed'
-  const hasAnyNotes = !!notes && Boolean(
-    notes.client_notes || notes.internal_notes || notes.objections || notes.needs_identified || notes.products_discussed,
-  )
-  const hasAnyBusinessContext = !!businessContext && Boolean(
-    businessContext.commercial_intent || businessContext.prospect_temperature || businessContext.estimated_value != null,
-  )
-  return hasAnyNotes || hasAnyBusinessContext ? 'partial' : 'none'
-}
+// Seule API publique pour rejouer les effets post-complétion (ex. après un échec partiel).
+// Impose l'invariant "completed" au niveau service — jamais uniquement côté UI — en relisant
+// le statut réel depuis la base plutôt que de faire confiance à un état local potentiellement
+// périmé. ensurePostCompletionActions() reste utilisable en interne (par completeAppointment)
+// mais toute nouvelle tentative de rejeu doit obligatoirement passer par cette fonction.
+export async function retryPostCompletionActions(appointmentId: string): Promise<PostCompletionResult> {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('status, client_id, user_id')
+    .eq('id', appointmentId)
+    .single()
 
-export async function hasAppointmentDebrief(appointmentId: string): Promise<DebriefState> {
-  const [apptRes, notesRes, bizRes] = await Promise.all([
-    supabase.from('appointments').select('status').eq('id', appointmentId).single(),
-    supabase.from('appointment_notes')
-      .select('client_notes, internal_notes, objections, needs_identified, products_discussed')
-      .eq('appointment_id', appointmentId).maybeSingle(),
-    supabase.from('appointment_business_context')
-      .select('commercial_intent, prospect_temperature, estimated_value')
-      .eq('appointment_id', appointmentId).maybeSingle(),
-  ])
+  if (error) throw new PostCompletionRetryError('not_found')
+  if (data.status !== 'completed') throw new PostCompletionRetryError('not_completed')
+  if (!data.client_id) return { success: true, warnings: [] }
 
-  if (apptRes.error) throw new Error(apptRes.error.message)
-
-  return evaluateAppointmentDebrief(apptRes.data.status, notesRes.data ?? null, bizRes.data ?? null)
+  return ensurePostCompletionActions(appointmentId, data.client_id, data.user_id)
 }
 
 export async function cancelAppointment(id: string, reason?: string): Promise<void> {

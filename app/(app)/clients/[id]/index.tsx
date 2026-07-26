@@ -335,7 +335,7 @@ export default function ClientDetailScreen() {
                     ? <ActivityIndicator size="small" color={colors.text} />
                     : <Text style={styles.qaIcon}>✓</Text>}
                   <Text style={styles.qaLabel}>
-                    {client.next_action_source === 'appointment' ? t('clients.finish_action_debrief') : 'Terminer'}
+                    {client.next_action_source === 'appointment' ? t('clients.finish_action_debrief') : t('clients.finish_action')}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity disabled={actionBusy} style={styles.qaBtn} onPress={() => runNextAction(() => postponeNextAction(client))} activeOpacity={0.8}>

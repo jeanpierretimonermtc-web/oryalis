@@ -58,6 +58,7 @@
     "next_action_source_appointment": "RDV",
     "next_action_source_followup": "Relance",
     "next_action_source_interaction": "Interaction",
+    "finish_action": "Terminer",
     "finish_action_debrief": "Terminer et débriefer",
     "copy_phone": "Copier",
     "phone_copied": "Copié !",
