@@ -403,7 +403,8 @@ export default function AgendaScreen() {
                     <TouchableOpacity
                       key={appt.id}
                       style={[styles.weekApptBlock, { left: dayIdx * weekColW + 3, width: weekColW - 6, top: topPx + 2, height: hPx, backgroundColor: pal.bg, borderLeftColor: accent }]}
-                      onPress={() => router.push(`/(app)/appointments/new?clientId=${appt.client_id}` as any)}
+                      onPress={() => router.push(`/(app)/appointments/${appt.id}` as any)}
+                      accessibilityLabel={t('appointments.view_detail_hint')}
                       activeOpacity={0.8}
                     >
                       {hPx > 30 && (
@@ -469,7 +470,8 @@ export default function AgendaScreen() {
               <TouchableOpacity
                 key={appt.id}
                 style={[styles.dayApptBlock, { top: topPx, height: hPx, backgroundColor: pal.bg, borderLeftColor: accent, zIndex: 1 }]}
-                onPress={() => router.push(`/(app)/clients/${appt.client_id}/appointments` as any)}
+                onPress={() => router.push(`/(app)/appointments/${appt.id}` as any)}
+                accessibilityLabel={t('appointments.view_detail_hint')}
                 activeOpacity={0.8}
               >
                 <View style={styles.dayApptHeaderRow}>
@@ -507,7 +509,7 @@ export default function AgendaScreen() {
       <View style={styles.container}>
 
         <View style={styles.pageHeader}>
-          <Text style={styles.pageTitle}>{t('appointments.title')}</Text>
+          <Text style={styles.pageTitle}>{t('appointments.nav_title')}</Text>
           <View style={styles.headerRight}>
             {gcConfigured && (
               <TouchableOpacity

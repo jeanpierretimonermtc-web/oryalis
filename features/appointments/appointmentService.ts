@@ -5,6 +5,7 @@ import {
   PostCompletionRetryError,
   type Appointment,
   type AppointmentFull,
+  type AppointmentWithContext,
   type AppointmentTask,
   type AppointmentFilters,
   type CreateAppointmentPayload,
@@ -15,6 +16,8 @@ import {
   type CompleteAppointmentResult,
   type PostCompletionResult,
   type PostCompletionWarningCode,
+  type PostCompletionPlan,
+  type PostCompletionPlanKey,
 } from './appointmentTypes'
 
 const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, created_at, updated_at'
@@ -34,6 +37,24 @@ export async function fetchAppointments(filters: AppointmentFilters = {}): Promi
   const { data, error } = await query
   if (error) throw new Error(error.message)
   return data ?? []
+}
+
+// Variante enrichie pour les listes qui doivent afficher un résumé du contexte commercial
+// (pipeline, température, intention) sans faire un aller-retour par RDV — une seule requête
+// supplémentaire, filtrée par les ids déjà chargés.
+export async function fetchAppointmentsWithContext(filters: AppointmentFilters = {}): Promise<AppointmentWithContext[]> {
+  const appointments = await fetchAppointments(filters)
+  if (appointments.length === 0) return []
+
+  const { data: contexts, error } = await supabase
+    .from('appointment_business_context')
+    .select('appointment_id, pipeline_stage, prospect_temperature, commercial_intent')
+    .in('appointment_id', appointments.map(a => a.id))
+
+  if (error) throw new Error(error.message)
+
+  const byApptId = new Map((contexts ?? []).map(c => [c.appointment_id, c]))
+  return appointments.map(appt => ({ ...appt, business_context: byApptId.get(appt.id) ?? null }))
 }
 
 export async function fetchAppointmentById(id: string): Promise<AppointmentFull | null> {
@@ -144,7 +165,7 @@ export async function updateAppointment(id: string, payload: UpdateAppointmentPa
 // date, cf. nextActionService.postponeNextAction et les requêtes d'agenda qui le groupent
 // systématiquement avec 'scheduled') — donc complétable au même titre.
 // 'cancelled' et 'no_show' sont explicitement exclus : voir AppointmentCompletionError.
-export async function completeAppointment(id: string): Promise<CompleteAppointmentResult> {
+export async function completeAppointment(id: string, plan?: PostCompletionPlan): Promise<CompleteAppointmentResult> {
   const { data, error } = await supabase
     .from('appointments')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
@@ -159,7 +180,7 @@ export async function completeAppointment(id: string): Promise<CompleteAppointme
     let postCompletion: PostCompletionResult = { success: true, warnings: [] }
     if (data.client_id) {
       try {
-        postCompletion = await ensurePostCompletionActions(id, data.client_id, data.user_id)
+        postCompletion = await ensurePostCompletionActions(id, data.client_id, data.user_id, plan)
       } catch (e) {
         console.error('[completeAppointment.postCompletion]', e)
         postCompletion = { success: false, warnings: ['automation_failed'] }
@@ -195,8 +216,10 @@ export async function ensurePostCompletionActions(
   appointmentId: string,
   clientId: string,
   userId: string,
+  plan?: PostCompletionPlan,
 ): Promise<PostCompletionResult> {
   const warnings: PostCompletionWarningCode[] = []
+  const planItem = (key: PostCompletionPlanKey) => plan?.find(p => p.key === key)
 
   const [bizRes, notesRes, existingRes] = await Promise.all([
     supabase
@@ -227,15 +250,24 @@ export async function ensurePostCompletionActions(
     return d.toISOString().split('T')[0]
   }
 
-  // Create followup if no pending auto followup exists for this client
+  // Create followups for each commercial intent present — indépendants les uns des autres
+  // (un RDV avec plusieurs intentions à la fois, ex. buy_product + become_distributor,
+  // déclenche les deux relances). hasExistingAuto reste une garde globale calculée une
+  // seule fois en amont (limite connue et préexistante, non corrigée ici) : si le client a
+  // déjà une relance auto en attente, aucune des relances ci-dessous n'est créée.
   if (biz && !hasExistingAuto) {
-    try {
-      if (biz.commercial_intent === 'buy_product') {
+    const intents = biz.commercial_intent ?? []
+
+    const buyProductItem = planItem('buy_product')
+    const shouldCreateBuyProduct = plan ? !!buyProductItem?.create : intents.includes('buy_product')
+
+    if (shouldCreateBuyProduct) {
+      try {
         const { error } = await supabase.from('followups').insert({
           client_id:            clientId,
           user_id:              userId,
           title:                'Relance suite RDV — achat produit',
-          due_date:             dueDate(3),
+          due_date:             dueDate(buyProductItem?.delayDays ?? 3),
           done:                 false,
           auto_generated:       true,
           prospect_temperature: biz.prospect_temperature ?? null,
@@ -243,12 +275,22 @@ export async function ensurePostCompletionActions(
           product_context:      notes?.products_discussed ?? null,
         })
         if (error) throw error
-      } else if (biz.commercial_intent === 'become_distributor') {
+      } catch (e) {
+        console.error('[ensurePostCompletionActions.followup.buy_product]', e)
+        if (!warnings.includes('followup_failed')) warnings.push('followup_failed')
+      }
+    }
+
+    const distributorItem = planItem('become_distributor')
+    const shouldCreateDistributor = plan ? !!distributorItem?.create : intents.includes('become_distributor')
+
+    if (shouldCreateDistributor) {
+      try {
         const { error } = await supabase.from('followups').insert({
           client_id:            clientId,
           user_id:              userId,
           title:                'Relance suite RDV — recrutement distributeur',
-          due_date:             dueDate(2),
+          due_date:             dueDate(distributorItem?.delayDays ?? 2),
           done:                 false,
           auto_generated:       true,
           prospect_temperature: biz.prospect_temperature ?? null,
@@ -256,10 +298,10 @@ export async function ensurePostCompletionActions(
           product_context:      null,
         })
         if (error) throw error
+      } catch (e) {
+        console.error('[ensurePostCompletionActions.followup.become_distributor]', e)
+        if (!warnings.includes('followup_failed')) warnings.push('followup_failed')
       }
-    } catch (e) {
-      console.error('[ensurePostCompletionActions.followup]', e)
-      warnings.push('followup_failed')
     }
   }
 
@@ -270,7 +312,10 @@ export async function ensurePostCompletionActions(
   // "follow_up" créée manuellement par le praticien sur ce même RDV serait aussi détectée
   // et empêcherait la création automatique. Voir rapport de phase pour la migration future
   // recommandée (colonne auto_generated ou task_type dédié).
-  if (notes?.objections?.trim()) {
+  const objectionItem = planItem('objection_task')
+  const shouldCreateObjectionTask = plan ? !!objectionItem?.create : !!notes?.objections?.trim()
+
+  if (shouldCreateObjectionTask) {
     try {
       const { count: openFollowUpCount } = await supabase
         .from('appointment_tasks')
@@ -290,7 +335,7 @@ export async function ensurePostCompletionActions(
             task_type:      'follow_up',
             priority:       'high',
             status:         'pending',
-            due_at:         new Date(Date.now() + 86400000).toISOString(),
+            due_at:         new Date(Date.now() + (objectionItem?.delayDays ?? 1) * 86400000).toISOString(),
           })
           if (error) throw error
         }
@@ -326,7 +371,7 @@ export async function ensurePostCompletionActions(
 // le statut réel depuis la base plutôt que de faire confiance à un état local potentiellement
 // périmé. ensurePostCompletionActions() reste utilisable en interne (par completeAppointment)
 // mais toute nouvelle tentative de rejeu doit obligatoirement passer par cette fonction.
-export async function retryPostCompletionActions(appointmentId: string): Promise<PostCompletionResult> {
+export async function retryPostCompletionActions(appointmentId: string, plan?: PostCompletionPlan): Promise<PostCompletionResult> {
   const { data, error } = await supabase
     .from('appointments')
     .select('status, client_id, user_id')
@@ -337,7 +382,7 @@ export async function retryPostCompletionActions(appointmentId: string): Promise
   if (data.status !== 'completed') throw new PostCompletionRetryError('not_completed')
   if (!data.client_id) return { success: true, warnings: [] }
 
-  return ensurePostCompletionActions(appointmentId, data.client_id, data.user_id)
+  return ensurePostCompletionActions(appointmentId, data.client_id, data.user_id, plan)
 }
 
 export async function cancelAppointment(id: string, reason?: string): Promise<void> {

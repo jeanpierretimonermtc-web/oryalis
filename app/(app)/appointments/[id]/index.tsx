@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { supabase } from '@/shared/lib/supabase'
 import { useAppointmentDetail } from '@/features/appointments/useAppointments'
 import { AppointmentCompletionError } from '@/features/appointments/appointmentTypes'
-import type { AppointmentStatus, AppointmentTask, ProspectTemperature, CommercialIntent, PostCompletionWarningCode } from '@/features/appointments/appointmentTypes'
+import type { AppointmentStatus, AppointmentTask, ProspectTemperature, CommercialIntent, PostCompletionWarningCode, PostCompletionPlan, PostCompletionPlanKey } from '@/features/appointments/appointmentTypes'
 import { PIPELINE_STAGES, type PipelineStage } from '@/shared/lib/types'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
@@ -166,6 +166,12 @@ export default function AppointmentDetailScreen() {
   const [postWarnings,      setPostWarnings]       = useState<PostCompletionWarningCode[]>([])
   const [retrying,          setRetrying]           = useState(false)
   const debriefParamHandled = useRef(false)
+  const [followupPlan, setFollowupPlan] = useState<Record<PostCompletionPlanKey, { create: boolean; delayDays: number }>>({
+    buy_product:       { create: true, delayDays: 3 },
+    become_distributor: { create: true, delayDays: 2 },
+    objection_task:     { create: true, delayDays: 1 },
+  })
+  const lastPlanRef = useRef<PostCompletionPlan | undefined>(undefined)
   const [showCancelConfirm, setShowCancelConfirm]  = useState(false)
   const [cancelling,        setCancelling]         = useState(false)
   const [inlineError,       setInlineError]        = useState<string | null>(null)
@@ -219,6 +225,18 @@ export default function AppointmentDetailScreen() {
       router.setParams({ debrief: undefined } as any)
     }
   }, [debrief, appointment])
+
+  // Réinitialise les choix de relances à chaque ouverture de la modale (valeurs par défaut
+  // cochées, délais historiques) — évite qu'un choix d'un débrief précédent ne fuite sur le suivant.
+  useEffect(() => {
+    if (showDebrief) {
+      setFollowupPlan({
+        buy_product:        { create: true, delayDays: 3 },
+        become_distributor:  { create: true, delayDays: 2 },
+        objection_task:      { create: true, delayDays: 1 },
+      })
+    }
+  }, [showDebrief])
 
   useEffect(() => {
     const cid = appointment?.client_id
@@ -287,6 +305,24 @@ export default function AppointmentDetailScreen() {
   // Confirmation du débrief : sauvegarde déjà faite (notes + contexte commercial, ce
   // dernier pill par pill au fur et à mesure) → seulement ensuite completeAppointment().
   // Idempotent pour un RDV déjà completed (alreadyCompleted, aucune erreur).
+  // Ne construit une entrée de plan que pour les relances effectivement suggérées (mêmes
+  // conditions que l'affichage dans la modale) — un item absent du plan retombe, côté
+  // service, sur la dérivation automatique historique si le plan complet n'existait pas,
+  // mais ici le plan est toujours construit explicitement dès que la modale est confirmée.
+  function buildFollowupPlan(): PostCompletionPlan {
+    const plan: PostCompletionPlan = []
+    if (biz?.commercial_intent?.includes('buy_product')) {
+      plan.push({ key: 'buy_product', ...followupPlan.buy_product })
+    }
+    if (biz?.commercial_intent?.includes('become_distributor')) {
+      plan.push({ key: 'become_distributor', ...followupPlan.become_distributor })
+    }
+    if (objections.trim()) {
+      plan.push({ key: 'objection_task', ...followupPlan.objection_task })
+    }
+    return plan
+  }
+
   async function handleConfirmDebrief() {
     if (isCompleting) return // empêche une double soumission
     if (notesDirty) {
@@ -296,7 +332,9 @@ export default function AppointmentDetailScreen() {
     setIsCompleting(true)
     setInlineError(null)
     try {
-      const result = await complete()
+      const plan = buildFollowupPlan()
+      lastPlanRef.current = plan
+      const result = await complete(plan)
       if (result.postCompletion && !result.postCompletion.success) {
         setPostWarnings(result.postCompletion.warnings)
       } else {
@@ -319,11 +357,30 @@ export default function AppointmentDetailScreen() {
     }
   }
 
+  // Réouverture du débrief d'un RDV déjà completed : on ne repasse jamais par complete()
+  // (le RDV l'est déjà), mais un changement de sélection/délai de relance doit tout de
+  // même être appliqué avant de fermer — via le même chemin idempotent que "Réessayer"
+  // (les gardes anti-doublon du service s'appliquent donc à l'identique).
+  async function handleUpdateFollowupsOnCompleted() {
+    if (isCompleting) return
+    setIsCompleting(true)
+    setInlineError(null)
+    try {
+      const plan = buildFollowupPlan()
+      lastPlanRef.current = plan
+      const result = await retryPostCompletion(plan)
+      if (result) setPostWarnings(result.warnings)
+    } finally {
+      setIsCompleting(false)
+      setShowDebrief(false)
+    }
+  }
+
   async function handleRetryPostCompletion() {
     if (retrying) return
     setRetrying(true)
     try {
-      const result = await retryPostCompletion()
+      const result = await retryPostCompletion(lastPlanRef.current)
       if (result) setPostWarnings(result.warnings)
     } finally {
       setRetrying(false)
@@ -346,9 +403,11 @@ export default function AppointmentDetailScreen() {
     if (!ok) setInlineError(t('appointments.error_save_business'))
   }
 
-  async function handleIntentChange(intent: CommercialIntent) {
+  async function handleIntentToggle(intent: CommercialIntent) {
     setInlineError(null)
-    const ok = await saveBusinessContext({ commercial_intent: intent })
+    const current = biz?.commercial_intent ?? []
+    const next = current.includes(intent) ? current.filter(i => i !== intent) : [...current, intent]
+    const ok = await saveBusinessContext({ commercial_intent: next })
     if (!ok) setInlineError(t('appointments.error_save_business'))
   }
 
@@ -489,12 +548,12 @@ export default function AppointmentDetailScreen() {
             ) : null}
           </View>
 
-          {(biz?.commercial_intent || biz?.estimated_value != null || appointment.location || practitionerName) ? (
+          {(biz?.commercial_intent?.length || biz?.estimated_value != null || appointment.location || practitionerName) ? (
             <View style={styles.metaGrid}>
-              {biz?.commercial_intent ? (
+              {biz?.commercial_intent?.length ? (
                 <View style={styles.metaItem}>
                   <Text style={styles.metaLabel}>{t('appointments.meta_intent')}</Text>
-                  <Text style={styles.metaValue}>{t(`commercial_intents.${biz.commercial_intent}` as any)}</Text>
+                  <Text style={styles.metaValue}>{biz.commercial_intent.map(i => t(`commercial_intents.${i}` as any)).join(', ')}</Text>
                 </View>
               ) : null}
               {biz?.estimated_value != null ? (
@@ -604,11 +663,11 @@ export default function AppointmentDetailScreen() {
       <Text style={styles.commercialSubLabel}>{t('appointments.field_intent')}</Text>
       <View style={styles.statusPills}>
         {INTENT_PILLS.map(intent => {
-          const active = biz?.commercial_intent === intent
+          const active = !!biz?.commercial_intent?.includes(intent)
           return (
             <TouchableOpacity
               key={intent}
-              onPress={() => handleIntentChange(intent)}
+              onPress={() => handleIntentToggle(intent)}
               style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
               activeOpacity={0.75}
             >
@@ -684,11 +743,11 @@ export default function AppointmentDetailScreen() {
             <Text style={styles.commercialSubLabel}>{t('appointments.field_intent')}</Text>
             <View style={styles.statusPills}>
               {INTENT_PILLS.map(intent => {
-                const active = biz?.commercial_intent === intent
+                const active = !!biz?.commercial_intent?.includes(intent)
                 return (
                   <TouchableOpacity
                     key={intent}
-                    onPress={() => handleIntentChange(intent)}
+                    onPress={() => handleIntentToggle(intent)}
                     style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
                     activeOpacity={0.75}
                   >
@@ -718,13 +777,56 @@ export default function AppointmentDetailScreen() {
                 )
               })}
             </View>
+
+            <Text style={styles.commercialSubLabel}>{t('appointments.debrief_followups_title')}</Text>
+            {(() => {
+              const rows: { key: PostCompletionPlanKey; labelKey: string }[] = []
+              if (biz?.commercial_intent?.includes('buy_product'))       rows.push({ key: 'buy_product',       labelKey: 'appointments.debrief_followup_buy_product' })
+              if (biz?.commercial_intent?.includes('become_distributor')) rows.push({ key: 'become_distributor', labelKey: 'appointments.debrief_followup_become_distributor' })
+              if (objections.trim())                                     rows.push({ key: 'objection_task',     labelKey: 'appointments.debrief_followup_objection_task' })
+
+              if (rows.length === 0) {
+                return <Text style={styles.debriefSub}>{t('appointments.debrief_followups_empty')}</Text>
+              }
+
+              return rows.map(({ key, labelKey }) => {
+                const item = followupPlan[key]
+                return (
+                  <View key={key} style={styles.followupPlanRow}>
+                    <TouchableOpacity
+                      style={styles.taskCheck}
+                      onPress={() => setFollowupPlan(prev => ({ ...prev, [key]: { ...prev[key], create: !prev[key].create } }))}
+                    >
+                      <View style={[styles.taskCheckBox, item.create && { backgroundColor: colors.success, borderColor: colors.success }]}>
+                        {item.create && <Text style={styles.taskCheckMark}>✓</Text>}
+                      </View>
+                    </TouchableOpacity>
+                    <Text style={[styles.followupPlanLabel, !item.create && { color: colors.textTertiary }]}>{t(labelKey as any)}</Text>
+                    {item.create && (
+                      <View style={styles.followupPlanDelay}>
+                        <Text style={styles.followupPlanDelayLabel}>{t('appointments.debrief_followup_days_label')}</Text>
+                        <TextInput
+                          style={styles.followupPlanDelayInput}
+                          value={String(item.delayDays)}
+                          onChangeText={(v) => {
+                            const n = parseInt(v, 10)
+                            setFollowupPlan(prev => ({ ...prev, [key]: { ...prev[key], delayDays: Number.isFinite(n) && n >= 0 ? n : 0 } }))
+                          }}
+                          keyboardType="number-pad"
+                        />
+                      </View>
+                    )}
+                  </View>
+                )
+              })
+            })()}
           </ScrollView>
 
           {inlineError && showDebrief ? <Text style={styles.errorText}>{inlineError}</Text> : null}
 
           <TouchableOpacity
             style={[styles.debriefDoneBtn, isCompleting && { opacity: 0.6 }]}
-            onPress={appointment?.status === 'completed' ? () => setShowDebrief(false) : handleConfirmDebrief}
+            onPress={appointment?.status === 'completed' ? handleUpdateFollowupsOnCompleted : handleConfirmDebrief}
             disabled={isCompleting}
             activeOpacity={0.85}
           >
@@ -889,10 +991,10 @@ export default function AppointmentDetailScreen() {
               <Text style={styles.sideKpiValue}>{biz.estimated_value} {biz.currency}</Text>
             </View>
           ) : null}
-          {biz.commercial_intent ? (
+          {biz.commercial_intent?.length ? (
             <View style={styles.sideKpiRow}>
               <Text style={styles.sideKpiLabel}>{t('appointments.meta_intent')}</Text>
-              <Text style={styles.sideKpiValue}>{t(`commercial_intents.${biz.commercial_intent}` as any)}</Text>
+              <Text style={styles.sideKpiValue}>{biz.commercial_intent.map(i => t(`commercial_intents.${i}` as any)).join(', ')}</Text>
             </View>
           ) : null}
         </View>
@@ -1062,6 +1164,13 @@ function makeStyles(colors: ThemeColors) {
     // Commercial context
     commercialSubLabel: { fontSize: 11, fontFamily: fonts.medium, color: colors.textTertiary, marginTop: 14, marginBottom: 8 },
     bizValueInput: { fontSize: 14, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.bgDim, borderRadius: 8, padding: 10, maxWidth: 160 },
+
+    // Débrief — choix des relances à créer
+    followupPlanRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+    followupPlanLabel:      { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.text },
+    followupPlanDelay:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    followupPlanDelayLabel: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary },
+    followupPlanDelayInput: { fontSize: 13, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.bgDim, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, width: 48, textAlign: 'center' },
 
     // Cancel banner
     cancelBanner:        { backgroundColor: colors.danger + '10', borderRadius: 12, borderWidth: 1, borderColor: colors.danger + '40', padding: 14, gap: 10 },

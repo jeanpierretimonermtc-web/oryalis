@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import * as Clipboard from 'expo-clipboard'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useClient } from '@/features/clients/useClient'
-import { useClientAppointments } from '@/features/appointments/useAppointments'
+import { useClientAppointmentsWithContext } from '@/features/appointments/useAppointments'
 import { useNotes } from '@/features/notes/useNotes'
 import { useClientFollowups } from '@/features/followups/useFollowups'
 import { useRecommendations } from '@/features/recommendations/useRecommendations'
@@ -25,6 +25,19 @@ import { formatDate } from '@/shared/lib/dateFormat'
 
 type Tab = 'apercu' | 'chrono' | 'rdv' | 'notes' | 'relances' | 'reco' | 'interactions' | 'orders' | 'team'
 
+type TimelineKind = 'rdv' | 'note' | 'relance' | 'reco' | 'commande' | 'interaction'
+type TimelineStatusFilter = 'all' | 'done' | 'pending' | 'cancelled'
+
+// Libellé du filtre "type" — réutilise les clés déjà utilisées pour les onglets correspondants.
+const TIMELINE_KIND_LABEL_KEY: Record<TimelineKind, string> = {
+  rdv:         'clients.tab_rdv',
+  note:        'clients.tab_notes',
+  relance:     'clients.tab_followups',
+  reco:        'clients.tab_reco',
+  commande:    'clients.tab_orders',
+  interaction: 'clients.tab_interactions',
+}
+
 interface TimelineEntry {
   id: string
   date: string
@@ -32,7 +45,21 @@ interface TimelineEntry {
   title: string
   sub?: string
   done?: boolean
+  kind: TimelineKind
+  // Catégorie de statut exploitable par le filtre — absente pour les types sans notion
+  // de "fait / en attente / annulé" (ex. notes, commandes).
+  statusCategory?: 'done' | 'pending' | 'cancelled'
   onPress: () => void
+}
+
+function monthYearLabel(key: string, locale: string): string {
+  const [y, m] = key.split('-').map(Number)
+  const label = new Date(y, m - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' })
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+const TEMP_EMOJI: Record<string, string> = {
+  cold: '❄️', warm: '🌤', hot: '🔥', very_hot: '🔥',
 }
 
 const BASE_TABS: { key: Tab; labelKey: string }[] = [
@@ -85,10 +112,17 @@ export default function ClientDetailScreen() {
   const { t, i18n } = useTranslation()
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const APPT_STATUS_COLOR: Record<string, string> = {
+    scheduled: colors.primary,
+    completed: colors.success,
+    cancelled: colors.danger,
+    no_show: colors.warning,
+    rescheduled: colors.textSecondary,
+  }
   const { id } = useLocalSearchParams<{ id: string }>()
   const { session } = useAuth()
   const { client, loading, refresh } = useClient(id)
-  const { appointments } = useClientAppointments(id)
+  const { appointments } = useClientAppointmentsWithContext(id)
   const { notes } = useNotes(id)
   const { followups } = useClientFollowups(id)
   const { recommendations } = useRecommendations(id)
@@ -100,6 +134,9 @@ export default function ClientDetailScreen() {
   const [actionBusy, setActionBusy]     = useState(false)
   const [actionError, setActionError]   = useState<string | null>(null)
   const [phoneCopied, setPhoneCopied]   = useState(false)
+  const [timelineKindFilter,   setTimelineKindFilter]   = useState<'all' | TimelineKind>('all')
+  const [timelineStatusFilter, setTimelineStatusFilter] = useState<TimelineStatusFilter>('all')
+  const [timelinePeriodFilter, setTimelinePeriodFilter] = useState<string | null>(null) // 'YYYY-MM' ou null = toute période
   const { getStatusLabel, isModuleActive } = useAppConfig()
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const { width: screenW } = useWindowDimensions()
@@ -139,6 +176,8 @@ export default function ClientDetailScreen() {
       icon: '📅',
       title: appt.title,
       sub: t(`appointment_statuses.${appt.status}` as any),
+      kind: 'rdv' as const,
+      statusCategory: (appt.status === 'completed' ? 'done' : appt.status === 'cancelled' || appt.status === 'no_show' ? 'cancelled' : 'pending') as 'done' | 'pending' | 'cancelled',
       onPress: () => router.push(`/(app)/clients/${id}/appointments`),
     })),
     ...notes.map(note => ({
@@ -146,6 +185,7 @@ export default function ClientDetailScreen() {
       date: note.created_at,
       icon: '📝',
       title: note.content,
+      kind: 'note' as const,
       onPress: () => router.push(`/(app)/clients/${id}/notes`),
     })),
     ...followups.map(f => ({
@@ -155,6 +195,8 @@ export default function ClientDetailScreen() {
       title: f.title ?? f.content ?? t('followups.title'),
       sub: f.done ? t('followups.done') : undefined,
       done: f.done,
+      kind: 'relance' as const,
+      statusCategory: (f.done ? 'done' : 'pending') as 'done' | 'pending',
       onPress: () => router.push(`/(app)/clients/${id}/followups`),
     })),
     ...recommendations.map(r => ({
@@ -163,6 +205,8 @@ export default function ClientDetailScreen() {
       icon: '🌿',
       title: r.product_name,
       sub: r.reason ?? t(`recommendations.${r.status}`),
+      kind: 'reco' as const,
+      statusCategory: (r.status === 'advised' ? 'pending' : 'done') as 'done' | 'pending',
       onPress: () => router.push(`/(app)/clients/${id}/recommendations`),
     })),
     ...orders.map(o => ({
@@ -171,6 +215,7 @@ export default function ClientDetailScreen() {
       icon: '🛒',
       title: o.product_name,
       sub: o.amount != null ? `${o.amount.toFixed(0)}€` : undefined,
+      kind: 'commande' as const,
       onPress: () => router.push(`/(app)/clients/${id}/orders`),
     })),
     ...interactions.map(item => ({
@@ -180,9 +225,22 @@ export default function ClientDetailScreen() {
       title: item.subject ?? t(`interaction_types.${item.interaction_type}`),
       sub: t(`interaction_types.${item.interaction_type}`),
       done: !!item.completed_at,
+      kind: 'interaction' as const,
+      statusCategory: (item.completed_at ? 'done' : 'pending') as 'done' | 'pending',
       onPress: () => router.push(`/(app)/clients/${id}/interactions`),
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+  // ── Filtres de la chronologie : type, statut, période (mois/année) ──────────
+  const timelineAvailableKinds = Array.from(new Set(timelineEntries.map(e => e.kind))) as TimelineKind[]
+  const timelineAvailableMonths = Array.from(new Set(timelineEntries.map(e => e.date.slice(0, 7)))).sort((a, b) => b.localeCompare(a))
+
+  const filteredTimelineEntries = timelineEntries.filter(e => {
+    if (timelineKindFilter !== 'all' && e.kind !== timelineKindFilter) return false
+    if (timelineStatusFilter !== 'all' && e.statusCategory !== timelineStatusFilter) return false
+    if (timelinePeriodFilter && e.date.slice(0, 7) !== timelinePeriodFilter) return false
+    return true
+  })
 
   async function runNextAction<T>(action: () => Promise<T>): Promise<T | undefined> {
     if (actionBusy) return undefined // garde anti-double-clic
@@ -373,11 +431,6 @@ export default function ClientDetailScreen() {
               <LineIcon name="message" size={18} color={colors.text} strokeWidth={2} />
               <Text style={styles.qaLabel}>Message</Text>
               <Text style={styles.qaSubLabel}>Modèles à envoyer</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.qaBtn} onPress={() => router.push(`/(app)/clients/${id}/appointments` as any)} activeOpacity={0.8}>
-              <LineIcon name="calendarPlus" size={18} color={colors.text} strokeWidth={2} />
-              <Text style={styles.qaLabel}>RDV</Text>
-              <Text style={styles.qaSubLabel}>Créer, voir, historique</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.qaBtn} onPress={() => router.push(`/(app)/clients/${id}/edit` as any)} activeOpacity={0.8}>
               <LineIcon name="edit" size={18} color={colors.text} strokeWidth={2} />
@@ -659,9 +712,71 @@ export default function ClientDetailScreen() {
             {/* ─ Chronologie ─ */}
             {activeTab === 'chrono' && (
               <View style={styles.listTab}>
-                {timelineEntries.length === 0
-                  ? <Text style={styles.emptyText}>{t('clients.timeline_empty')}</Text>
-                  : timelineEntries.map(entry => (
+                <Text style={styles.timelineFilterLabel}>{t('clients.timeline_filter_type')}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timelineFilterRow}>
+                  <TouchableOpacity
+                    style={[styles.filterChip, timelineKindFilter === 'all' && styles.filterChipActive]}
+                    onPress={() => setTimelineKindFilter('all')}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.filterChipText, timelineKindFilter === 'all' && styles.filterChipTextActive]}>{t('clients.filter_all')}</Text>
+                  </TouchableOpacity>
+                  {timelineAvailableKinds.map(kind => (
+                    <TouchableOpacity
+                      key={kind}
+                      style={[styles.filterChip, timelineKindFilter === kind && styles.filterChipActive]}
+                      onPress={() => setTimelineKindFilter(kind)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.filterChipText, timelineKindFilter === kind && styles.filterChipTextActive]}>{t(TIMELINE_KIND_LABEL_KEY[kind])}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <Text style={styles.timelineFilterLabel}>{t('clients.timeline_filter_status')}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timelineFilterRow}>
+                  {(['all', 'pending', 'done', 'cancelled'] as TimelineStatusFilter[]).map(status => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[styles.filterChip, timelineStatusFilter === status && styles.filterChipActive]}
+                      onPress={() => setTimelineStatusFilter(status)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.filterChipText, timelineStatusFilter === status && styles.filterChipTextActive]}>
+                        {t(`clients.timeline_filter_status_${status}`)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {timelineAvailableMonths.length > 0 && (
+                  <>
+                    <Text style={styles.timelineFilterLabel}>{t('clients.timeline_filter_period')}</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timelineFilterRow}>
+                      <TouchableOpacity
+                        style={[styles.filterChip, timelinePeriodFilter === null && styles.filterChipActive]}
+                        onPress={() => setTimelinePeriodFilter(null)}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={[styles.filterChipText, timelinePeriodFilter === null && styles.filterChipTextActive]}>{t('clients.timeline_filter_period_all')}</Text>
+                      </TouchableOpacity>
+                      {timelineAvailableMonths.map(month => (
+                        <TouchableOpacity
+                          key={month}
+                          style={[styles.filterChip, timelinePeriodFilter === month && styles.filterChipActive]}
+                          onPress={() => setTimelinePeriodFilter(month)}
+                          activeOpacity={0.75}
+                        >
+                          <Text style={[styles.filterChipText, timelinePeriodFilter === month && styles.filterChipTextActive]}>{monthYearLabel(month, locale)}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </>
+                )}
+
+                {filteredTimelineEntries.length === 0
+                  ? <Text style={styles.emptyText}>{t(timelineEntries.length === 0 ? 'clients.timeline_empty' : 'clients.timeline_filtered_empty')}</Text>
+                  : filteredTimelineEntries.map(entry => (
                       <TouchableOpacity
                         key={entry.id}
                         style={[styles.listCard, entry.done && styles.listCardDone]}
@@ -693,25 +808,48 @@ export default function ClientDetailScreen() {
                   ? <Text style={styles.emptyText}>{t('appointments.empty')}</Text>
                   : appointments
                       .slice()
-                      .slice().sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime())
-                      .map(appt => (
-                        <TouchableOpacity
-                          key={appt.id}
-                          style={styles.listCard}
-                          onPress={() => router.push(`/(app)/clients/${id}/appointments`)}
-                          activeOpacity={0.8}
-                        >
-                          <View style={styles.listCardLeft}>
-                            <Text style={styles.listCardDate}>
-                              {formatDate(appt.start_at, locale)}
-                            </Text>
-                            <Text style={styles.listCardSub} numberOfLines={1}>{appt.title}</Text>
-                          </View>
-                          <View style={styles.listCardBadge}>
-                            <Text style={styles.listCardBadgeText}>{new Date(appt.start_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))
+                      .sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime())
+                      .map(appt => {
+                        const biz = appt.business_context
+                        const contextParts: string[] = []
+                        if (biz?.prospect_temperature) {
+                          contextParts.push(`${TEMP_EMOJI[biz.prospect_temperature]} ${t(`prospect_temperatures.${biz.prospect_temperature}` as any)}`)
+                        }
+                        if (biz?.commercial_intent?.length) {
+                          contextParts.push(biz.commercial_intent.map(i => t(`commercial_intents.${i}` as any)).join(', '))
+                        }
+                        if (biz?.pipeline_stage) {
+                          contextParts.push(t(`pipeline_stages.${biz.pipeline_stage}` as any))
+                        }
+                        return (
+                          <TouchableOpacity
+                            key={appt.id}
+                            style={styles.listCard}
+                            onPress={() => router.push(`/(app)/appointments/${appt.id}` as any)}
+                            activeOpacity={0.8}
+                          >
+                            <View style={styles.listCardLeft}>
+                              <View style={styles.apptRowHeader}>
+                                <Text style={styles.listCardDate}>
+                                  {formatDate(appt.start_at, locale)}
+                                </Text>
+                                <View style={[styles.apptStatusPill, { backgroundColor: (APPT_STATUS_COLOR[appt.status] ?? colors.textSecondary) + '22' }]}>
+                                  <Text style={[styles.apptStatusPillText, { color: APPT_STATUS_COLOR[appt.status] ?? colors.textSecondary }]}>
+                                    {t(`appointment_statuses.${appt.status}` as any)}
+                                  </Text>
+                                </View>
+                              </View>
+                              <Text style={styles.listCardSub} numberOfLines={1}>{appt.title}</Text>
+                              {contextParts.length > 0 && (
+                                <Text style={styles.listCardContext} numberOfLines={1}>{contextParts.join(' · ')}</Text>
+                              )}
+                            </View>
+                            <View style={styles.listCardBadge}>
+                              <Text style={styles.listCardBadgeText}>{new Date(appt.start_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</Text>
+                            </View>
+                          </TouchableOpacity>
+                        )
+                      })
                 }
                 <TouchableOpacity style={styles.addRowBtn} onPress={() => router.push(`/(app)/clients/${id}/appointments`)} activeOpacity={0.7}>
                   <Text style={styles.addRowBtnText}>+ {t('appointments.add')}</Text>
@@ -1038,6 +1176,14 @@ function makeStyles(colors: ThemeColors) {
   listTab:   { gap: 10 },
   emptyText: { textAlign: 'center', color: colors.textTertiary, fontFamily: fonts.body, fontSize: 14, marginTop: 32, marginBottom: 16 },
 
+  // Filtres de la chronologie
+  timelineFilterLabel: { fontSize: 11, fontFamily: fonts.medium, color: colors.textTertiary, marginTop: 2 },
+  timelineFilterRow:   { flexDirection: 'row', gap: 8, paddingVertical: 6 },
+  filterChip:          { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9999, borderWidth: 0.5, borderColor: colors.border },
+  filterChipActive:    { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+  filterChipText:      { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
+  filterChipTextActive: { color: colors.primary, fontFamily: fonts.semibold },
+
   listCard:       { backgroundColor: colors.card, borderRadius: 14, padding: 16, gap: 6, flexDirection: 'row', alignItems: 'flex-start', ...CARD_SHADOW },
   listCardDone:   { opacity: 0.55 },
   listCardLeft:   { flex: 1, gap: 4 },
@@ -1046,6 +1192,10 @@ function makeStyles(colors: ThemeColors) {
   listCardDate:   { fontSize: 13, fontFamily: fonts.semibold, color: colors.primaryAction },
   listCardDateStrike: { textDecorationLine: 'line-through', color: colors.textTertiary },
   listCardSub:    { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18 },
+  listCardContext: { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, lineHeight: 16 },
+  apptRowHeader:  { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  apptStatusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999 },
+  apptStatusPillText: { fontSize: 11, fontFamily: fonts.semibold },
   listCardBadge:  { backgroundColor: colors.surfaceContainerHigh, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 9999 },
   listCardBadgeGreen: { backgroundColor: colors.primaryLight },
   listCardBadgeText:  { fontSize: 11, fontFamily: fonts.bold, color: colors.textSecondary },

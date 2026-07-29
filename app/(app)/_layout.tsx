@@ -20,7 +20,7 @@ const SIDEBAR_BREAKPOINT = 768
 const NAV_ITEMS: { segment: string; icon: string; labelKey: string; module?: string }[] = [
   { segment: '',             icon: '🏠', labelKey: 'dashboard.title'    },
   { segment: 'clients',      icon: '👥', labelKey: 'clients.title'      },
-  { segment: 'appointments', icon: '📅', labelKey: 'appointments.title' },
+  { segment: 'appointments', icon: '📅', labelKey: 'appointments.nav_title' },
   { segment: 'followups',    icon: '🔔', labelKey: 'followups.title'    },
   { segment: 'network',      icon: '🌐', labelKey: 'network.title',     module: 'downline'  },
   { segment: 'orders',       icon: '🛒', labelKey: 'orders.title'       },
@@ -310,7 +310,7 @@ export default function AppLayout() {
           >
             <Tabs.Screen name="index"        options={{ title: t('dashboard.title')    }} />
             <Tabs.Screen name="clients"      options={{ title: t('clients.title')      }} />
-            <Tabs.Screen name="appointments" options={{ title: t('appointments.title') }} />
+            <Tabs.Screen name="appointments" options={{ title: t('appointments.nav_title') }} />
             <Tabs.Screen name="followups"    options={{ title: t('followups.title')    }} />
             <Tabs.Screen name="catalog"      options={{ title: t('catalog.title')      }} />
             <Tabs.Screen name="catalog/protocols" options={{ href: null }} />

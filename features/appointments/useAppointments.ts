@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '@/shared/lib/supabase'
 import {
   fetchAppointments,
+  fetchAppointmentsWithContext,
   fetchAppointmentById,
   createAppointment,
   updateAppointment,
@@ -19,6 +20,7 @@ import {
 import type {
   Appointment,
   AppointmentFull,
+  AppointmentWithContext,
   AppointmentTask,
   AppointmentFilters,
   CreateAppointmentPayload,
@@ -28,6 +30,7 @@ import type {
   CreateTaskPayload,
   CompleteAppointmentResult,
   PostCompletionResult,
+  PostCompletionPlan,
 } from './appointmentTypes'
 
 export function useAppointments(filters: AppointmentFilters = {}) {
@@ -200,9 +203,9 @@ export function useAppointmentDetail(id: string | null) {
   // Seul chemin de complétion : voir appointmentService.completeAppointment().
   // Rejette (throw) pour cancelled/no_show — l'appelant décide de l'affichage exact
   // (AppointmentCompletionError.code), plutôt que d'être avalé ici en simple booléen.
-  const complete = useCallback(async (): Promise<CompleteAppointmentResult> => {
+  const complete = useCallback(async (plan?: PostCompletionPlan): Promise<CompleteAppointmentResult> => {
     if (!id) throw new Error('No appointment id')
-    const result = await completeAppointment(id)
+    const result = await completeAppointment(id, plan)
     setAppointment(prev => prev ? { ...prev, ...result.appointment } : prev)
     return result
   }, [id])
@@ -211,10 +214,10 @@ export function useAppointmentDetail(id: string | null) {
   // le RDV, ne recrée que ce qui manque encore (idempotent). La garde "completed" est
   // imposée par retryPostCompletionActions() au niveau service (relit le statut réel en
   // base), pas seulement ici.
-  const retryPostCompletion = useCallback(async (): Promise<PostCompletionResult | null> => {
+  const retryPostCompletion = useCallback(async (plan?: PostCompletionPlan): Promise<PostCompletionResult | null> => {
     if (!id) return null
     try {
-      return await retryPostCompletionActions(id)
+      return await retryPostCompletionActions(id, plan)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur lors du nouvel essai')
       return null
@@ -302,6 +305,30 @@ export function useUpcomingAppointments(limit = 10) {
 export function useClientAppointments(clientId: string) {
   const { appointments, loading, error, reload } = useAppointments({ client_id: clientId })
   return { appointments, loading, error, refresh: reload }
+}
+
+// Variante enrichie du contexte commercial (pipeline, température, intention) par RDV —
+// pour les écrans qui doivent en afficher un résumé sans ouvrir chaque fiche RDV.
+export function useClientAppointmentsWithContext(clientId: string) {
+  const [appointments, setAppointments] = useState<AppointmentWithContext[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      setAppointments(await fetchAppointmentsWithContext({ client_id: clientId }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur inconnue')
+    } finally {
+      setLoading(false)
+    }
+  }, [clientId])
+
+  useEffect(() => { load() }, [load])
+
+  return { appointments, loading, error, refresh: load }
 }
 
 export function useLastRdvMap(userId: string | undefined) {

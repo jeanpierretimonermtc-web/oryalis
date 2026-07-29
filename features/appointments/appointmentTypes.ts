@@ -88,7 +88,7 @@ export interface AppointmentBusinessContext {
   main_product_id: string | null
   pipeline_stage: PipelineStage
   prospect_temperature: ProspectTemperature | null
-  commercial_intent: CommercialIntent | null
+  commercial_intent: CommercialIntent[] | null
   estimated_value: number | null
   currency: string
   created_at: string
@@ -127,6 +127,12 @@ export interface AppointmentFull extends Appointment {
   attendees: AppointmentAttendee[]
 }
 
+// Variante légère pour les listes (ex. onglet RDV de la fiche client) : juste de quoi
+// afficher un résumé du contexte commercial, sans les notes ni les tâches.
+export interface AppointmentWithContext extends Appointment {
+  business_context: Pick<AppointmentBusinessContext, 'pipeline_stage' | 'prospect_temperature' | 'commercial_intent'> | null
+}
+
 export interface CreateAppointmentPayload {
   client_id?: string
   title: string
@@ -149,7 +155,7 @@ export interface CreateAppointmentPayload {
     main_product_id?: string
     pipeline_stage?: PipelineStage
     prospect_temperature?: ProspectTemperature
-    commercial_intent?: CommercialIntent
+    commercial_intent?: CommercialIntent[]
     estimated_value?: number
     currency?: string
   }
@@ -182,7 +188,7 @@ export interface UpdateBusinessContextPayload {
   main_product_id?: string
   pipeline_stage?: PipelineStage
   prospect_temperature?: ProspectTemperature
-  commercial_intent?: CommercialIntent
+  commercial_intent?: CommercialIntent[]
   estimated_value?: number
   currency?: string
 }
@@ -230,6 +236,18 @@ export class AppointmentCompletionError extends Error {
     this.code = code
   }
 }
+
+// Choix utilisateur des relances à créer lors du débrief (facultatif — si absent,
+// ensurePostCompletionActions retombe sur la dérivation automatique historique).
+export type PostCompletionPlanKey = 'buy_product' | 'become_distributor' | 'objection_task'
+
+export interface PostCompletionPlanItem {
+  key: PostCompletionPlanKey
+  create: boolean
+  delayDays: number
+}
+
+export type PostCompletionPlan = PostCompletionPlanItem[]
 
 // Rejet métier contrôlé — le rejeu des actions post-complétion n'est autorisé que pour un
 // rendez-vous déjà completed (garde imposée au niveau service, pas seulement dans l'UI).
