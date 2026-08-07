@@ -177,17 +177,29 @@ export default function ClientDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { session } = useAuth()
   const { client, loading, refresh } = useClient(id)
-  // Sans ça, revenir de "Modifier" (ou de toute autre page) affiche des données
-  // périmées tant que l'utilisateur ne quitte pas et ne revient pas sur la fiche.
-  useFocusEffect(useCallback(() => { refresh() }, [refresh]))
-  const { appointments } = useClientAppointmentsWithContext(id)
+  const { appointments, refresh: refreshAppointments } = useClientAppointmentsWithContext(id)
   const { notes, refresh: refreshNotes } = useNotes(id)
-  const { followups } = useClientFollowups(id)
-  const { recommendations } = useRecommendations(id)
-  const { interactions } = useClientInteractions(id)
-  const { orders } = useClientOrders(id)
-  const { team } = useDirectTeam(id)
-  const { events: clientEvents } = useClientEvents(id)
+  const { followups, refresh: refreshFollowups } = useClientFollowups(id)
+  const { recommendations, refresh: refreshRecommendations } = useRecommendations(id)
+  const { interactions, refresh: refreshInteractions } = useClientInteractions(id)
+  const { orders, reload: reloadOrders } = useClientOrders(id)
+  const { team, reload: reloadTeam } = useDirectTeam(id)
+  const { events: clientEvents, refresh: refreshClientEvents } = useClientEvents(id)
+  // Sans ça, revenir de "Ajouter un RDV / une relance / une recommandation / une interaction /
+  // une commande / un contact réseau" (ou de "Modifier") affiche des données périmées tant que
+  // l'utilisateur ne quitte pas et ne revient pas sur la fiche — chaque section de l'onglet
+  // Suivi a sa propre source de données, il faut toutes les rafraîchir, pas seulement le client.
+  useFocusEffect(useCallback(() => {
+    refresh()
+    refreshAppointments()
+    refreshNotes()
+    refreshFollowups()
+    refreshRecommendations()
+    refreshInteractions()
+    reloadOrders()
+    reloadTeam()
+    refreshClientEvents()
+  }, [refresh, refreshAppointments, refreshNotes, refreshFollowups, refreshRecommendations, refreshInteractions, reloadOrders, reloadTeam, refreshClientEvents]))
   const [activeTab, setActiveTab]       = useState<Tab>('synthese')
   const [messageOpen, setMessageOpen]   = useState(false)
   const [actionBusy, setActionBusy]     = useState(false)
