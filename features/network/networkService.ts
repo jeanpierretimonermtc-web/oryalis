@@ -51,7 +51,7 @@ export async function fetchNetworkTree(userId: string): Promise<NetworkNode[]> {
     .from('clients')
     .select(NETWORK_COLS)
     .eq('user_id', userId)
-    .or('sponsor_id.not.is.null,contact_role.in.(distributor,leader,team_member)')
+    .or('sponsor_id.not.is.null,contact_role.ov.{distributor,leader,team_member}')
     .order('full_name')
 
   if (error) throw new Error(error.message)

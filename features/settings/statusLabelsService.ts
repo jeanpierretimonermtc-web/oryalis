@@ -1,8 +1,8 @@
 import { supabase } from '@/shared/lib/supabase'
-import type { ClientStatus, UserStatusLabel, ActivityType } from '@/shared/lib/types'
-import { STATUS_PRESETS } from '@/shared/lib/types'
+import type { LabelKey, UserStatusLabel, ActivityType } from '@/shared/lib/types'
+import { ROLE_PRESETS } from '@/shared/lib/types'
 
-export async function fetchStatusLabels(userId: string): Promise<Record<ClientStatus, string>> {
+export async function fetchStatusLabels(userId: string): Promise<Record<LabelKey, string>> {
   const { data, error } = await supabase
     .from('user_status_labels')
     .select('status_key, custom_label')
@@ -12,12 +12,12 @@ export async function fetchStatusLabels(userId: string): Promise<Record<ClientSt
   for (const row of data ?? []) {
     map[row.status_key] = row.custom_label
   }
-  return map as Record<ClientStatus, string>
+  return map as Record<LabelKey, string>
 }
 
 export async function upsertStatusLabel(
   userId: string,
-  statusKey: ClientStatus,
+  statusKey: LabelKey,
   customLabel: string
 ): Promise<void> {
   const { error } = await supabase
@@ -33,7 +33,7 @@ export async function applyPreset(
   userId: string,
   activityType: ActivityType
 ): Promise<void> {
-  const preset = STATUS_PRESETS[activityType]
+  const preset = ROLE_PRESETS[activityType]
   if (!preset || Object.keys(preset).length === 0) return
   // Upserts individuels — plus fiables que le batch pour les conflits multi-colonnes
   for (const [statusKey, label] of Object.entries(preset)) {

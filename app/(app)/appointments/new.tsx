@@ -12,6 +12,8 @@ import { createAppointment, updateAppointment, fetchAppointmentById } from '@/fe
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
+import { CalendarPickerModal } from '@/shared/components/ui/CalendarPickerModal'
+import { TimePickerModal } from '@/shared/components/ui/TimePickerModal'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
@@ -25,47 +27,62 @@ function initials(name: string | null | undefined) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 function pad(n: number) { return String(n).padStart(2, '0') }
-function buildCalendarDays(year: number, month: number): (number | null)[] {
-  const firstDay = new Date(year, month, 1)
-  const totalDays = new Date(year, month + 1, 0).getDate()
-  let offset = firstDay.getDay() - 1; if (offset < 0) offset = 6
-  const cells: (number | null)[] = Array(offset).fill(null)
-  for (let d = 1; d <= totalDays; d++) cells.push(d)
-  return cells
-}
+// Interprète date+heure comme l'heure LOCALE de l'appareil (celle que l'utilisateur a
+// saisie) et convertit correctement en UTC pour le stockage — une simple concaténation de
+// chaînes sans fuseau était interprétée par Postgres dans le fuseau de la session (UTC),
+// décalant chaque RDV de l'écart entre l'heure locale et UTC (ex. +2h en été en France).
 function toISO(date: string, time: string) {
-  return `${date}T${time}:00`
+  const [y, m, d] = date.split('-').map(Number)
+  const [hh, mm] = time.split(':').map(Number)
+  return new Date(y, m - 1, d, hh, mm, 0, 0).toISOString()
 }
-function addMinutes(iso: string, minutes: number) {
-  return new Date(new Date(iso).getTime() + minutes * 60000).toISOString().slice(0, 16)
+// Ajoute des minutes en arithmétique locale pure (jamais de conversion UTC intermédiaire),
+// pour préremplir l'heure de fin suggérée sans décalage de fuseau.
+function addMinutesToTime(date: string, time: string, minutes: number): { date: string; time: string } {
+  const [y, m, d] = date.split('-').map(Number)
+  const [hh, mm] = time.split(':').map(Number)
+  const dt = new Date(y, m - 1, d, hh, mm + minutes, 0, 0)
+  return {
+    date: `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`,
+    time: `${pad(dt.getHours())}:${pad(dt.getMinutes())}`,
+  }
 }
 
 // ── SelectPill ────────────────────────────────────────────────────────────────
-function SelectPill<T extends string>({ options, value, onChange, colors }: {
+function SelectPill<T extends string>({ options, value, onChange, colors, wrap }: {
   options: { value: T; label: string }[]
   value: T | null
   onChange: (v: T) => void
   colors: ThemeColors
+  // Web/large écran : tous les choix affichés d'un coup (retour à la ligne) plutôt que
+  // coupés dans une bande qui défile horizontalement sans indice visuel de défilement.
+  wrap?: boolean
 }) {
+  const pills = options.map(opt => {
+    const active = opt.value === value
+    return (
+      <TouchableOpacity
+        key={opt.value}
+        style={[
+          { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primaryLight : colors.card },
+        ]}
+        onPress={() => onChange(opt.value)}
+        activeOpacity={0.75}
+      >
+        <Text style={{ fontSize: 13, fontFamily: active ? fonts.semibold : fonts.body, color: active ? colors.primary : colors.textSecondary }}>
+          {opt.label}
+        </Text>
+      </TouchableOpacity>
+    )
+  })
+
+  if (wrap) {
+    return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 2 }}>{pills}</View>
+  }
+
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
-      {options.map(opt => {
-        const active = opt.value === value
-        return (
-          <TouchableOpacity
-            key={opt.value}
-            style={[
-              { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primaryLight : colors.card },
-            ]}
-            onPress={() => onChange(opt.value)}
-            activeOpacity={0.75}
-          >
-            <Text style={{ fontSize: 13, fontFamily: active ? fonts.semibold : fonts.body, color: active ? colors.primary : colors.textSecondary }}>
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        )
-      })}
+      {pills}
     </ScrollView>
   )
 }
@@ -176,150 +193,25 @@ function ClientPickerModal({ visible, onClose, onSelect, userId, colors, styles 
   )
 }
 
-// ── Calendar Picker Modal ─────────────────────────────────────────────────────
-function CalendarPickerModal({ visible, value, locale, onClose, onConfirm, colors, styles }: {
-  visible: boolean; value: string; locale: string
-  onClose: () => void; onConfirm: (d: string) => void
-  colors: ThemeColors; styles: ReturnType<typeof makeStyles>
-}) {
-  const { t } = useTranslation()
-  const todayStr = new Date().toISOString().split('T')[0]
-  const [viewYear,  setViewYear]  = useState(new Date().getFullYear())
-  const [viewMonth, setViewMonth] = useState(new Date().getMonth())
-  const [selected,  setSelected]  = useState(value || todayStr)
-
-  useEffect(() => {
-    if (!visible) return
-    const base = value || todayStr
-    const [y, m] = base.split('-')
-    setViewYear(parseInt(y)); setViewMonth(parseInt(m) - 1); setSelected(base)
-  }, [visible])
-
-  function prevMonth() {
-    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11) }
-    else setViewMonth(m => m - 1)
-  }
-  function nextMonth() {
-    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0) }
-    else setViewMonth(m => m + 1)
-  }
-
-  const days       = buildCalendarDays(viewYear, viewMonth)
-  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' })
-  const dayNames   = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(2024, 0, 1 + i)
-    return d.toLocaleDateString(locale, { weekday: 'narrow' }).toUpperCase()
-  })
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={[styles.pickerBox, { backgroundColor: colors.card }]}>
-          <View style={styles.calHeader}>
-            <TouchableOpacity onPress={prevMonth} style={styles.calNavBtn}>
-              <Text style={[styles.calNavText, { color: colors.primary }]}>‹</Text>
-            </TouchableOpacity>
-            <Text style={[styles.calMonthLabel, { color: colors.text }]}>
-              {monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1)}
-            </Text>
-            <TouchableOpacity onPress={nextMonth} style={styles.calNavBtn}>
-              <Text style={[styles.calNavText, { color: colors.primary }]}>›</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.calDayNames}>
-            {dayNames.map((n, i) => <Text key={i} style={[styles.calDayName, { color: colors.textTertiary }]}>{n}</Text>)}
-          </View>
-          <View style={styles.calGrid}>
-            {days.map((day, i) => {
-              if (day === null) return <View key={`_${i}`} style={styles.calCell} />
-              const dateStr = `${viewYear}-${pad(viewMonth + 1)}-${pad(day)}`
-              const isSel   = dateStr === selected
-              const isToday = dateStr === todayStr
-              return (
-                <TouchableOpacity key={dateStr} style={[styles.calCell, isSel && { backgroundColor: colors.primary, borderRadius: 999 }, !isSel && isToday && { borderRadius: 999, borderWidth: 1.5, borderColor: colors.primary }]} onPress={() => setSelected(dateStr)} activeOpacity={0.7}>
-                  <Text style={[styles.calDayText, { color: colors.text }, isSel && { color: '#fff', fontFamily: fonts.semibold }, !isSel && isToday && { color: colors.primary, fontFamily: fonts.semibold }]}>{day}</Text>
-                </TouchableOpacity>
-              )
-            })}
-          </View>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: colors.primary }]} onPress={() => { onConfirm(selected); onClose() }} activeOpacity={0.85}>
-            <Text style={styles.confirmBtnText}>{t('common.confirm')}</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
-  )
-}
-
-// ── Time Picker Modal ─────────────────────────────────────────────────────────
-function TimePickerModal({ visible, value, onClose, onConfirm, colors, styles }: {
-  visible: boolean; value: string; onClose: () => void; onConfirm: (t: string) => void
-  colors: ThemeColors; styles: ReturnType<typeof makeStyles>
-}) {
-  const { t } = useTranslation()
-  const [hours,   setHours]   = useState(9)
-  const [minutes, setMinutes] = useState(0)
-
-  useEffect(() => {
-    if (!visible) return
-    if (value) {
-      const [h, m] = value.split(':')
-      setHours(parseInt(h)); setMinutes(Math.round(parseInt(m) / 5) * 5 % 60)
-    } else { setHours(9); setMinutes(0) }
-  }, [visible])
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={[styles.pickerBox, { backgroundColor: colors.card }]}>
-          <Text style={[styles.calMonthLabel, { color: colors.text, marginBottom: 28 }]}>{t('appointments.time')}</Text>
-          <View style={styles.timePicker}>
-            <View style={styles.timeColumn}>
-              <TouchableOpacity style={styles.timeArrow} onPress={() => setHours(h => (h + 1) % 24)} activeOpacity={0.7}>
-                <Text style={[styles.timeArrowText, { color: colors.primary }]}>▲</Text>
-              </TouchableOpacity>
-              <View style={[styles.timeValueBox, { backgroundColor: colors.bgDim, borderColor: colors.border }]}>
-                <Text style={[styles.timeValueText, { color: colors.text }]}>{pad(hours)}</Text>
-              </View>
-              <TouchableOpacity style={styles.timeArrow} onPress={() => setHours(h => (h - 1 + 24) % 24)} activeOpacity={0.7}>
-                <Text style={[styles.timeArrowText, { color: colors.primary }]}>▼</Text>
-              </TouchableOpacity>
-              <Text style={[styles.timeUnit, { color: colors.textTertiary }]}>h</Text>
-            </View>
-            <Text style={[styles.timeSep, { color: colors.text }]}>:</Text>
-            <View style={styles.timeColumn}>
-              <TouchableOpacity style={styles.timeArrow} onPress={() => setMinutes(m => (m + 5) % 60)} activeOpacity={0.7}>
-                <Text style={[styles.timeArrowText, { color: colors.primary }]}>▲</Text>
-              </TouchableOpacity>
-              <View style={[styles.timeValueBox, { backgroundColor: colors.bgDim, borderColor: colors.border }]}>
-                <Text style={[styles.timeValueText, { color: colors.text }]}>{pad(minutes)}</Text>
-              </View>
-              <TouchableOpacity style={styles.timeArrow} onPress={() => setMinutes(m => (m - 5 + 60) % 60)} activeOpacity={0.7}>
-                <Text style={[styles.timeArrowText, { color: colors.primary }]}>▼</Text>
-              </TouchableOpacity>
-              <Text style={[styles.timeUnit, { color: colors.textTertiary }]}>min</Text>
-            </View>
-          </View>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: colors.primary, marginTop: 28 }]} onPress={() => { onConfirm(`${pad(hours)}:${pad(minutes)}`); onClose() }} activeOpacity={0.85}>
-            <Text style={styles.confirmBtnText}>{t('common.confirm')}</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
-  )
-}
-
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export default function NewAppointmentScreen() {
   const { t, i18n } = useTranslation()
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
-  const { date: paramDate, time: paramTime, clientId: paramClientId, id: editId } =
-    useLocalSearchParams<{ date?: string; time?: string; clientId?: string; id?: string }>()
+  const { date: paramDate, time: paramTime, clientId: paramClientId, id: editId, returnTo } =
+    useLocalSearchParams<{ date?: string; time?: string; clientId?: string; id?: string; returnTo?: string }>()
   const { width } = useWindowDimensions()
   const isWide = width >= 768
   const isEdit = !!editId
+
+  // Naviguer ici depuis un autre onglet (ex. fiche contact → RDV) via un chemin absolu ne
+  // laisse pas toujours un historique de retour exploitable — voir appointments/[id]/index.tsx
+  // pour le même mécanisme.
+  function goBack() {
+    if (returnTo) router.replace(decodeURIComponent(returnTo) as any)
+    else router.back()
+  }
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const [loadingAppt, setLoadingAppt] = useState(isEdit)
 
@@ -393,10 +285,9 @@ export default function NewAppointmentScreen() {
 
   function handleStartTimeConfirm(time: string) {
     setStartTime(time)
-    const startISO = toISO(startDate, time)
-    const endISO   = addMinutes(startISO, 60)
-    setEndDate(endISO.split('T')[0])
-    setEndTime(endISO.split('T')[1].slice(0, 5))
+    const { date: endD, time: endT } = addMinutesToTime(startDate, time, 60)
+    setEndDate(endD)
+    setEndTime(endT)
   }
 
   async function handleSave() {
@@ -437,7 +328,7 @@ export default function NewAppointmentScreen() {
             : undefined,
         })
       }
-      router.back()
+      goBack()
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : t('common.error'))
       console.error('[newAppointment]', e)
@@ -465,7 +356,15 @@ export default function NewAppointmentScreen() {
   if (loadingAppt) {
     return (
       <>
-        <Stack.Screen options={{ title: t('appointments.edit_title'), headerBackTitle: '' }} />
+        <Stack.Screen options={{
+          title: t('appointments.edit_title'),
+          headerBackTitle: '',
+          headerLeft: () => (
+            <TouchableOpacity onPress={goBack} style={styles.headerBackBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.headerBackText}>‹ {t('common.back')}</Text>
+            </TouchableOpacity>
+          ),
+        }} />
         <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -475,7 +374,15 @@ export default function NewAppointmentScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: isEdit ? t('appointments.edit_title') : t('appointments.new_title'), headerBackTitle: '' }} />
+      <Stack.Screen options={{
+        title: isEdit ? t('appointments.edit_title') : t('appointments.new_title'),
+        headerBackTitle: '',
+        headerLeft: () => (
+          <TouchableOpacity onPress={goBack} style={styles.headerBackBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.headerBackText}>‹ {t('common.back')}</Text>
+          </TouchableOpacity>
+        ),
+      }} />
       <ScrollView style={styles.container} contentContainerStyle={[styles.content, isWide && styles.contentWide]} keyboardShouldPersistTaps="handled">
 
         {/* ── Section 1 : Informations ─────────────────────────────── */}
@@ -492,7 +399,7 @@ export default function NewAppointmentScreen() {
           </Field>
 
           <Field label={t('appointments.type_label')}>
-            <SelectPill options={typeOptions} value={apptType} onChange={setApptType} colors={colors} />
+            <SelectPill options={typeOptions} value={apptType} onChange={setApptType} colors={colors} wrap={isWide} />
           </Field>
 
           <Field label={`${t('appointments.select_client')} (${t('common.optional')})`}>
@@ -572,10 +479,10 @@ export default function NewAppointmentScreen() {
       </ScrollView>
 
       <ClientPickerModal visible={showClientPicker} onClose={() => setShowClientPicker(false)} onSelect={handleSelectClient} userId={session?.user.id ?? ''} colors={colors} styles={styles} />
-      <CalendarPickerModal visible={showStartCal} value={startDate} locale={locale} onClose={() => setShowStartCal(false)} onConfirm={handleStartDateConfirm} colors={colors} styles={styles} />
-      <TimePickerModal visible={showStartTime} value={startTime} onClose={() => setShowStartTime(false)} onConfirm={handleStartTimeConfirm} colors={colors} styles={styles} />
-      <CalendarPickerModal visible={showEndCal} value={endDate} locale={locale} onClose={() => setShowEndCal(false)} onConfirm={setEndDate} colors={colors} styles={styles} />
-      <TimePickerModal visible={showEndTime} value={endTime} onClose={() => setShowEndTime(false)} onConfirm={setEndTime} colors={colors} styles={styles} />
+      <CalendarPickerModal visible={showStartCal} value={startDate} locale={locale} onClose={() => setShowStartCal(false)} onConfirm={handleStartDateConfirm} />
+      <TimePickerModal visible={showStartTime} value={startTime} onClose={() => setShowStartTime(false)} onConfirm={handleStartTimeConfirm} />
+      <CalendarPickerModal visible={showEndCal} value={endDate} locale={locale} onClose={() => setShowEndCal(false)} onConfirm={setEndDate} />
+      <TimePickerModal visible={showEndTime} value={endTime} onClose={() => setShowEndTime(false)} onConfirm={setEndTime} />
     </>
   )
 }
@@ -586,6 +493,9 @@ function makeStyles(colors: ThemeColors) {
   container:   { flex: 1, backgroundColor: colors.bg },
   content:     { padding: 16, gap: 16, paddingBottom: 48 },
   contentWide: { maxWidth: 640, alignSelf: 'center', width: '100%', paddingHorizontal: 24 },
+
+  headerBackBtn:  { paddingHorizontal: 12 },
+  headerBackText: { fontSize: 14, fontFamily: fonts.medium, color: colors.primary },
 
   error: { color: colors.danger, fontSize: 14, textAlign: 'center', padding: 10, backgroundColor: colors.dangerLight, borderRadius: 8 },
 
@@ -622,29 +532,5 @@ function makeStyles(colors: ThemeColors) {
   clientAvatarText:  { fontSize: 14, fontFamily: fonts.bold },
   clientRowName:     { fontSize: 15, fontFamily: fonts.semibold },
   clientRowEmail:    { fontSize: 13, fontFamily: fonts.body, marginTop: 1 },
-
-  overlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 },
-  pickerBox:     { width: '100%', maxWidth: 340, borderRadius: 20, padding: 20, boxShadow: [{ offsetX: 0, offsetY: 12, blurRadius: 24, color: 'rgba(0, 0, 0, 0.2)' }], elevation: 16 },
-  confirmBtn:    { borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 16 },
-  confirmBtnText:{ fontSize: 15, fontFamily: fonts.semibold, color: '#fff' },
-
-  calHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  calNavBtn:    { padding: 6 },
-  calNavText:   { fontSize: 28, fontFamily: fonts.medium, lineHeight: 32 },
-  calMonthLabel:{ fontSize: 15, fontFamily: fonts.semibold, textAlign: 'center', flex: 1 },
-  calDayNames:  { flexDirection: 'row', marginBottom: 2 },
-  calDayName:   { width: '14.285714%', textAlign: 'center', fontSize: 11, fontFamily: fonts.semibold, paddingVertical: 6 },
-  calGrid:      { flexDirection: 'row', flexWrap: 'wrap' },
-  calCell:      { width: '14.285714%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
-  calDayText:   { fontSize: 14, fontFamily: fonts.medium },
-
-  timePicker:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 },
-  timeColumn:    { alignItems: 'center', gap: 10 },
-  timeArrow:     { padding: 8 },
-  timeArrowText: { fontSize: 22, lineHeight: 26 },
-  timeValueBox:  { width: 80, height: 64, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  timeValueText: { fontSize: 32, fontFamily: fonts.bold, lineHeight: 38 },
-  timeUnit:      { fontSize: 11, fontFamily: fonts.semibold, textTransform: 'uppercase', letterSpacing: 0.5 },
-  timeSep:       { fontSize: 36, fontFamily: fonts.bold, marginBottom: 28 },
   })
 }

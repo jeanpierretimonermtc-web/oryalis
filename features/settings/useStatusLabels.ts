@@ -4,12 +4,14 @@ import {
   fetchStatusLabels, upsertStatusLabel,
   applyPreset, resetStatusLabels,
 } from './statusLabelsService'
-import type { ClientStatus, ActivityType } from '@/shared/lib/types'
-import { DEFAULT_STATUS_LABELS as DEFAULTS } from '@/shared/lib/types'
+import type { LabelKey, ActivityType } from '@/shared/lib/types'
+import { DEFAULT_ROLE_LABELS, DEFAULT_STATUS_LABELS } from '@/shared/lib/types'
+
+const DEFAULTS: Record<string, string> = { ...DEFAULT_STATUS_LABELS, ...DEFAULT_ROLE_LABELS }
 
 export function useStatusLabels() {
   const { session } = useAuth()
-  const [labels, setLabels]   = useState<Partial<Record<ClientStatus, string>>>({})
+  const [labels, setLabels]   = useState<Partial<Record<LabelKey, string>>>({})
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -27,11 +29,11 @@ export function useStatusLabels() {
   useEffect(() => { load() }, [load])
 
   // Retourne le libellé personnalisé ou le défaut
-  const getLabel = useCallback((key: ClientStatus): string => {
+  const getLabel = useCallback((key: LabelKey): string => {
     return labels[key] ?? DEFAULTS[key] ?? key
   }, [labels])
 
-  const saveLabel = useCallback(async (key: ClientStatus, value: string) => {
+  const saveLabel = useCallback(async (key: LabelKey, value: string) => {
     if (!session) return
     try {
       await upsertStatusLabel(session.user.id, key, value)

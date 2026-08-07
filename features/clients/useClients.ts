@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { getClients, searchClients } from './clientService'
-import type { ClientListItem, ClientStatus } from '@/shared/lib/types'
+import type { ClientListItem, ContactRole } from '@/shared/lib/types'
 
-export function useClients(statusFilter?: ClientStatus) {
+export function useClients(roleFilter?: ContactRole) {
   const { session } = useAuth()
   const [clients, setClients] = useState<ClientListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -15,13 +15,13 @@ export function useClients(statusFilter?: ClientStatus) {
     setError(null)
     try {
       const data = await getClients(session.user.id)
-      setClients(statusFilter ? data.filter(c => c.status === statusFilter) : data)
+      setClients(roleFilter ? data.filter(c => c.contact_role.includes(roleFilter)) : data)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'error')
     } finally {
       setLoading(false)
     }
-  }, [session, statusFilter])
+  }, [session, roleFilter])
 
   useEffect(() => { fetch() }, [fetch])
 
@@ -33,11 +33,11 @@ export function useClientSearch() {
   const [results, setResults] = useState<ClientListItem[]>([])
   const [loading, setLoading] = useState(false)
 
-  const search = useCallback(async (query: string, status?: ClientStatus) => {
+  const search = useCallback(async (query: string, role?: ContactRole) => {
     if (!session) return
     setLoading(true)
     try {
-      const data = await searchClients(session.user.id, query, status)
+      const data = await searchClients(session.user.id, query, role)
       setResults(data)
     } finally {
       setLoading(false)

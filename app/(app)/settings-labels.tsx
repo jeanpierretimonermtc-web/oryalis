@@ -7,8 +7,8 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
-import type { ActivityType, ClientStatus } from '@/shared/lib/types'
-import { STATUS_KEYS, DEFAULT_STATUS_LABELS, STATUS_PRESETS } from '@/shared/lib/types'
+import type { ActivityType, ContactRole } from '@/shared/lib/types'
+import { ROLE_KEYS, DEFAULT_ROLE_LABELS, ROLE_PRESETS } from '@/shared/lib/types'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 
 export default function LabelsSettingsScreen() {
@@ -16,24 +16,24 @@ export default function LabelsSettingsScreen() {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { labels, saveLabel, applyActivityPreset, resetLabels } = useAppConfig()
-  const [draft, setDraft] = useState<Partial<Record<ClientStatus, string>>>({})
+  const [draft, setDraft] = useState<Partial<Record<ContactRole, string>>>({})
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { setDraft({ ...labels }) }, [labels])
 
   const activePreset = useMemo((): ActivityType | null => {
-    for (const [type, preset] of Object.entries(STATUS_PRESETS)) {
+    for (const [type, preset] of Object.entries(ROLE_PRESETS)) {
       if (!preset) continue
       const entries = Object.entries(preset)
       if (!entries.length) continue
-      if (entries.every(([k, v]) => labels[k as ClientStatus] === v)) return type as ActivityType
+      if (entries.every(([k, v]) => labels[k as ContactRole] === v)) return type as ActivityType
     }
     return null
   }, [labels])
 
   async function handleSave() {
     setSaving(true)
-    try { for (const [k, v] of Object.entries(draft)) { if (v?.trim()) await saveLabel(k as ClientStatus, v.trim()) } }
+    try { for (const [k, v] of Object.entries(draft)) { if (v?.trim()) await saveLabel(k as ContactRole, v.trim()) } }
     finally { setSaving(false) }
   }
 
@@ -60,14 +60,14 @@ export default function LabelsSettingsScreen() {
         </View>
 
         <View style={styles.card}>
-          {STATUS_KEYS.map((key, idx) => (
+          {ROLE_KEYS.map((key, idx) => (
             <View key={key} style={[styles.labelRow, idx > 0 && styles.labelRowBorder]}>
               <Text style={styles.keyText}>{key}</Text>
               <TextInput
                 style={styles.input}
-                value={draft[key] ?? DEFAULT_STATUS_LABELS[key]}
+                value={draft[key] ?? DEFAULT_ROLE_LABELS[key]}
                 onChangeText={v => setDraft(prev => ({ ...prev, [key]: v }))}
-                placeholder={DEFAULT_STATUS_LABELS[key]}
+                placeholder={DEFAULT_ROLE_LABELS[key]}
                 placeholderTextColor={colors.textTertiary}
               />
             </View>

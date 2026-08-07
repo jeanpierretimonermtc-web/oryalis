@@ -113,6 +113,58 @@ export function renderTemplate(
     .replace(/\{mon_prénom\}/g, vars.mon_prénom ?? '[votre prénom]')
 }
 
+// Décision #7 de la refonte : le récap partagé au client ne reprend jamais les
+// notes internes ni les objections — uniquement date/type du RDV, besoins
+// identifiés et produits discutés.
+export function buildAppointmentRecapTemplate(params: {
+  dateLabel: string
+  typeLabel: string
+  needsIdentified?: string | null
+  productsDiscussed?: string | null
+  // Prochain RDV proposé en fin de débrief — repris dans le récap quand renseigné, comme
+  // dans le workflow réel observé chez les praticiennes ("récap + date du futur RDV,
+  // envoyés ensemble, immédiatement").
+  nextAppointment?: { dateLabel: string; purpose: string } | null
+}): MessageTemplate {
+  const { dateLabel, typeLabel, needsIdentified, productsDiscussed, nextAppointment } = params
+  const parts = [`Bonjour {prénom}, merci pour notre échange du ${dateLabel} (${typeLabel}).`]
+  if (needsIdentified?.trim())   parts.push(`Ce qu'on a retenu :\n${needsIdentified.trim()}`)
+  if (productsDiscussed?.trim()) parts.push(`Produits évoqués :\n${productsDiscussed.trim()}`)
+  if (nextAppointment)           parts.push(`Je te propose qu'on se retrouve le ${nextAppointment.dateLabel} pour ${nextAppointment.purpose}.`)
+  parts.push(`À bientôt !\n{mon_prénom}`)
+  return {
+    id: 'appointment-recap',
+    category: 'suivi',
+    channel: 'all',
+    name: 'Récap du rendez-vous',
+    body: parts.join('\n\n'),
+  }
+}
+
+// Résumé "copie de vos données" que le client peut demander à tout moment (RGPD) — ne
+// reprend que ce qui est client-facing par nature : intérêts, historique des dates/types
+// de RDV, produits recommandés. Jamais les notes internes, objections, données de santé,
+// pipeline ou température (Décision #7).
+export function buildClientSummaryTemplate(params: {
+  interests?: string[]
+  appointments: { dateLabel: string; typeLabel: string }[]
+  recommendations: { productName: string }[]
+}): MessageTemplate {
+  const { interests, appointments, recommendations } = params
+  const parts = [`Bonjour {prénom}, comme tu me l'as demandé, voici un résumé de ce qui est noté dans ton suivi chez {mon_prénom}.`]
+  if (interests?.length) parts.push(`Centres d'intérêt : ${interests.join(', ')}`)
+  if (appointments.length) parts.push(`Rendez-vous :\n${appointments.map(a => `- ${a.dateLabel} — ${a.typeLabel}`).join('\n')}`)
+  if (recommendations.length) parts.push(`Produits recommandés :\n${recommendations.map(r => `- ${r.productName}`).join('\n')}`)
+  parts.push(`Si tu remarques une erreur ou que tu veux que je supprime une information, dis-le-moi.\n{mon_prénom}`)
+  return {
+    id: 'client-summary',
+    category: 'suivi',
+    channel: 'all',
+    name: 'Résumé de suivi',
+    body: parts.join('\n\n'),
+  }
+}
+
 export const CATEGORY_LABELS: Record<TemplateCategory, string> = {
   prospection: 'Prospection',
   lrp:         'LRP / Fidélité',

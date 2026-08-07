@@ -25,7 +25,6 @@
 | `/clients/:id` (fiche) | `app/(app)/clients/[id]/index.tsx` |
 | `/clients/:id/edit` | `app/(app)/clients/[id]/edit.tsx` |
 | `/clients/:id/appointments` | `app/(app)/clients/[id]/appointments.tsx` |
-| `/clients/:id/notes` | `app/(app)/clients/[id]/notes.tsx` |
 | `/clients/:id/followups` | `app/(app)/clients/[id]/followups.tsx` |
 | `/clients/:id/recommendations` | `app/(app)/clients/[id]/recommendations.tsx` |
 | `/clients/:id/interactions` | `app/(app)/clients/[id]/interactions.tsx` |
@@ -269,11 +268,10 @@ Colonnes détaillées de `appointment_notes` / `appointment_tasks` / `appointmen
 
 | Écran (fichier) | Hooks (`use*`) | Services (fonctions appelées) |
 |---|---|---|
-| `clients/[id]/index.tsx` (fiche client) | `useClient`, `useClientAppointments`, `useNotes`, `useClientFollowups`, `useRecommendations`, `useClientInteractions`, `useClientOrders`, `useDirectTeam`, `useAppConfig` | `computeProspectScore`, `callContact`, `completeNextAction`, `openWhatsApp`, `postponeNextAction` (toutes dans `nextActionService.ts`) |
+| `clients/[id]/index.tsx` (fiche client) | `useClient`, `useClientAppointments`, `useNotes`, `useClientFollowups`, `useRecommendations`, `useClientInteractions`, `useClientOrders`, `useDirectTeam`, `useAppConfig` | `computeProspectScore`, `callContact`, `completeNextAction`, `openWhatsApp`, `postponeNextAction` (toutes dans `nextActionService.ts`), `createNote`, `deleteNote` (notes libres fusionnées dans l'onglet Activité) |
 | `clients/index.tsx` (liste) | `useClients`, `useClientSearch`, `useLastRdvMap`, `useContactQuota`, `useAppConfig` | `archiveClient`, `computeProspectScore`, `deleteClient` |
 | `clients/new.tsx` | `useContactQuota`, `useAppConfig` | `createClient`, `isContactQuotaError` |
 | `clients/[id]/edit.tsx` | `useClient`, `useAppConfig` | `updateClient`, `deleteClient` |
-| `clients/[id]/notes.tsx` | `useNotes` (+ requêtes directes vers `appointment_notes` côté écran pour la fusion, hors hook dédié) | `createNote`, `deleteNote` |
 | `clients/[id]/followups.tsx` | `useClientFollowups`, `useClient` (+ requêtes directes `appointment_tasks`/`interactions` côté écran pour la fusion) | `createFollowup`, `toggleFollowupDone`, `deleteFollowup`, `completeTask`, `deleteTask` (ces 2 dernières viennent de `appointmentService.ts`, pas de `followupService.ts`) |
 | `clients/[id]/interactions.tsx` | `useClientInteractions` | `createInteraction`, `markInteractionDone`, `deleteInteraction` |
 | `clients/[id]/appointments.tsx` | `useClientAppointments` | `deleteAppointment` |
@@ -369,7 +367,6 @@ Déjà détaillés en §3-4 de la version précédente de ce document ; résumé
 |---|---|---|
 | `/clients/:id` | `app/(app)/clients/[id]/index.tsx` | Fiche client — agrège tout (RDV, notes, relances, interactions, commandes, équipe) |
 | `/clients/:id/appointments` | `app/(app)/clients/[id]/appointments.tsx` | Historique + à venir des RDV du client |
-| `/clients/:id/notes` | `app/(app)/clients/[id]/notes.tsx` | Notes libres fusionnées avec `appointment_notes` |
 | `/clients/:id/followups` | `app/(app)/clients/[id]/followups.tsx` | Relances fusionnées avec `appointment_tasks` + interactions à venir |
 | `/clients/:id/interactions` | `app/(app)/clients/[id]/interactions.tsx` | Journal d'interactions manuelles |
 | `/appointments` | `app/(app)/appointments/index.tsx` | Agenda global (mois/semaine/jour) |

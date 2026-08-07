@@ -1,5 +1,9 @@
 // ── Scalar types ──────────────────────────────────────────────────────────────
 
+/** @deprecated Ancien statut de cycle de vie — remplacé par `contact_role` (rôle),
+ * `is_vip` (tag manuel) et `computeRelationshipHealth()` (santé calculée). La colonne
+ * `status` reste en base pour compatibilité mais n'est plus lue/écrite comme source de
+ * vérité par l'app (voir migrate42.mjs). */
 export type ClientStatus =
   | 'prospect'
   | 'new_client'
@@ -20,16 +24,18 @@ export type ModuleKey =
   | 'goals'
   | 'calendar_sync'
   | 'client_import'
-  | 'auto_new_client'
+  | 'auto_first_order'
   | 'auto_order'
   | 'auto_appointment'
   | 'auto_no_contact'
 
+/** @deprecated voir `ClientStatus`. */
 export const STATUS_KEYS: ClientStatus[] = [
   'prospect', 'new_client', 'active', 'loyal', 'vip',
   'advisor', 'team_member', 'inactive', 'lost',
 ]
 
+/** @deprecated voir `ClientStatus`. */
 export const DEFAULT_STATUS_LABELS: Record<ClientStatus, string> = {
   prospect:    'Prospect',
   new_client:  'Nouveau client',
@@ -42,9 +48,34 @@ export const DEFAULT_STATUS_LABELS: Record<ClientStatus, string> = {
   lost:        'Perdu',
 }
 
+/** @deprecated voir `ClientStatus`. */
 export const STATUS_PRESETS: Partial<Record<ActivityType, Partial<Record<ClientStatus, string>>>> = {
   doterra:  { loyal: 'LRP',             advisor: 'Conseillère', team_member: 'Équipe'    },
   zinzino:  { loyal: 'Client récurrent', advisor: 'Partenaire',  team_member: 'Downline'  },
+}
+
+// ── Rôle relationnel : libellés personnalisables (remplace STATUS_* ci-dessus) ────────
+
+/** Clé de personnalisation de libellé — rôle (nouveau) ou statut legacy (conservé pour
+ * ne pas invalider d'anciennes lignes `user_status_labels` déjà enregistrées). */
+export type LabelKey = ContactRole | ClientStatus
+
+export const ROLE_KEYS: ContactRole[] = [
+  'prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive',
+]
+
+export const DEFAULT_ROLE_LABELS: Record<ContactRole, string> = {
+  prospect:    'Prospect',
+  customer:    'Client',
+  distributor: 'Distributeur',
+  leader:      'Leader',
+  team_member: 'Membre équipe',
+  inactive:    'Inactif',
+}
+
+export const ROLE_PRESETS: Partial<Record<ActivityType, Partial<Record<ContactRole, string>>>> = {
+  doterra: { distributor: 'Conseillère', leader: 'Conseillère Leader', team_member: 'Équipe' },
+  zinzino: { distributor: 'Partenaire',  leader: 'Partenaire Leader',  team_member: 'Downline' },
 }
 
 export interface UserBusinessProfile {
@@ -52,6 +83,7 @@ export interface UserBusinessProfile {
   user_id: string
   activity_type: ActivityType
   custom_brand_name: string | null
+  custom_lrp_name: string | null
   active_modules: ModuleKey[]
   automation_delays: Record<string, number>
   created_at: string
@@ -61,7 +93,7 @@ export interface UserBusinessProfile {
 export interface UserStatusLabel {
   id: string
   user_id: string
-  status_key: ClientStatus
+  status_key: LabelKey
   custom_label: string
   created_at: string
 }
@@ -112,6 +144,12 @@ export type AcquisitionSource =
 
 export type NetworkPotential = 'low' | 'medium' | 'high'
 
+// Programme de commande récurrente / fidélité (ex. "LRP" chez doTERRA) — le nom affiché
+// est personnalisable (voir UserBusinessProfile.custom_lrp_name), le statut ci-dessous ne
+// change pas de fabricant à l'autre.
+export type LrpStatus = 'not_enrolled' | 'active' | 'paused' | 'cancelled'
+export const LRP_STATUSES: LrpStatus[] = ['not_enrolled', 'active', 'paused', 'cancelled']
+
 export type ContactRole =
   | 'prospect'
   | 'customer'
@@ -134,6 +172,20 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   'new_lead', 'contacted', 'presentation_scheduled', 'presentation_completed',
   'follow_up', 'customer', 'distributor', 'lost',
 ]
+
+// ── Santé de la relation (calculée, voir features/clients/relationshipHealth.ts) ──────
+
+export type RelationshipHealthTier = 'up_to_date' | 'to_follow_up' | 'overdue' | 'dormant'
+
+export const RELATIONSHIP_HEALTH_TIERS: RelationshipHealthTier[] = [
+  'up_to_date', 'to_follow_up', 'overdue', 'dormant',
+]
+
+export interface RelationshipHealth {
+  tier: RelationshipHealthTier
+  /** true si `manually_inactive` a forcé ce palier, indépendamment de l'activité réelle. */
+  overridden: boolean
+}
 
 export type NextActionType = 'call' | 'whatsapp' | 'sms' | 'email' | 'rdv'
 export type NextActionSource = 'appointment' | 'interaction' | 'followup'
@@ -230,6 +282,7 @@ export interface Client {
   user_id: string
   full_name: string
   first_name: string | null
+  avatar_url: string | null
   email: string | null
   phone: string | null
   status: ClientStatus
@@ -247,11 +300,15 @@ export interface Client {
   welcome_email_sent: boolean
   doterra_id: string | null
   next_lrp_date: string | null
+  lrp_status: LrpStatus
+  lrp_loyalty_percent: number | null
+  lrp_start_date: string | null
   address: string | null
   loyalty_notes: string | null
+  tracking_consent_at: string | null
   // ── MLM réseau (migrate15) ────────────────────────────────────────────────
   sponsor_id: string | null
-  contact_role: ContactRole
+  contact_role: ContactRole[]
   pipeline_stage: PipelineStage
   pipeline_stage_updated_at: string | null
   // ── CRM International (migrate13) ─────────────────────────────────────────
@@ -270,6 +327,9 @@ export interface Client {
   referral_count: number
   network_potential: NetworkPotential | null
   archived_at: string | null
+  // ── Modèle relationnel (migrate42) ─────────────────────────────────────────
+  is_vip: boolean
+  manually_inactive: boolean
   // ──────────────────────────────────────────────────────────────────────────
   created_at: string
   updated_at: string | null
@@ -277,7 +337,8 @@ export interface Client {
 
 /** Lightweight projection of Client used by list screens, to keep egress low. */
 export type ClientListItem = Pick<Client,
-  'id' | 'full_name' | 'email' | 'phone' | 'status' | 'pipeline_stage' | 'contact_role' | 'last_interaction_at'
+  'id' | 'full_name' | 'first_name' | 'avatar_url' | 'email' | 'phone' | 'status' | 'pipeline_stage' | 'contact_role' |
+  'last_interaction_at' | 'next_action_at' | 'is_vip' | 'manually_inactive' | 'created_at'
 >
 
 export interface UplineNode {
@@ -315,6 +376,19 @@ export interface Followup {
   auto_generated: boolean
   priority_score: number | null
   // ─────────────────────────────────────────────────────────────────────────
+  // Lot 1.2 — RDV source (relance personnelle créée depuis une clôture) et, pour une
+  // relance automatique, l'id de la règle AUTOMATION_RULES qui l'a créée.
+  appointment_id: string | null
+  automation_rule_id: string | null
+  // Lot 1.2.1 (suite) — commande source (relance auto issue d'une commande) ; ON DELETE
+  // CASCADE en base : cette relance disparaît si la commande est supprimée.
+  order_id: string | null
+  // Distincte de `done` : une relance annulée n'a jamais été traitée, contrairement à une
+  // relance terminée (voir Lot 1.2 §16 — jamais confondre les deux).
+  cancelled_at: string | null
+  // Lot 1.2.1 — clé d'idempotence (RDV + révision + type d'action), voir index unique
+  // partiel en base. Null pour toute relance créée hors clôture de RDV.
+  closure_action_key: string | null
   created_at: string
   updated_at: string | null
 }
@@ -332,6 +406,11 @@ export interface Recommendation {
   objective: string | null
   recommendation_date: string | null
   catalog?: Pick<Catalog, 'name' | 'color' | 'icon'>
+  // Lot 1.2 — RDV source si créée depuis une clôture (jamais automatique, voir §6).
+  appointment_id: string | null
+  cancelled_at: string | null
+  // Lot 1.2.1 — clé d'idempotence (RDV + révision), voir index unique partiel en base.
+  closure_action_key: string | null
   created_at: string
   updated_at: string | null
 }
@@ -382,8 +461,20 @@ export interface Order {
   products: OrderProduct[] | null
   // ─────────────────────────────────────────────────────────────────────────
   order_type: OrderType
+  // Lot 1.2 — RDV source si la commande a été créée depuis une clôture ("vente réalisée").
+  appointment_id: string | null
+  // Lot 1.2.1 — clé d'idempotence (RDV + révision), voir index unique partiel en base.
+  closure_action_key: string | null
+  // Lot 1.2.1 (suite) — annulation douce, distincte de status='returned' et de la suppression.
+  cancelled_at: string | null
+  // Lot 1.2.1 (suite) — figée à la création, jamais recalculée depuis le nombre de commandes
+  // actuel (qui change avec le temps). NULL = commande antérieure à ce champ, inconnu.
+  is_first_order: boolean | null
   created_at: string
   updated_at: string | null
+  // Jointure optionnelle (vue commandes globale) — jamais présente sur les lectures qui ne la
+  // sélectionnent pas explicitement.
+  client?: { full_name: string } | null
 }
 
 // ── Joined types ──────────────────────────────────────────────────────────────
@@ -398,7 +489,7 @@ export interface NetworkNode extends Pick<Client,
 }
 
 export interface FollowupWithClient extends Followup {
-  client: Pick<Client, 'id' | 'full_name' | 'status' | 'contact_role' | 'pipeline_stage'>
+  client: Pick<Client, 'id' | 'full_name' | 'status' | 'contact_role' | 'pipeline_stage' | 'is_vip'>
 }
 
 export interface InteractionWithClient extends Interaction {

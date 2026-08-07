@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native'
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
@@ -9,7 +9,8 @@ import { createFollowup, toggleFollowupDone, deleteFollowup } from '@/features/f
 import { completeTask, deleteTask } from '@/features/appointments/appointmentService'
 import { supabase } from '@/shared/lib/supabase'
 import { Input } from '@/shared/components/ui/Input'
-import { DateInput } from '@/shared/components/ui/DateInput'
+import { CalendarPickerModal } from '@/shared/components/ui/CalendarPickerModal'
+import type { CalendarBusyAppointment } from '@/shared/components/ui/CalendarPickerModal'
 import { Button } from '@/shared/components/ui/Button'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { Card } from '@/shared/components/ui/Card'
@@ -99,7 +100,9 @@ export default function ClientFollowupsScreen() {
   useFocusEffect(useCallback(() => { loadOther() }, [loadOther]))
 
   const unified: UnifiedAction[] = useMemo(() => {
-    const fromFollowups: UnifiedAction[] = followups.map(f => ({
+    // Une relance annulée (cancelled_at) n'a jamais été traitée mais ne doit plus apparaître
+    // comme "à faire" — distincte de `done`, jamais confondue avec elle (Lot 1.2.1 §10).
+    const fromFollowups: UnifiedAction[] = followups.filter(f => !f.cancelled_at).map(f => ({
       id: f.id,
       source: 'followup',
       title: f.title ?? '',
@@ -233,7 +236,8 @@ export default function ClientFollowupsScreen() {
 function FollowupModal({ clientId, userId, currentPipeline, onClose, onSaved }: {
   clientId: string; userId: string; currentPipeline: PipelineStage; onClose: () => void; onSaved: () => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const [actionType, setActionType] = useState<NextActionType | null>(null)
@@ -243,6 +247,21 @@ function FollowupModal({ clientId, userId, currentPipeline, onClose, onSaved }: 
   const [dueDate, setDueDate] = useState(new Date().toISOString().split('T')[0])
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [showDueCal, setShowDueCal] = useState(false)
+  const [dayAppointments, setDayAppointments] = useState<CalendarBusyAppointment[]>([])
+
+  // RDV déjà planifiés (tous contacts confondus) — pour voir la charge du jour avant de
+  // fixer l'échéance de la relance, même principe que pour la date de prochain RDV.
+  useEffect(() => {
+    const from = new Date().toISOString()
+    const to = new Date(Date.now() + 90 * 86400000).toISOString()
+    supabase.from('appointments').select('start_at, end_at, title')
+      .eq('user_id', userId)
+      .in('status', ['scheduled', 'rescheduled'])
+      .gte('start_at', from)
+      .lte('start_at', to)
+      .then(({ data }) => { if (data) setDayAppointments(data) })
+  }, [userId])
 
   async function handleSave() {
     if (!title.trim() && !content.trim()) {
@@ -307,9 +326,22 @@ function FollowupModal({ clientId, userId, currentPipeline, onClose, onSaved }: 
         </View>
         <Input label={t('followups.title_label')} value={title} onChangeText={setTitle} />
         <Input label={`${t('followups.description')} (${t('common.optional')})`} value={content} onChangeText={setContent} />
-        <DateInput label={t('followups.due_date')} value={dueDate} onChangeValue={setDueDate} />
+        <View style={{ gap: 8 }}>
+          <Text style={styles.fieldLabel}>{t('followups.due_date')}</Text>
+          <TouchableOpacity style={styles.dueDateBtn} onPress={() => setShowDueCal(true)} activeOpacity={0.75}>
+            <Text style={styles.dueDateBtnText}>{formatDate(dueDate, locale)}</Text>
+          </TouchableOpacity>
+        </View>
         {errorMsg ? <Text style={styles.errorMsg}>{errorMsg}</Text> : null}
       </ScrollView>
+      <CalendarPickerModal
+        visible={showDueCal}
+        value={dueDate}
+        locale={locale}
+        dayAppointments={dayAppointments}
+        onClose={() => setShowDueCal(false)}
+        onConfirm={setDueDate}
+      />
     </Modal>
   )
 }
@@ -351,6 +383,8 @@ function makeStyles(colors: ThemeColors) {
   modalCancel: { fontSize: 16, fontFamily: fonts.body, color: colors.primary },
 
   fieldLabel:           { fontSize: 12, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6 },
+  dueDateBtn:     { backgroundColor: colors.bgDim, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.border },
+  dueDateBtnText: { fontSize: 15, fontFamily: fonts.medium, color: colors.text },
   actionTypeRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   actionTypeChip:       { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border },
   actionTypeChipActive: { backgroundColor: colors.primaryLight, borderColor: colors.primary },

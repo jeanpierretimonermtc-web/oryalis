@@ -5,11 +5,13 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useNetworkTree } from '@/features/network/useNetwork'
 import { useUpline } from '@/features/network/useUpline'
+import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { MessageModal } from '@/shared/components/ui/MessageModal'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { NetworkNode, ContactRole, Client } from '@/shared/lib/types'
+import type { NetworkNode, Client } from '@/shared/lib/types'
+import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
 
 const INDENT = 22
 
@@ -23,17 +25,6 @@ function activityColor(updatedAt: string | null, colors: ThemeColors): string {
   if (days < 15) return colors.success
   if (days < 30) return colors.warning
   return colors.danger
-}
-
-function rolePalette(role: ContactRole, colors: ThemeColors) {
-  switch (role) {
-    case 'leader':      return { bg: colors.tertiaryLight,  text: colors.tertiary  }
-    case 'distributor': return { bg: colors.secondaryLight, text: colors.secondary }
-    case 'customer':    return { bg: colors.successLight,   text: colors.success   }
-    case 'team_member': return { bg: colors.bgDim,          text: colors.textSecondary }
-    case 'inactive':    return { bg: colors.warningLight,   text: colors.warning   }
-    default:            return { bg: colors.primaryLight,   text: colors.primary   }
-  }
 }
 
 function lrpDaysLeft(nextLrpDate: string | null | undefined): number | null {
@@ -61,8 +52,8 @@ function filterTree(nodes: NetworkNode[], filter: RoleFilter): NetworkNode[] {
       children: filterTree(node.children, filter),
     }))
     .filter(node => {
-      if (filter === 'network') return node.contact_role === 'distributor' || node.contact_role === 'leader' || node.children.length > 0
-      if (filter === 'customers') return node.contact_role === 'customer' || node.contact_role === 'prospect'
+      if (filter === 'network') return node.contact_role.includes('distributor') || node.contact_role.includes('leader') || node.children.length > 0
+      if (filter === 'customers') return node.contact_role.includes('customer') || node.contact_role.includes('prospect')
       return true
     })
 }
@@ -80,10 +71,11 @@ function NodeRow({ node, collapsed, onToggle, onMessage }: NodeRowProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const { getRoleLabel, getLrpName } = useAppConfig()
 
-  const rp          = rolePalette(node.contact_role, colors)
+  const rp          = getRoleColors(getPrimaryRole(node.contact_role), colors)
   const dot         = activityColor(node.updated_at, colors)
-  const isNetwork   = node.contact_role === 'distributor' || node.contact_role === 'leader'
+  const isNetwork   = node.contact_role.includes('distributor') || node.contact_role.includes('leader')
   const hasChildren = node.children.length > 0
   const isCollapsed = collapsed.has(node.id)
   const lrpDays     = lrpDaysLeft(node.next_lrp_date)
@@ -122,7 +114,7 @@ function NodeRow({ node, collapsed, onToggle, onMessage }: NodeRowProps) {
       {lrpAlert && (
         <View style={[styles.lrpBadge, { backgroundColor: lrpDays! <= 3 ? colors.dangerLight : colors.warningLight }]}>
           <Text style={[styles.lrpText, { color: lrpDays! <= 3 ? colors.danger : colors.warning }]}>
-            LRP {lrpDays}j
+            {getLrpName()} {lrpDays}j
           </Text>
         </View>
       )}
@@ -139,7 +131,7 @@ function NodeRow({ node, collapsed, onToggle, onMessage }: NodeRowProps) {
       {/* Role badge */}
       <View style={[styles.roleBadge, { backgroundColor: rp.bg }]}>
         <Text style={[styles.roleText, { color: rp.text }]}>
-          {t(`clients.contact_role.${node.contact_role}`)}
+          {node.contact_role.map(r => getRoleLabel(r)).join(' · ')}
         </Text>
       </View>
 

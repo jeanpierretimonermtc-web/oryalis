@@ -38,7 +38,7 @@ export function useNetworkTree() {
   const allNodes = flatten(tree)
 
   const totalSize       = allNodes.length
-  const distributors    = allNodes.filter(n => n.contact_role === 'distributor' || n.contact_role === 'leader').length
+  const distributors    = allNodes.filter(n => n.contact_role.includes('distributor') || n.contact_role.includes('leader')).length
   const activeThisMonth = allNodes.filter(n => {
     if (!n.updated_at) return false
     const cutoff = new Date()

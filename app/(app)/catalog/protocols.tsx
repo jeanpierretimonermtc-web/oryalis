@@ -56,6 +56,7 @@ function ProductRow({ product, selected, onToggle }: { product: ProtocolProduct;
 // ── Protocol card ─────────────────────────────────────────────────────────────
 
 function ProtocolCard({ protocol, onRecommend }: { protocol: Protocol; onRecommend: (p: Protocol) => void }) {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const [expanded, setExpanded] = useState(false)
@@ -114,7 +115,7 @@ function ProtocolCard({ protocol, onRecommend }: { protocol: Protocol; onRecomme
 
           {/* CTA */}
           <TouchableOpacity style={styles.recommendBtn} onPress={() => onRecommend(protocol)} activeOpacity={0.85}>
-            <Text style={styles.recommendBtnText}>✚ Recommander ce protocole à un client</Text>
+            <Text style={styles.recommendBtnText}>✚ {t('catalog.recommend_protocol_cta')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -133,6 +134,7 @@ function ClientPicker({
   protocol: Protocol | null
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
@@ -205,7 +207,7 @@ function ClientPicker({
                 style={[styles.recommendBtn, { marginTop: 16 }]}
                 onPress={() => { handleReset(); router.push(`/(app)/clients/${selectedClient?.id}` as any) }}
               >
-                <Text style={styles.recommendBtnText}>Voir la fiche client →</Text>
+                <Text style={styles.recommendBtnText}>{t('catalog.view_contact_file')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.closeLink} onPress={handleReset}>
                 <Text style={styles.closeLinkText}>Fermer</Text>
@@ -213,7 +215,7 @@ function ClientPicker({
             </View>
           ) : !selectedClient ? (
             <>
-              <Text style={styles.pickerTitle}>Choisir un client</Text>
+              <Text style={styles.pickerTitle}>{t('catalog.choose_contact')}</Text>
               <TextInput
                 style={styles.pickerSearch}
                 placeholder="Rechercher..."
@@ -287,7 +289,7 @@ function ClientPicker({
                 }
               </TouchableOpacity>
               <TouchableOpacity style={styles.closeLink} onPress={() => setSelectedClient(null)}>
-                <Text style={styles.closeLinkText}>← Changer de client</Text>
+                <Text style={styles.closeLinkText}>{t('catalog.change_contact')}</Text>
               </TouchableOpacity>
             </>
           )}

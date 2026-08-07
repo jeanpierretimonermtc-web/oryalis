@@ -1,6 +1,17 @@
 import { supabase } from '@/shared/lib/supabase'
-import type { Client, ClientListItem, ClientStatus, ProspectTemperature } from '@/shared/lib/types'
-import { triggerNewClient } from '@/features/automations/automationService'
+import type { Client, ClientListItem, ContactRole, ProspectTemperature } from '@/shared/lib/types'
+import { deriveLastName } from '@/shared/lib/clientName'
+
+// Tri par nom de famille plutôt que par full_name brut (= prénom en premier) — les
+// praticiens pensent "NOM Prénom" (convention observée dans leurs propres classeurs de
+// suivi), pas dans l'ordre où Oryalis construit full_name en interne.
+function sortByLastName<T extends { full_name: string; first_name: string | null }>(clients: T[]): T[] {
+  return [...clients].sort((a, b) => {
+    const la = deriveLastName(a.full_name, a.first_name)
+    const lb = deriveLastName(b.full_name, b.first_name)
+    return la.localeCompare(lb, 'fr') || a.full_name.localeCompare(b.full_name, 'fr')
+  })
+}
 
 export interface ProspectScoreInput {
   client: Pick<Client, 'contact_role' | 'last_interaction_at'>
@@ -32,7 +43,7 @@ export function computeProspectScore({
   if (totalRdv > 2) score += 10
 
   // Network role bonus
-  if (client.contact_role === 'distributor' || client.contact_role === 'leader') score += 10
+  if (client.contact_role.includes('distributor') || client.contact_role.includes('leader')) score += 10
 
   // Inactivity penalty
   if (client.last_interaction_at) {
@@ -45,18 +56,17 @@ export function computeProspectScore({
 
 export type ClientInput = Omit<Client,
   'id' | 'user_id' | 'created_at' | 'updated_at' | 'archived_at' | 'pipeline_stage_updated_at' |
-  'next_action_at' | 'next_action_source' | 'next_action_source_id' | 'last_interaction_at'
+  'next_action_at' | 'next_action_source' | 'next_action_source_id' | 'last_interaction_at' | 'status'
 >
 
 export async function getClients(userId: string) {
   const { data, error } = await supabase
     .from('clients')
-    .select('id, full_name, email, phone, status, pipeline_stage, contact_role, last_interaction_at')
+    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, is_vip, manually_inactive, created_at')
     .eq('user_id', userId)
     .is('archived_at', null)
-    .order('full_name')
   if (error) throw error
-  return data as ClientListItem[]
+  return sortByLastName(data as ClientListItem[])
 }
 
 export async function getArchivedClients(userId: string) {
@@ -87,10 +97,7 @@ export async function createClient(userId: string, input: ClientInput) {
     .select()
     .single()
   if (error) throw error
-  const client = data as Client
-  const prénom = client.first_name || client.full_name.split(' ')[0]
-  triggerNewClient(userId, client.id, prénom).catch(console.error)
-  return client
+  return data as Client
 }
 
 export async function updateClient(id: string, input: Partial<ClientInput>) {
@@ -109,17 +116,17 @@ export async function deleteClient(id: string) {
   if (error) throw error
 }
 
-export async function searchClients(userId: string, query: string, status?: ClientStatus) {
+export async function searchClients(userId: string, query: string, role?: ContactRole) {
   let q = supabase
     .from('clients')
-    .select('id, full_name, email, phone, status, pipeline_stage, contact_role, last_interaction_at')
+    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, is_vip, manually_inactive, created_at')
     .eq('user_id', userId)
     .is('archived_at', null)
     .ilike('full_name', `%${query}%`)
-  if (status) q = q.eq('status', status)
-  const { data, error } = await q.order('full_name')
+  if (role) q = q.contains('contact_role', [role])
+  const { data, error } = await q
   if (error) throw error
-  return data as ClientListItem[]
+  return sortByLastName(data as ClientListItem[])
 }
 
 export async function archiveClient(id: string) {

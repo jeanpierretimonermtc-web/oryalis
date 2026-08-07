@@ -139,6 +139,11 @@ export const lightStatusColors: Record<string, { bg: string; text: string }> = {
   advisor:     { bg: '#ECFEFF', text: '#0E7490' },   // cyan   — conseillère
   team_member: { bg: '#F0FDF4', text: '#15803D' },   // green light — membre équipe
   lost:        { bg: '#F1F5F9', text: '#64748B' },   // gray   — perdu
+  // ── Paliers de santé de relation (calculés, voir relationshipHealth.ts) ──
+  up_to_date:   { bg: light.successLight, text: light.success },
+  to_follow_up: { bg: light.warningLight, text: light.warning },
+  overdue:      { bg: light.dangerLight,  text: light.danger },
+  dormant:      { bg: light.surfaceContainerHigh, text: light.textTertiary },
 }
 
 export const darkStatusColors: Record<string, { bg: string; text: string }> = {
@@ -151,6 +156,10 @@ export const darkStatusColors: Record<string, { bg: string; text: string }> = {
   advisor:     { bg: '#0C3B47', text: '#67E8F9' },
   team_member: { bg: '#052E16', text: '#4ADE80' },
   lost:        { bg: '#1E293B', text: '#94A3B8' },
+  up_to_date:   { bg: dark.successLight, text: dark.success },
+  to_follow_up: { bg: dark.warningLight, text: dark.warning },
+  overdue:      { bg: dark.dangerLight,  text: dark.danger },
+  dormant:      { bg: dark.surfaceContainerHigh, text: dark.textTertiary },
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, ScrollView, ActivityIndicator } from 'react-native'
-import { Stack, useLocalSearchParams } from 'expo-router'
+import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useRecommendations } from '@/features/recommendations/useRecommendations'
@@ -20,7 +20,11 @@ export default function ClientRecommendationsScreen() {
   const { session } = useAuth()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { recommendations, loading, refresh } = useRecommendations(id)
+  const { recommendations: allRecommendations, loading, refresh } = useRecommendations(id)
+  useFocusEffect(useCallback(() => { refresh() }, [refresh]))
+  // Une recommandation annulée reste dans l'historique (onglet Activité) mais ne doit plus
+  // apparaître comme active/proposable ici (Lot 1.2.1 §10).
+  const recommendations = useMemo(() => allRecommendations.filter(r => !r.cancelled_at), [allRecommendations])
   const [showModal, setShowModal] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [productName, setProductName] = useState('')

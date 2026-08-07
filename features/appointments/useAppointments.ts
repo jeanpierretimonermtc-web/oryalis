@@ -31,6 +31,7 @@ import type {
   CompleteAppointmentResult,
   PostCompletionResult,
   PostCompletionPlan,
+  AppointmentClosureDecision,
 } from './appointmentTypes'
 
 export function useAppointments(filters: AppointmentFilters = {}) {
@@ -143,7 +144,7 @@ export function useAppointmentDetail(id: string | null) {
       setAppointment(prev => prev ? {
         ...prev,
         business_context: {
-          ...(prev.business_context ?? { id: '', appointment_id: id, brand_id: null, catalog_id: null, main_product_id: null, pipeline_stage: 'new_lead' as const, prospect_temperature: null, commercial_intent: null, estimated_value: null, currency: 'EUR', created_at: '', updated_at: '' }),
+          ...(prev.business_context ?? { id: '', appointment_id: id, brand_id: null, catalog_id: null, main_product_id: null, pipeline_stage: 'new_lead' as const, prospect_temperature: null, commercial_intent: null, estimated_value: null, currency: 'EUR', outcome: null, no_followup_required: false, outcome_details: null, outcome_other_label: null, outcome_revision: 1, created_at: '', updated_at: '' }),
           ...payload,
         },
       } : prev)
@@ -203,10 +204,14 @@ export function useAppointmentDetail(id: string | null) {
   // Seul chemin de complétion : voir appointmentService.completeAppointment().
   // Rejette (throw) pour cancelled/no_show — l'appelant décide de l'affichage exact
   // (AppointmentCompletionError.code), plutôt que d'être avalé ici en simple booléen.
-  const complete = useCallback(async (plan?: PostCompletionPlan): Promise<CompleteAppointmentResult> => {
+  const complete = useCallback(async (closure: AppointmentClosureDecision, plan?: PostCompletionPlan): Promise<CompleteAppointmentResult> => {
     if (!id) throw new Error('No appointment id')
-    const result = await completeAppointment(id, plan)
-    setAppointment(prev => prev ? { ...prev, ...result.appointment } : prev)
+    const result = await completeAppointment(id, closure, plan)
+    setAppointment(prev => prev ? {
+      ...prev,
+      ...result.appointment,
+      business_context: prev.business_context ? { ...prev.business_context, no_followup_required: closure.noFollowupRequired } : prev.business_context,
+    } : prev)
     return result
   }, [id])
 
@@ -331,29 +336,43 @@ export function useClientAppointmentsWithContext(clientId: string) {
   return { appointments, loading, error, refresh: load }
 }
 
+// Pour chaque client : le prochain RDV à venir (le plus proche) s'il y en a un, sinon le
+// dernier RDV passé (le plus récent). Un même "max start_at" ne peut pas répondre aux deux
+// questions à la fois — un RDV loin dans le futur n'est pas "le dernier", et un RDV passé
+// ancien n'est pas "le prochain".
 export function useLastRdvMap(userId: string | undefined) {
+  const [nextRdvMap, setNextRdvMap] = useState<Record<string, string>>({})
   const [lastRdvMap, setLastRdvMap] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     if (!userId) return
-    // Limite à 1 an pour éviter de charger tout l'historique
+    // Limite à 1 an en arrière pour éviter de charger tout l'historique
     const since = new Date()
     since.setFullYear(since.getFullYear() - 1)
     const { data } = await supabase
       .from('appointments')
-      .select('client_id, start_at')
+      .select('client_id, start_at, status')
       .eq('user_id', userId)
+      .neq('status', 'cancelled')
       .gte('start_at', since.toISOString())
-      .order('start_at', { ascending: false })
     if (!data) return
-    const map: Record<string, string> = {}
+
+    const nowMs = Date.now()
+    const next: Record<string, string> = {}
+    const last: Record<string, string> = {}
     for (const row of data) {
-      if (!map[row.client_id]) map[row.client_id] = row.start_at
+      const t = new Date(row.start_at).getTime()
+      if (t > nowMs) {
+        if (!next[row.client_id] || t < new Date(next[row.client_id]).getTime()) next[row.client_id] = row.start_at
+      } else {
+        if (!last[row.client_id] || t > new Date(last[row.client_id]).getTime()) last[row.client_id] = row.start_at
+      }
     }
-    setLastRdvMap(map)
+    setNextRdvMap(next)
+    setLastRdvMap(last)
   }, [userId])
 
   useEffect(() => { load() }, [load])
 
-  return { lastRdvMap, refresh: load }
+  return { nextRdvMap, lastRdvMap, refresh: load }
 }

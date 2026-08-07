@@ -60,7 +60,8 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .select('id, full_name')
     .eq('user_id', userId)
     .is('archived_at', null)
-    .in('status', ['prospect', 'new_client'])
+    .contains('contact_role', ['prospect'])
+    .eq('manually_inactive', false)
     .or(`last_interaction_at.lt.${sevenDaysAgo},last_interaction_at.is.null`)
     .limit(10)
 
@@ -81,6 +82,7 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .from('orders')
     .select('client_id')
     .eq('user_id', userId)
+    .is('cancelled_at', null)
     .gte('order_date', fortyFiveDaysAgo)
 
   const recentClientIds = new Set((recentOrders ?? []).map(o => o.client_id).filter(Boolean))
@@ -90,7 +92,8 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .select('id, full_name')
     .eq('user_id', userId)
     .is('archived_at', null)
-    .in('status', ['active', 'loyal', 'vip'])
+    .contains('contact_role', ['customer'])
+    .eq('manually_inactive', false)
     .limit(30)
 
   for (const c of activeClients ?? []) {
@@ -147,7 +150,8 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
       .select('id, full_name')
       .eq('user_id', userId)
       .is('archived_at', null)
-      .in('contact_role', ['distributor', 'leader'])
+      .overlaps('contact_role', ['distributor', 'leader'])
+      .eq('manually_inactive', false)
       .or(`last_interaction_at.lt.${thirtyDaysAgo},last_interaction_at.is.null`)
       .limit(10)
 
@@ -169,6 +173,7 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .select('id, client_id, title, content, client:clients(full_name)')
     .eq('user_id', userId)
     .eq('done', false)
+    .is('cancelled_at', null)
     .lt('due_date', today)
     .order('due_date', { ascending: true })
     .limit(5)
@@ -194,7 +199,7 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     .select('sponsor_id, contact_role')
     .eq('user_id', userId)
     .not('sponsor_id', 'is', null)
-    .in('contact_role', ['distributor', 'customer'])
+    .overlaps('contact_role', ['distributor', 'customer'])
     .gte('created_at', thirtyDaysAgoRecruit)
 
   // Count filleuls per sponsor

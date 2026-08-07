@@ -8,6 +8,7 @@ const DEFAULT: UserBusinessProfile = {
   user_id: '',
   activity_type: 'generic',
   custom_brand_name: null,
+  custom_lrp_name: null,
   active_modules: ['products', 'renewals_lrp', 'downline', 'goals', 'calendar_sync'],
   automation_delays: {},
   created_at: '',

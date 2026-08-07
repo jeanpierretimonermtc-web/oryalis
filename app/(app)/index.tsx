@@ -11,15 +11,17 @@ import {
 } from 'react-native'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
+import { Bell, Calendar, CheckCircle2, Flame, RefreshCw, AlertTriangle, ClipboardX, UserMinus } from 'lucide-react-native'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useDemoState } from '@/features/demo/DemoProvider'
 import {
   useDashboardStats,
-  useUpcomingLrp,
   usePipelineStats,
   useMonthlyRevenue,
   useAlerts,
   useDailyActions,
+  buildTopPriorities,
+  DAILY_PRIORITY,
 } from '@/features/dashboard/useDashboard'
 import type { DailyActionItem, DailyActionKind } from '@/features/dashboard/useDashboard'
 import { useGoals } from '@/features/goals/useGoals'
@@ -169,144 +171,6 @@ function SectionHeader({
   )
 }
 
-// ── Appointment row ───────────────────────────────────────────────────────────
-function ApptRow({ appt }: { appt: Appointment }) {
-  const { t } = useTranslation()
-  const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
-
-  const d = new Date(appt.start_at)
-  const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  const done = appt.status === 'completed'
-
-  return (
-    <TouchableOpacity
-      style={styles.apptRow}
-      onPress={() =>
-        appt.client_id
-          ? router.push(`/(app)/clients/${appt.client_id}/appointments`)
-          : router.push('/(app)/appointments')
-      }
-      activeOpacity={0.7}
-    >
-      <View style={styles.apptTimeCol}>
-        <Text style={styles.apptTimeMain}>{timeStr}</Text>
-      </View>
-
-      <Avatar name={appt.title} size={38} status="active" />
-
-      <View style={styles.apptInfo}>
-        <Text style={styles.apptName} numberOfLines={1}>
-          {appt.title}
-        </Text>
-        <Text style={styles.apptType}>{t(`appointment_types.${appt.appointment_type}` as any)}</Text>
-      </View>
-
-      <View style={[styles.statusBadge, done ? styles.confirmedBadge : styles.pendingBadge]}>
-        <Text style={[styles.statusText, done ? styles.confirmedText : styles.pendingText]}>
-          {done ? t('dashboard.confirmed') : t('dashboard.pending_appt')}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  )
-}
-
-// ── Followup card ─────────────────────────────────────────────────────────────
-function FollowupCard({ f }: { f: FollowupWithClient }) {
-  const { t } = useTranslation()
-  const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
-
-  const today = formatLocalDate(new Date())
-  const isOverdue = f.due_date < today
-  const daysLate = isOverdue
-    ? Math.ceil((new Date(today).getTime() - new Date(f.due_date).getTime()) / 86400000)
-    : 0
-
-  const badgeText =
-    daysLate > 1
-      ? t('dashboard.days_late', { days: daysLate })
-      : daysLate === 1
-        ? t('dashboard.yesterday')
-        : t('dashboard.followup_today')
-
-  const urgent = daysLate > 1
-
-  return (
-    <TouchableOpacity
-      style={styles.followupRow}
-      onPress={() => router.push(`/(app)/clients/${f.client_id}/followups`)}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.followupDot, { backgroundColor: urgent ? colors.danger : colors.secondary }]} />
-
-      <Avatar name={f.client?.full_name ?? '?'} size={34} />
-
-      <View style={styles.followupInfo}>
-        <Text style={styles.followupName} numberOfLines={1}>
-          {f.client?.full_name}
-        </Text>
-        <Text style={styles.followupTask} numberOfLines={1}>
-          {f.title ?? f.content}
-        </Text>
-        <Text style={[styles.followupDue, { color: urgent ? colors.danger : colors.secondary }]}>
-          🕐 {badgeText}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  )
-}
-
-// ── LRP card ──────────────────────────────────────────────────────────────────
-function LrpCard({ client }: { client: Client }) {
-  const { t } = useTranslation()
-  const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
-  const locale = useLocale()
-
-  const daysUntil = client.next_lrp_date
-    ? Math.ceil((new Date(client.next_lrp_date).getTime() - Date.now()) / 86400000)
-    : null
-
-  const urgent = daysUntil !== null && daysUntil <= 7
-
-  return (
-    <TouchableOpacity
-      style={styles.apptRow}
-      onPress={() => router.push(`/(app)/clients/${client.id}`)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.apptTimeCol}>
-        <Text style={styles.apptTimeMain}>
-          {daysUntil !== null && daysUntil <= 0
-            ? t('dashboard.lrp_today')
-            : daysUntil !== null
-              ? t('dashboard.lrp_days', { days: daysUntil })
-              : '—'}
-        </Text>
-        <Text style={styles.apptTimeSub}>LRP</Text>
-      </View>
-
-      <Avatar name={client.full_name} size={38} />
-
-      <View style={styles.apptInfo}>
-        <Text style={styles.apptName} numberOfLines={1}>
-          {client.full_name}
-        </Text>
-        <Text style={styles.apptType}>
-          {client.next_lrp_date &&
-            formatDate(client.next_lrp_date, locale, { day: '2-digit', month: 'long' })}
-        </Text>
-      </View>
-
-      {urgent && (
-        <View style={[styles.statusBadge, { backgroundColor: colors.dangerLight }]}>
-          <Text style={[styles.statusText, { color: colors.danger }]}>{t('common.urgent')}</Text>
-        </View>
-      )}
-    </TouchableOpacity>
-  )
-}
 
 // ── Pipeline strip ────────────────────────────────────────────────────────────
 const PIPELINE_ORDER: PipelineStage[] = ['new_lead', 'contacted', 'presentation_scheduled', 'presentation_completed', 'follow_up', 'customer', 'distributor', 'lost']
@@ -363,155 +227,133 @@ function PipelineStrip({ byStage }: { byStage: Record<string, number> }) {
   )
 }
 
-// ── Priority strip ────────────────────────────────────────────────────────────
-function PriorityItem({
-  count,
-  label,
-  onPress,
-  accent,
-  bg,
-}: {
-  count: number
-  label: string
-  onPress: () => void
-  accent: string
-  bg: string
-}) {
-  const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
 
-  if (count === 0) return null
+// Ordre d'affichage des catégories détaillées — reprend DAILY_PRIORITY (features/dashboard)
+// pour rester cohérent avec le tri utilisé dans "Priorités du jour".
+const DAILY_ORDER: DailyActionKind[] = (Object.keys(DAILY_PRIORITY) as DailyActionKind[])
+  .sort((a, b) => DAILY_PRIORITY[a] - DAILY_PRIORITY[b])
 
-  return (
-    <TouchableOpacity
-      style={[styles.priorityItem, { backgroundColor: bg, borderColor: accent }]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <Text style={[styles.priorityCount, { color: accent }]}>{count}</Text>
-      <Text style={[styles.priorityLabel, { color: accent }]}>{label}</Text>
-    </TouchableOpacity>
-  )
+// Une icône et une couleur d'accent par catégorie — pour que chaque groupe se
+// distingue au premier coup d'œil sans avoir à lire le libellé.
+const DAILY_ICON: Record<DailyActionKind, typeof Bell> = {
+  overdue_followup: Bell, today_appointment: Calendar, today_action: CheckCircle2,
+  overdue_task: AlertTriangle, hot_prospect: Flame, incomplete_appointment: ClipboardX,
+  at_risk_client: UserMinus, renewal: RefreshCw,
 }
-
-function PriorityStrip({
-  overdueCount,
-  lrpSoonCount,
-  rdvTodayCount,
-}: {
-  overdueCount: number
-  lrpSoonCount: number
-  rdvTodayCount: number
-}) {
-  const { t } = useTranslation()
-  const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
-
-  const total = overdueCount + lrpSoonCount + rdvTodayCount
-
-  if (total === 0) {
-    return (
-      <View style={styles.allClearRow}>
-        <Text style={styles.allClearText}>{t('dashboard.no_priorities')}</Text>
-      </View>
-    )
+function dailyAccent(kind: DailyActionKind, colors: ThemeColors) {
+  switch (kind) {
+    case 'overdue_followup':
+    case 'overdue_task':          return { fg: colors.danger, bg: colors.dangerLight }
+    case 'hot_prospect':          return { fg: colors.warning, bg: colors.warningLight }
+    case 'renewal':               return { fg: colors.secondary, bg: colors.secondaryLight }
+    case 'today_action':
+    case 'incomplete_appointment':
+    case 'at_risk_client':        return { fg: colors.tertiary, bg: colors.tertiaryLight }
+    default:                      return { fg: colors.primary, bg: colors.primaryLight }
   }
-
-  return (
-    <View style={styles.priorityStrip}>
-      <Text style={styles.priorityStripTitle}>{t('dashboard.priorities_title')}</Text>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.priorityRow}
-      >
-        <PriorityItem
-          count={overdueCount}
-          label={t('dashboard.priority_followups')}
-          onPress={() => router.push('/(app)/followups')}
-          accent={colors.danger}
-          bg={colors.dangerLight}
-        />
-        <PriorityItem
-          count={lrpSoonCount}
-          label={t('dashboard.priority_lrp')}
-          onPress={() => router.push('/(app)/clients')}
-          accent={colors.secondary}
-          bg={colors.secondaryLight}
-        />
-        <PriorityItem
-          count={rdvTodayCount}
-          label={t('dashboard.priority_rdv')}
-          onPress={() => router.push('/(app)/appointments')}
-          accent={colors.primary}
-          bg={colors.primaryLight}
-        />
-      </ScrollView>
-    </View>
-  )
 }
 
-// ── Opportunity cards ─────────────────────────────────────────────────────────
-function OpportunityCard({
-  emoji,
-  title,
-  actionLabel,
-  onPress,
-  highlight = false,
-}: {
-  emoji: string
-  title: string
-  actionLabel: string
-  onPress: () => void
-  highlight?: boolean
-}) {
-  const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
-
-  const cardBg = highlight ? colors.tertiaryLight : colors.card
-  const cardBorder = highlight ? colors.tertiary : colors.border
-  const actionClr = highlight ? colors.tertiary : colors.primary
-
-  return (
-    <TouchableOpacity
-      style={[styles.oppCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <Text style={styles.oppEmoji}>{emoji}</Text>
-
-      <Text style={styles.oppTitle} numberOfLines={2}>
-        {title}
-      </Text>
-
-      <View style={styles.oppAction}>
-        <Text style={[styles.oppActionText, { color: actionClr }]}>{actionLabel}</Text>
-        <Text style={[styles.oppArrow, { color: actionClr }]}>→</Text>
-      </View>
-    </TouchableOpacity>
-  )
+// Traduit la raison structurée (reasonKey + reasonParams) d'un item — jamais de texte déjà
+// traduit dans le hook, la traduction reste ici, comme pour dashboard.daily.${kind}.
+function useReasonText() {
+  const { t } = useTranslation()
+  return (item: DailyActionItem) => {
+    const params = { ...item.reasonParams }
+    if (item.kind === 'hot_prospect' && typeof params.temp === 'string') {
+      params.temp = t(`prospect_temperatures.${params.temp}`)
+    }
+    return t(`dashboard.reason.${item.reasonKey}`, params)
+  }
 }
 
-const DAILY_ORDER: DailyActionKind[] = ['overdue_followup', 'today_appointment', 'today_action', 'hot_prospect', 'renewal']
-
-function DailyActionCenter({ items, loading }: { items: DailyActionItem[]; loading: boolean }) {
+// ── Priorités du jour (condensé, dédupliqué, plafonné) ──────────────────────────
+// Reçoit la liste déjà calculée (plutôt que de la recalculer) pour que le dashboard puisse
+// exclure exactement ces mêmes éléments de "À faire aujourd'hui" — jamais de doublon visuel.
+function TopPriorities({ top, loading }: { top: DailyActionItem[]; loading: boolean }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const locale = useLocale()
+  const reasonText = useReasonText()
+
+  if (loading) return <View style={styles.actionCenter}><ActivityIndicator color={colors.primary} /></View>
+
+  return (
+    <View style={styles.topPriorities}>
+      <Text style={styles.topPrioritiesTitle}>{t('dashboard.priorities_title')}</Text>
+      {top.length === 0 ? (
+        <View style={styles.allClearRow}><Text style={styles.allClearText}>{t('dashboard.no_priorities')}</Text></View>
+      ) : top.map(item => {
+        const accent = dailyAccent(item.kind, colors)
+        const Icon = DAILY_ICON[item.kind]
+        const showViewFile = item.clientId && item.href !== `/(app)/clients/${item.clientId}`
+        return (
+          <View key={item.id} style={[styles.topPriorityCard, { borderLeftColor: accent.fg }]}>
+            <TouchableOpacity style={styles.topPriorityMain} onPress={() => router.push(item.href as any)} activeOpacity={0.75}>
+              <View style={[styles.actionGroupIconBox, { backgroundColor: accent.bg }]}>
+                <Icon size={14} color={accent.fg} strokeWidth={2.2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={styles.topPriorityHeaderRow}>
+                  <Text style={styles.actionClient} numberOfLines={1}>{item.clientName || item.title}</Text>
+                  <View style={[styles.topPriorityBadge, { backgroundColor: accent.bg }]}>
+                    <Text style={[styles.topPriorityBadgeText, { color: accent.fg }]}>{t(`dashboard.daily.${item.kind}`)}</Text>
+                  </View>
+                </View>
+                <Text style={styles.actionDetail}>
+                  {reasonText(item)}
+                  {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: item.kind === 'today_appointment' ? '2-digit' : undefined, minute: item.kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
+                </Text>
+              </View>
+              <Text style={styles.actionArrow}>→</Text>
+            </TouchableOpacity>
+            {showViewFile ? (
+              <TouchableOpacity onPress={() => router.push(`/(app)/clients/${item.clientId}` as any)} activeOpacity={0.7}>
+                <Text style={styles.topPriorityViewFile}>{t('dashboard.view_file')}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )
+      })}
+    </View>
+  )
+}
+
+function DailyActionCenter({ items, hasAnyToday, loading }: { items: DailyActionItem[]; hasAnyToday: boolean; loading: boolean }) {
+  const { t } = useTranslation()
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const locale = useLocale()
+  const reasonText = useReasonText()
   if (loading) return <View style={styles.actionCenter}><ActivityIndicator color={colors.primary} /></View>
 
   return <View style={styles.actionCenter}>
-    <View style={styles.actionCenterHeader}><View><Text style={styles.actionCenterTitle}>{t('dashboard.action_center')}</Text><Text style={styles.actionCenterSub}>{t('dashboard.action_center_sub', { count: items.length })}</Text></View><Text style={styles.actionCenterTotal}>{items.length}</Text></View>
-    {items.length === 0 ? <View style={styles.allClearRow}><Text style={styles.allClearText}>{t('dashboard.no_priorities')}</Text></View> : DAILY_ORDER.map(kind => {
+    <View style={styles.actionCenterHeader}><View><Text style={styles.actionCenterTitle}>{t('dashboard.action_center')}</Text><Text style={styles.actionCenterSub}>{t('dashboard.action_center_sub_rest', { count: items.length })}</Text></View><Text style={styles.actionCenterTotal}>{items.length}</Text></View>
+    {items.length === 0 ? (
+      <View style={styles.allClearRow}>
+        <Text style={styles.allClearText}>{hasAnyToday ? t('dashboard.action_center_empty_covered') : t('dashboard.no_priorities')}</Text>
+      </View>
+    ) : DAILY_ORDER.map(kind => {
       const group = items.filter(item => item.kind === kind)
       if (!group.length) return null
+      const accent = dailyAccent(kind, colors)
+      const Icon = DAILY_ICON[kind]
       return <View key={kind} style={styles.actionGroup}>
-        <View style={styles.actionGroupHeader}><Text style={styles.actionGroupTitle}>{t(`dashboard.daily.${kind}`)}</Text><Text style={styles.actionGroupCount}>{group.length}</Text></View>
-        {group.slice(0, 5).map(item => <TouchableOpacity key={item.id} style={styles.actionRow} onPress={() => router.push(item.href as any)} activeOpacity={0.75}>
-          <View style={[styles.actionKindDot, { backgroundColor: kind === 'overdue_followup' ? colors.danger : kind === 'hot_prospect' ? colors.warning : kind === 'renewal' ? colors.secondary : colors.primary }]} />
-          <View style={styles.actionRowText}><Text style={styles.actionClient}>{item.clientName || item.title}</Text><Text style={styles.actionDetail}>{item.clientName ? item.title : t(`dashboard.daily.${kind}`)}{item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: kind === 'today_appointment' ? '2-digit' : undefined, minute: kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}</Text></View>
+        <View style={styles.actionGroupHeader}>
+          <View style={[styles.actionGroupIconBox, { backgroundColor: accent.bg }]}>
+            <Icon size={13} color={accent.fg} strokeWidth={2.2} />
+          </View>
+          <Text style={[styles.actionGroupTitle, { color: accent.fg }]}>{t(`dashboard.daily.${kind}`)}</Text>
+          <Text style={styles.actionGroupCount}>{group.length}</Text>
+        </View>
+        {group.slice(0, 5).map(item => <TouchableOpacity key={item.id} style={[styles.actionRow, { borderLeftColor: accent.fg }]} onPress={() => router.push(item.href as any)} activeOpacity={0.75}>
+          <View style={styles.actionRowText}>
+            <Text style={styles.actionClient}>{item.clientName || item.title}</Text>
+            <Text style={styles.actionDetail}>
+              {reasonText(item)}
+              {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: kind === 'today_appointment' ? '2-digit' : undefined, minute: kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
+            </Text>
+          </View>
           <Text style={styles.actionArrow}>→</Text>
         </TouchableOpacity>)}
         {group.length > 5 ? <Text style={styles.actionMore}>+{group.length - 5} {t('dashboard.other_actions')}</Text> : null}
@@ -530,15 +372,23 @@ export default function DashboardScreen() {
   const isWide = width >= 768
 
   const { stats, loading: statsLoading, refresh: refreshStats } = useDashboardStats()
-  const { appointments, loading: apptLoading, refresh: refreshAppts } = useUpcomingAppointments(10)
+  const { loading: apptLoading, refresh: refreshAppts } = useUpcomingAppointments(10)
   const { followups, loading: fuLoading, refresh: refreshFu } = usePendingFollowups()
-  const { clients: lrpClients, refresh: refreshLrp } = useUpcomingLrp(8)
   const { byStage, refresh: refreshPipeline } = usePipelineStats()
   const { amount: monthRevenue, refresh: refreshRevenue } = useMonthlyRevenue()
-  const { alerts, reload: refreshAlerts } = useAlerts()
+  const { reload: refreshAlerts } = useAlerts()
   const { goals } = useGoals()
   const { isModuleActive } = useAppConfig()
   const { items: dailyActions, loading: dailyLoading, refresh: refreshDaily } = useDailyActions()
+
+  // "Priorités du jour" (top 6, dédupliqué) et "À faire aujourd'hui" (tout le reste, par
+  // catégorie) ne doivent jamais montrer le même élément deux fois — le second exclut
+  // explicitement ce que le premier affiche déjà.
+  const topPriorities = useMemo(() => buildTopPriorities(dailyActions, 6), [dailyActions])
+  const remainingActions = useMemo(() => {
+    const shown = new Set(topPriorities.map(i => i.id))
+    return dailyActions.filter(item => !shown.has(item.id))
+  }, [dailyActions, topPriorities])
 
   const firstName = session?.user?.user_metadata?.full_name?.split(' ')[0] ?? ''
   const hour = new Date().getHours()
@@ -565,7 +415,6 @@ export default function DashboardScreen() {
     refreshStats()
     refreshAppts()
     refreshFu()
-    refreshLrp()
     refreshPipeline()
     refreshRevenue()
     refreshAlerts()
@@ -597,69 +446,11 @@ export default function DashboardScreen() {
 
   const now = new Date()
   const todayStr = formatLocalDate(now)
-  const todayAppts = appointments.filter((a) => a.start_at.startsWith(todayStr))
   const overdueToday = followups.filter((f) => f.due_date <= todayStr)
 
-  const lrpSoon = isModuleActive('renewals_lrp')
-    ? lrpClients.filter((c) => {
-        const days = c.next_lrp_date
-          ? Math.ceil((new Date(c.next_lrp_date).getTime() - Date.now()) / 86400000)
-          : null
-        return days !== null && days >= 0 && days <= 5
-      })
-    : []
-
-  const oppLrp = lrpSoon.slice(0, 3).map((c) => {
-    const days = Math.ceil((new Date(c.next_lrp_date!).getTime() - Date.now()) / 86400000)
-
-    return {
-      key: `lrp-${c.id}`,
-      emoji: '📦',
-      title: `${c.full_name} — ${t('dashboard.opp_lrp', { days })}`,
-      action: t('dashboard.opp_lrp_action'),
-      href: `/(app)/clients/${c.id}` as const,
-      highlight: false,
-    }
-  })
-
-  const oppFollowups = overdueToday.slice(0, 3).map((f) => {
-    const days = Math.ceil(
-      (new Date(todayStr).getTime() - new Date(f.due_date).getTime()) / 86400000,
-    )
-
-    return {
-      key: `fu-${f.id}`,
-      emoji: '⚡',
-      title: `${f.client?.full_name ?? '—'} — ${t('dashboard.opp_followup', { days })}`,
-      action: t('dashboard.opp_followup_action'),
-      href: `/(app)/clients/${f.client_id}/followups` as const,
-      highlight: false,
-    }
-  })
-
-  const oppLeaders = alerts
-    .filter((a) => a.type === 'leader_emerging')
-    .slice(0, 2)
-    .map((a) => ({
-      key: `leader-${a.id}`,
-      emoji: '🌟',
-      title: a.message,
-      action: t('dashboard.opp_leader_action'),
-      href: (a.action_url ?? '/(app)/network') as string,
-      highlight: true,
-    }))
-
-  const opportunities = [...oppFollowups, ...oppLeaders, ...oppLrp]
-  const visibleOpportunities = opportunities.slice(0, isWide ? 4 : 3)
 
   const activePct =
     stats.totalClients > 0 ? Math.round((stats.activeClients / stats.totalClients) * 100) : 0
-
-  const hasTodaySection = todayAppts.length > 0
-  const hasUrgentSection = overdueToday.length > 0
-  const hasLrpSection = isModuleActive('renewals_lrp') && lrpClients.length > 0
-  const hasOperationalSections = hasTodaySection || hasUrgentSection || hasLrpSection
-  const useTwoColSections = isWide && hasTodaySection && (hasUrgentSection || hasLrpSection)
 
   return (
     <>
@@ -768,26 +559,11 @@ export default function DashboardScreen() {
           </>
         )}
 
-        {/* ── Priorités du jour ─────────────────────────── */}
-        <DailyActionCenter items={dailyActions} loading={dailyLoading} />
+        {/* ── Priorités du jour (condensé, dédupliqué) ──── */}
+        <TopPriorities top={topPriorities} loading={dailyLoading} />
 
-        {/* ── Opportunités détectées ────────────────────── */}
-        {false && visibleOpportunities.length > 0 && (
-          <View style={styles.section}>
-            <SectionHeader title={t('dashboard.opportunities_title')} />
-
-            {visibleOpportunities.map((opp) => (
-              <OpportunityCard
-                key={opp.key}
-                emoji={opp.emoji}
-                title={opp.title}
-                actionLabel={opp.action}
-                highlight={'highlight' in opp ? opp.highlight : false}
-                onPress={() => router.push(opp.href as any)}
-              />
-            ))}
-          </View>
-        )}
+        {/* ── Détail par catégorie ──────────────────────── */}
+        <DailyActionCenter items={remainingActions} hasAnyToday={dailyActions.length > 0} loading={dailyLoading} />
 
         {/* ── KPI principaux ────────────────────────────── */}
         <View style={[styles.kpiGrid, isWide && styles.kpiGridWide]}>
@@ -846,72 +622,6 @@ export default function DashboardScreen() {
         {/* ── Pipeline ──────────────────────────────────── */}
         <PipelineStrip byStage={byStage} />
 
-        {/* ── Sections opérationnelles ──────────────────── */}
-        {false && hasOperationalSections && (
-          <View style={useTwoColSections ? styles.twoCol : styles.oneCol}>
-            {hasTodaySection && (
-              <View style={useTwoColSections ? styles.col : undefined}>
-                <View style={styles.section}>
-                  <SectionHeader
-                    title={t('dashboard.today_agenda')}
-                    sub={`${todayAppts.length} RDV`}
-                    onMore={() => router.push('/(app)/appointments')}
-                  />
-
-                  <View style={styles.listCard}>
-                    {todayAppts.map((a, i) => (
-                      <View key={a.id}>
-                        <ApptRow appt={a} />
-                        {i < todayAppts.length - 1 && <View style={styles.divider} />}
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {(hasUrgentSection || hasLrpSection) && (
-              <View style={useTwoColSections ? styles.col : undefined}>
-                {hasUrgentSection && (
-                  <View style={styles.section}>
-                    <SectionHeader
-                      title={t('dashboard.urgent_followups')}
-                      sub={t('dashboard.priority')}
-                      onMore={() => router.push('/(app)/followups')}
-                    />
-
-                    <View style={styles.listCard}>
-                      {overdueToday.slice(0, 4).map((f, i) => (
-                        <View key={f.id}>
-                          <FollowupCard f={f} />
-                          {i < Math.min(overdueToday.length, 4) - 1 && (
-                            <View style={styles.divider} />
-                          )}
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {hasLrpSection && (
-                  <View style={styles.section}>
-                    <SectionHeader title={t('dashboard.next_lrp')} />
-
-                    <View style={styles.listCard}>
-                      {lrpClients.map((c, i) => (
-                        <View key={c.id}>
-                          <LrpCard client={c} />
-                          {i < lrpClients.length - 1 && <View style={styles.divider} />}
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-        )}
-
         {/* ── KPI réseau ────────────────────────────────── */}
         {stats.networkSize > 0 && (
           <View style={[styles.kpiGrid, isWide && styles.kpiGridWide]}>
@@ -967,7 +677,7 @@ export default function DashboardScreen() {
             accent={colors.secondary}
             bg={colors.secondaryLight}
             onPress={() =>
-              router.push({ pathname: '/(app)/clients', params: { status: 'new_client' } } as any)
+              router.push({ pathname: '/(app)/clients', params: { status: 'all' } } as any)
             }
           />
         </View>
@@ -1022,14 +732,6 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {/* ── Free day ──────────────────────────────────── */}
-        {todayAppts.length === 0 && overdueToday.length === 0 && (
-          <View style={styles.emptyDay}>
-            <Text style={styles.emptyDayEmoji}>✨</Text>
-            <Text style={styles.emptyDayTitle}>{t('dashboard.free_day')}</Text>
-            <Text style={styles.emptyDaySub}>{t('dashboard.free_day_sub')}</Text>
-          </View>
-        )}
       </ScrollView>
     </>
   )
@@ -1365,34 +1067,6 @@ function makeStyles(colors: ThemeColors) {
       marginTop: 4,
     },
 
-    emptyDay: {
-      alignItems: 'center',
-      paddingVertical: 48,
-      gap: 10,
-      backgroundColor: colors.card,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-
-    emptyDayEmoji: {
-      fontSize: 40,
-    },
-
-    emptyDayTitle: {
-      fontSize: 20,
-      fontFamily: fonts.display,
-      color: colors.primary,
-    },
-
-    emptyDaySub: {
-      fontSize: 13,
-      fontFamily: fonts.body,
-      color: colors.textSecondary,
-      textAlign: 'center',
-      paddingHorizontal: 20,
-    },
-
     demoCard: {
       backgroundColor: colors.primaryLight,
       borderRadius: 16,
@@ -1490,57 +1164,23 @@ function makeStyles(colors: ThemeColors) {
     actionCenterSub: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 3 },
     actionCenterTotal: { minWidth: 40, textAlign: 'center', fontSize: 22, fontFamily: fonts.display, color: colors.primary, backgroundColor: colors.primaryLight, borderRadius: 14, paddingVertical: 7 },
     actionGroup: { gap: 4 },
-    actionGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 5 },
-    actionGroupTitle: { fontSize: 12, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+    actionGroupHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 7 },
+    actionGroupIconBox: { width: 22, height: 22, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
+    actionGroupTitle: { flex: 1, fontSize: 12, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
     actionGroupCount: { fontSize: 12, fontFamily: fonts.bold, color: colors.textTertiary },
-    actionRow: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 52, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border },
-    actionKindDot: { width: 8, height: 8, borderRadius: 4 },
+    actionRow: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 52, paddingVertical: 8, paddingLeft: 10, borderTopWidth: 1, borderTopColor: colors.border, borderLeftWidth: 2.5 },
     actionRowText: { flex: 1 }, actionClient: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
     actionDetail: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 2 },
     actionArrow: { color: colors.primary, fontSize: 18 }, actionMore: { textAlign: 'center', fontSize: 12, color: colors.textTertiary, paddingTop: 4 },
 
-    priorityStrip: {
-      backgroundColor: colors.card,
-      borderRadius: 18,
-      padding: 18,
-      gap: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-
-    priorityStripTitle: {
-      fontSize: 11,
-      fontFamily: fonts.bold,
-      color: colors.textTertiary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-
-    priorityRow: {
-      gap: 8,
-    },
-
-    priorityItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 12,
-      borderWidth: 1.5,
-    },
-
-    priorityCount: {
-      fontSize: 22,
-      fontFamily: fonts.display,
-      lineHeight: 26,
-    },
-
-    priorityLabel: {
-      fontSize: 12,
-      fontFamily: fonts.medium,
-      flex: 1,
-    },
+    topPriorities: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 18, gap: 12 },
+    topPrioritiesTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text, marginBottom: 2 },
+    topPriorityCard: { borderRadius: 12, borderLeftWidth: 3, backgroundColor: colors.bgDim, padding: 10, gap: 6 },
+    topPriorityMain: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    topPriorityHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    topPriorityBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
+    topPriorityBadgeText: { fontSize: 10, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.3 },
+    topPriorityViewFile: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary, alignSelf: 'flex-end' },
 
     allClearRow: {
       backgroundColor: colors.successLight,
@@ -1558,51 +1198,6 @@ function makeStyles(colors: ThemeColors) {
       color: colors.success,
     },
 
-    oppCard: {
-      backgroundColor: colors.card,
-      borderRadius: 18,
-      paddingVertical: 16,
-      paddingHorizontal: 18,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.04)' }],
-      elevation: 1,
-    },
-
-    oppEmoji: {
-      fontSize: 22,
-      width: 34,
-      textAlign: 'center',
-    },
-
-    oppTitle: {
-      flex: 1,
-      fontSize: 14,
-      fontFamily: fonts.semibold,
-      color: colors.text,
-      lineHeight: 20,
-    },
-
-    oppAction: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      flexShrink: 0,
-    },
-
-    oppActionText: {
-      fontSize: 13,
-      fontFamily: fonts.semibold,
-      color: colors.primary,
-    },
-
-    oppArrow: {
-      fontSize: 14,
-      color: colors.primary,
-    },
 
     pipelineWrap: {
       gap: 10,

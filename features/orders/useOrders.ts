@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchOrders, createOrder, deleteOrder } from './orderService'
-import type { OrderFilters, OrderInput } from './orderService'
+import { fetchOrders, createOrder, deleteOrder, updateOrder, cancelOrder } from './orderService'
+import type { OrderFilters, OrderInput, OrderEditInput, CreateOrderResult } from './orderService'
 import type { Order } from '@/shared/lib/types'
 
 export function useOrders(filters: OrderFilters = {}) {
@@ -23,11 +23,11 @@ export function useOrders(filters: OrderFilters = {}) {
 
   useEffect(() => { load() }, [load])
 
-  const add = useCallback(async (userId: string, input: OrderInput): Promise<Order | null> => {
+  const add = useCallback(async (userId: string, input: OrderInput): Promise<CreateOrderResult | null> => {
     try {
-      const created = await createOrder(userId, input)
-      setOrders(prev => [created, ...prev])
-      return created
+      const result = await createOrder(userId, input)
+      setOrders(prev => [result.order, ...prev])
+      return result
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Erreur création')
       return null
@@ -45,11 +45,34 @@ export function useOrders(filters: OrderFilters = {}) {
     }
   }, [])
 
+  const update = useCallback(async (id: string, input: OrderEditInput): Promise<boolean> => {
+    try {
+      const updated = await updateOrder(id, input)
+      setOrders(prev => prev.map(o => o.id === id ? updated : o))
+      return true
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur modification')
+      return false
+    }
+  }, [])
+
+  const cancel = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      await cancelOrder(id)
+      setOrders(prev => prev.map(o => o.id === id ? { ...o, cancelled_at: new Date().toISOString() } : o))
+      return true
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur annulation')
+      return false
+    }
+  }, [])
+
+  // Une commande annulée n'a jamais été honorée — exclue du chiffre d'affaires affiché.
   const totalAmount = orders
-    .filter(o => o.order_type !== 'personal')
+    .filter(o => o.order_type !== 'personal' && !o.cancelled_at)
     .reduce((sum, o) => sum + (o.amount ?? 0), 0)
 
-  return { orders, loading, error, reload: load, add, remove, totalAmount }
+  return { orders, loading, error, reload: load, add, remove, update, cancel, totalAmount }
 }
 
 export function useClientOrders(clientId: string) {

@@ -234,7 +234,11 @@ export async function importCSVClients(
     const statusRaw   = get(row, 'status')
     const roleRaw     = get(row, 'contact_role')
     const normalizedStatus = statusRaw ? normalizeStatus(statusRaw) : 'prospect'
-    const normalizedRole = roleRaw ? normalizeRole(roleRaw) : 'prospect'
+    // Sans rôle explicite dans le fichier, "advisor"/"conseiller" devient distributeur
+    // (pas "prospect") — un conseiller est déjà engagé, jamais un simple prospect.
+    const normalizedRole = roleRaw
+      ? normalizeRole(roleRaw)
+      : normalizedStatus === 'advisor' ? 'distributor' : 'prospect'
     const notesRaw    = get(row, 'notes')
     const followupRaw = get(row, 'next_followup_date')
     const interests   = get(row, 'interests')
@@ -249,8 +253,10 @@ export async function importCSVClients(
           email:        get(row, 'email') || null,
           phone:        get(row, 'phone') || null,
           status:       normalizedStatus,
-          contact_role: normalizedRole,
+          contact_role: [normalizedRole],
           pipeline_stage: initialPipelineStage(normalizedStatus, normalizedRole),
+          is_vip:            normalizedStatus === 'vip',
+          manually_inactive: normalizedStatus === 'inactive',
           country:      get(row, 'country') || null,
           city:         get(row, 'city') || null,
           language:     get(row, 'language') || 'fr',

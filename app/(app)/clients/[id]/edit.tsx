@@ -3,7 +3,9 @@ import { ScrollView, View, Text, Switch, StyleSheet, TouchableOpacity, ActivityI
 import { router, Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { updateClient, deleteClient } from '@/features/clients/clientService'
+import { logClientEvent } from '@/features/clients/clientEventService'
 import { useClient } from '@/features/clients/useClient'
+import { useAuth } from '@/features/auth/AuthProvider'
 import { Input } from '@/shared/components/ui/Input'
 import { DateInput } from '@/shared/components/ui/DateInput'
 import { TextArea } from '@/shared/components/ui/TextArea'
@@ -12,10 +14,12 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import { PIPELINE_STAGES } from '@/shared/lib/types'
-import type { Client, ClientStatus, NetworkPotential, ContactRole, PipelineStage } from '@/shared/lib/types'
+import { PIPELINE_STAGES, LRP_STATUSES } from '@/shared/lib/types'
+import type { NetworkPotential, ContactRole, PipelineStage, LrpStatus } from '@/shared/lib/types'
+import { computeRelationshipHealth } from '@/features/clients/relationshipHealth'
+import { deriveLastName } from '@/shared/lib/clientName'
+import { formatDate } from '@/shared/lib/dateFormat'
 
-const STATUSES: ClientStatus[] = ['prospect', 'new_client', 'active', 'loyal', 'inactive', 'vip', 'advisor']
 const CONTACT_ROLES: ContactRole[] = ['prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive']
 const NETWORK_POTENTIALS: NetworkPotential[] = ['low', 'medium', 'high']
 
@@ -47,13 +51,15 @@ function SectionCard({ icon, titleKey, children }: { icon: string; titleKey: str
 }
 
 export default function EditClientScreen() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = i18n.language.startsWith('fr') ? 'fr-FR' : 'en-US'
   const { colors, statusColors } = useTheme()
-  const { getStatusLabel, isModuleActive } = useAppConfig()
+  const { isModuleActive, getRoleLabel, getLrpName } = useAppConfig()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { id } = useLocalSearchParams<{ id: string }>()
   const { width } = useWindowDimensions()
   const isWide = width >= 768
+  const { session } = useAuth()
 
   const { client, loading: clientLoading } = useClient(id)
 
@@ -61,7 +67,8 @@ export default function EditClientScreen() {
   const [lastName, setLastName]             = useState('')
   const [email, setEmail]                   = useState('')
   const [phone, setPhone]                   = useState('')
-  const [status, setStatus]                 = useState<ClientStatus>('prospect')
+  const [isVip, setIsVip]                   = useState(false)
+  const [manuallyInactive, setManuallyInactive] = useState(false)
   const [inscriptionDate, setInscriptionDate] = useState('')
   const [birthDate, setBirthDate]           = useState('')
   const [profession, setProfession]         = useState('')
@@ -76,8 +83,13 @@ export default function EditClientScreen() {
   const [networkPotential, setNetworkPotential] = useState<NetworkPotential | null>(null)
   const [doterraId, setDoterraId]           = useState('')
   const [loyaltyNotes, setLoyaltyNotes]     = useState('')
+  const [trackingConsentAt, setTrackingConsentAt] = useState<string | null>(null)
+  const [lrpStatus, setLrpStatus]           = useState<LrpStatus>('not_enrolled')
+  const [nextLrpDate, setNextLrpDate]       = useState('')
+  const [lrpLoyaltyPercent, setLrpLoyaltyPercent] = useState('')
+  const [lrpStartDate, setLrpStartDate]     = useState('')
   const [address, setAddress]               = useState('')
-  const [contactRole, setContactRole]       = useState<ContactRole>('customer')
+  const [contactRole, setContactRole]       = useState<ContactRole[]>(['prospect'])
   const [pipelineStage, setPipelineStage]   = useState<PipelineStage>('new_lead')
 
   const [saving, setSaving]         = useState(false)
@@ -87,13 +99,13 @@ export default function EditClientScreen() {
   useEffect(() => {
     if (!client) return
     const fn   = (client.first_name ?? '').trim()
-    const full = (client.full_name ?? '').trim()
-    const ln   = fn && full.startsWith(fn) ? full.slice(fn.length).trim() : full
+    const ln   = deriveLastName(client.full_name, client.first_name)
     setFirstName(fn)
     setLastName(ln)
     setEmail(client.email ?? '')
     setPhone(client.phone ?? '')
-    setStatus(client.status)
+    setIsVip(client.is_vip ?? false)
+    setManuallyInactive(client.manually_inactive ?? false)
     setInscriptionDate(client.inscription_date ?? '')
     setBirthDate(client.birth_date ?? '')
     setProfession(client.profession ?? '')
@@ -107,9 +119,14 @@ export default function EditClientScreen() {
     setMedicalNotes(client.medical_notes ?? '')
     setDoterraId(client.doterra_id ?? '')
     setLoyaltyNotes(client.loyalty_notes ?? '')
+    setTrackingConsentAt(client.tracking_consent_at ?? null)
+    setLrpStatus(client.lrp_status ?? 'not_enrolled')
+    setNextLrpDate(client.next_lrp_date ?? '')
+    setLrpLoyaltyPercent(client.lrp_loyalty_percent != null ? String(client.lrp_loyalty_percent) : '')
+    setLrpStartDate(client.lrp_start_date ?? '')
     setAddress(client.address ?? '')
     setNetworkPotential(client.network_potential ?? null)
-    setContactRole(client.contact_role ?? 'customer')
+    setContactRole(client.contact_role?.length ? client.contact_role : ['prospect'])
     setPipelineStage(client.pipeline_stage ?? 'new_lead')
   }, [client])
 
@@ -121,12 +138,17 @@ export default function EditClientScreen() {
     const interestList = interests.split(',').map(s => s.trim()).filter(Boolean)
     setSaving(true)
     try {
+      const oldPipelineStage = client?.pipeline_stage ?? null
+      const oldContactRoles  = [...(client?.contact_role ?? [])].sort().join(',')
+      const newContactRoles  = [...contactRole].sort().join(',')
+
       await updateClient(id, {
         first_name: fn || null,
         full_name: [fn, ln].filter(Boolean).join(' '),
         email: email.trim() || null,
         phone: phone.trim() || null,
-        status,
+        is_vip: isVip,
+        manually_inactive: manuallyInactive,
         inscription_date: inscriptionDate || null,
         birth_date: birthDate || null,
         profession: profession.trim() || null,
@@ -140,12 +162,32 @@ export default function EditClientScreen() {
         medical_notes: medicalNotes.trim() || null,
         doterra_id: doterraId.trim() || null,
         loyalty_notes: loyaltyNotes.trim() || null,
+        tracking_consent_at: trackingConsentAt,
+        lrp_status: lrpStatus,
+        next_lrp_date: nextLrpDate || null,
+        lrp_loyalty_percent: lrpLoyaltyPercent.trim() ? Math.max(0, Math.min(100, parseInt(lrpLoyaltyPercent, 10) || 0)) : null,
+        lrp_start_date: lrpStartDate || null,
         address: address.trim() || null,
         journey_stage: client?.journey_stage ?? null, // retiré du formulaire, remplacé par pipeline_stage — valeur existante préservée
         network_potential: networkPotential,
         contact_role: contactRole,
         pipeline_stage: pipelineStage,
       })
+
+      // Traçabilité (refonte) — ne doit jamais faire échouer l'enregistrement principal.
+      if (session && client) {
+        try {
+          if (oldPipelineStage !== pipelineStage) {
+            await logClientEvent(session.user.id, id, 'pipeline_change', { old_value: oldPipelineStage, new_value: pipelineStage })
+          }
+          if (oldContactRoles !== newContactRoles) {
+            await logClientEvent(session.user.id, id, 'role_change', { old_value: oldContactRoles, new_value: newContactRoles })
+          }
+        } catch (logError) {
+          console.error('[logClientEvent]', logError)
+        }
+      }
+
       router.back()
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : t('common.error'))
@@ -229,41 +271,62 @@ export default function EditClientScreen() {
 
         {/* ── Statut ─────────────────────────────────────────────── */}
         <SectionCard icon="🏷" titleKey="clients.sections.status">
-          <View style={styles.chipRow}>
-            {STATUSES.map(s => {
-              const active = status === s
-              const cs = statusColors[s] ?? null
-              const bg     = active ? (cs ? cs.bg   : colors.primaryAction) : colors.card
-              const txtClr = active ? (cs ? cs.text : '#ffffff')            : colors.textSecondary
-              const border = active ? (cs ? cs.text : colors.primaryAction) : colors.border
-              return (
-                <TouchableOpacity
-                  key={s}
-                  style={[styles.statusChip, { backgroundColor: bg, borderColor: border }]}
-                  onPress={() => setStatus(s)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.statusChipText, { color: txtClr, fontFamily: active ? fonts.bold : fonts.medium }]}>
-                    {getStatusLabel(s)}
-                  </Text>
-                </TouchableOpacity>
-              )
-            })}
+          {client ? (() => {
+            const health = computeRelationshipHealth({
+              next_action_at: client.next_action_at,
+              last_interaction_at: client.last_interaction_at,
+              manually_inactive: manuallyInactive,
+              created_at: client.created_at,
+            })
+            const hc = statusColors[health.tier] ?? { bg: colors.surfaceContainerHigh, text: colors.textSecondary }
+            return (
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>{t('clients.computed_health_label')}</Text>
+                <View style={[styles.healthPill, { backgroundColor: hc.bg }]}>
+                  <Text style={[styles.healthPillText, { color: hc.text }]}>{t(`relationship_health.${health.tier}`)}</Text>
+                </View>
+              </View>
+            )
+          })() : null}
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>{t('clients.fields.is_vip')}</Text>
+            <Switch value={isVip} onValueChange={setIsVip} trackColor={{ true: colors.primary }} />
           </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>{t('clients.fields.manually_inactive')}</Text>
+            <Switch value={manuallyInactive} onValueChange={setManuallyInactive} trackColor={{ true: colors.primary }} />
+          </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>{t('clients.fields.tracking_consent')}</Text>
+            <Switch
+              value={!!trackingConsentAt}
+              onValueChange={(v) => setTrackingConsentAt(v ? new Date().toISOString() : null)}
+              trackColor={{ true: colors.primary }}
+            />
+          </View>
+          {trackingConsentAt ? (
+            <Text style={styles.consentDate}>
+              {t('clients.tracking_consent_recorded_at', { date: formatDate(trackingConsentAt, locale) })}
+            </Text>
+          ) : null}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>{t('clients.contact_role.label')}</Text>
             <View style={styles.chipRow}>
               {CONTACT_ROLES.map(role => {
-                const active = contactRole === role
+                const active = contactRole.includes(role)
                 return (
                   <TouchableOpacity
                     key={role}
                     style={[styles.smallChip, active && styles.smallChipActive]}
-                    onPress={() => setContactRole(role)}
+                    onPress={() => setContactRole(prev =>
+                      prev.includes(role)
+                        ? (prev.length > 1 ? prev.filter(r => r !== role) : prev)
+                        : [...prev, role]
+                    )}
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>
-                      {t(`clients.contact_role.${role}`)}
+                      {getRoleLabel(role)}
                     </Text>
                   </TouchableOpacity>
                 )
@@ -296,6 +359,7 @@ export default function EditClientScreen() {
 
         {/* ── Santé ──────────────────────────────────────────────── */}
         <SectionCard icon="🩺" titleKey="clients.sections.medical">
+          <Text style={styles.medicalDisclaimer}>{t('clients.medical_disclaimer')}</Text>
           <View style={styles.switchRow}>
             <Text style={styles.switchLabel}>{t('clients.fields.medical_treatment')}</Text>
             <Switch value={medicalTreatment} onValueChange={setMedicalTreatment} trackColor={{ true: colors.primary }} />
@@ -347,6 +411,35 @@ export default function EditClientScreen() {
         {isModuleActive('renewals_lrp') && (
           <SectionCard icon="⭐" titleKey="clients.sections.doterra">
             <Input label={`${t('clients.fields.doterra_id')} (${t('common.optional')})`} value={doterraId} onChangeText={setDoterraId} />
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>{t('clients.fields.lrp_status', { name: getLrpName() })}</Text>
+              <View style={styles.chipRow}>
+                {LRP_STATUSES.map(status => {
+                  const active = lrpStatus === status
+                  return (
+                    <TouchableOpacity key={status} style={[styles.smallChip, active && styles.smallChipActive]} onPress={() => setLrpStatus(status)} activeOpacity={0.7}>
+                      <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{t(`lrp_statuses.${status}`)}</Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
+            </View>
+
+            {lrpStatus !== 'not_enrolled' && (
+              <>
+                <DateInput label={t('clients.fields.next_lrp_date', { name: getLrpName() })} value={nextLrpDate} onChangeValue={setNextLrpDate} />
+                <DateInput label={`${t('clients.fields.lrp_start_date')} (${t('common.optional')})`} value={lrpStartDate} onChangeValue={setLrpStartDate} />
+                <Input
+                  label={`${t('clients.fields.lrp_loyalty_percent')} (${t('common.optional')})`}
+                  value={lrpLoyaltyPercent}
+                  onChangeText={v => setLrpLoyaltyPercent(v.replace(/\D/g, '').slice(0, 3))}
+                  placeholder="0-100"
+                  keyboardType="number-pad"
+                />
+              </>
+            )}
+
             <TextArea label={`${t('clients.fields.loyalty_notes')} (${t('common.optional')})`} value={loyaltyNotes} onChangeText={setLoyaltyNotes} />
           </SectionCard>
         )}
@@ -428,15 +521,15 @@ function makeStyles(colors: ThemeColors) {
   namePreviewLabel: { fontSize: 12, fontFamily: fonts.medium, color: colors.primary, opacity: 0.75 },
   namePreviewValue: { fontSize: 16, fontFamily: fonts.bold, color: colors.primary },
 
-  // ── Status chips ─────────────────────────────────────────────────────────────
+  // ── Chips ────────────────────────────────────────────────────────────────────
   chipRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  statusChip:   { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1.5 },
-  statusChipText: { fontSize: 13 },
+  healthPill:      { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999 },
+  healthPillText:  { fontSize: 12, fontFamily: fonts.semibold },
 
   // ── Field group + small chips ─────────────────────────────────────────────────
   fieldGroup:  { gap: 8 },
   fieldLabel:  { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6 },
-  smallChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border },
+  smallChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
   smallChipActive:      { backgroundColor: colors.primaryLight, borderColor: colors.primary },
   smallChipIcon:        { fontSize: 13 },
   smallChipText:        { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
@@ -445,6 +538,8 @@ function makeStyles(colors: ThemeColors) {
   // ── Switch ────────────────────────────────────────────────────────────────────
   switchRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
   switchLabel: { fontSize: 15, fontFamily: fonts.medium, color: colors.text, flex: 1 },
+  medicalDisclaimer: { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, lineHeight: 17, marginBottom: 10 },
+  consentDate: { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, marginTop: -2, marginBottom: 4 },
 
   // ── Error ─────────────────────────────────────────────────────────────────────
   error: { fontSize: 14, color: colors.danger, textAlign: 'center', padding: 12, backgroundColor: colors.dangerLight, borderRadius: 10 },

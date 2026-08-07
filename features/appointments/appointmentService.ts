@@ -1,8 +1,10 @@
 import { supabase } from '@/shared/lib/supabase'
 import { triggerAppointmentCompleted } from '@/features/automations/automationService'
+import { logClientEvent } from '@/features/clients/clientEventService'
 import {
   AppointmentCompletionError,
   PostCompletionRetryError,
+  type AppointmentClosureDecision,
   type Appointment,
   type AppointmentFull,
   type AppointmentWithContext,
@@ -20,7 +22,7 @@ import {
   type PostCompletionPlanKey,
 } from './appointmentTypes'
 
-const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, created_at, updated_at'
+const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, followup_of_appointment_id, created_at, updated_at'
 
 export async function fetchAppointments(filters: AppointmentFilters = {}): Promise<Appointment[]> {
   let query = supabase
@@ -72,7 +74,7 @@ export async function fetchAppointmentById(id: string): Promise<AppointmentFull 
       .select('id, appointment_id, client_notes, internal_notes, objections, needs_identified, products_discussed, created_at, updated_at')
       .eq('appointment_id', id).maybeSingle(),
     supabase.from('appointment_business_context')
-      .select('id, appointment_id, brand_id, catalog_id, main_product_id, pipeline_stage, prospect_temperature, commercial_intent, estimated_value, currency, created_at, updated_at')
+      .select('id, appointment_id, brand_id, catalog_id, main_product_id, pipeline_stage, prospect_temperature, commercial_intent, estimated_value, currency, outcome, no_followup_required, outcome_details, outcome_other_label, outcome_revision, created_at, updated_at')
       .eq('appointment_id', id).maybeSingle(),
     supabase.from('appointment_tasks')
       .select('id, appointment_id, user_id, client_id, title, task_type, priority, status, due_at, completed_at, created_at, updated_at')
@@ -97,7 +99,9 @@ export async function fetchAppointmentById(id: string): Promise<AppointmentFull 
         ...(bizRes.data ?? {
           id: '', appointment_id: id, brand_id: null, catalog_id: null, main_product_id: null,
           prospect_temperature: null, commercial_intent: null, estimated_value: null,
-          currency: 'EUR', created_at: '', updated_at: '',
+          currency: 'EUR', outcome: null, no_followup_required: false,
+          outcome_details: null, outcome_other_label: null, outcome_revision: 1,
+          created_at: '', updated_at: '',
         }),
         pipeline_stage: currentPipeline,
       }
@@ -165,7 +169,40 @@ export async function updateAppointment(id: string, payload: UpdateAppointmentPa
 // date, cf. nextActionService.postponeNextAction et les requêtes d'agenda qui le groupent
 // systématiquement avec 'scheduled') — donc complétable au même titre.
 // 'cancelled' et 'no_show' sont explicitement exclus : voir AppointmentCompletionError.
-export async function completeAppointment(id: string, plan?: PostCompletionPlan): Promise<CompleteAppointmentResult> {
+//
+// Lot 1.1 — deux garde-fous imposés ICI, pas seulement côté UI (un appel direct au service
+// sans ces conditions doit échouer AVANT toute écriture) :
+//  1. `outcome` doit déjà être renseigné sur appointment_business_context (relu depuis la
+//     base, jamais fait confiance à un état local potentiellement périmé).
+//  2. `closure.noFollowupRequired` est un paramètre obligatoire (pas optionnel) : son
+//     absence structurelle empêche déjà tout appel qui l'omettrait de compiler. Le service
+//     ne peut pas vérifier indépendamment qu'une relance/un prochain RDV existe réellement
+//     pour CE rendez-vous (les relances/RDV n'ont pas encore de colonne appointment_id —
+//     lien qui relève du Lot 3/4, hors périmètre) ; la garantie ici est donc « une décision a
+//     été explicitement communiquée au service », pas une vérification croisée en base.
+export async function completeAppointment(
+  id: string,
+  closure: AppointmentClosureDecision,
+  plan?: PostCompletionPlan,
+): Promise<CompleteAppointmentResult> {
+  if (typeof closure?.noFollowupRequired !== 'boolean') {
+    throw new AppointmentCompletionError('next_step_decision_required')
+  }
+
+  const { data: biz, error: bizError } = await supabase
+    .from('appointment_business_context')
+    .select('outcome')
+    .eq('appointment_id', id)
+    .maybeSingle()
+  if (bizError) throw new Error(bizError.message)
+  if (!biz?.outcome) throw new AppointmentCompletionError('outcome_required')
+
+  const { error: closureError } = await supabase
+    .from('appointment_business_context')
+    .update({ no_followup_required: closure.noFollowupRequired })
+    .eq('appointment_id', id)
+  if (closureError) throw new Error(closureError.message)
+
   const { data, error } = await supabase
     .from('appointments')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
@@ -224,7 +261,7 @@ export async function ensurePostCompletionActions(
   const [bizRes, notesRes, existingRes] = await Promise.all([
     supabase
       .from('appointment_business_context')
-      .select('commercial_intent, prospect_temperature, pipeline_stage')
+      .select('commercial_intent, prospect_temperature, pipeline_stage, no_followup_required')
       .eq('appointment_id', appointmentId)
       .maybeSingle(),
     supabase
@@ -237,7 +274,8 @@ export async function ensurePostCompletionActions(
       .select('id', { count: 'exact', head: true })
       .eq('client_id', clientId)
       .eq('auto_generated', true)
-      .eq('done', false),
+      .eq('done', false)
+      .is('cancelled_at', null),
   ])
 
   const biz   = bizRes.data
@@ -273,6 +311,9 @@ export async function ensurePostCompletionActions(
           prospect_temperature: biz.prospect_temperature ?? null,
           pipeline_stage:       biz.pipeline_stage ?? null,
           product_context:      notes?.products_discussed ?? null,
+          // Lot 1.2.1 — sans ce lien, cette relance est invisible pour buildOutcomeRevisionPlan
+          // (filtre appointment_id) : une révision ne peut alors jamais l'annuler.
+          appointment_id:       appointmentId,
         })
         if (error) throw error
       } catch (e) {
@@ -296,6 +337,7 @@ export async function ensurePostCompletionActions(
           prospect_temperature: biz.prospect_temperature ?? null,
           pipeline_stage:       biz.pipeline_stage ?? null,
           product_context:      null,
+          appointment_id:       appointmentId,
         })
         if (error) throw error
       } catch (e) {
@@ -331,7 +373,7 @@ export async function ensurePostCompletionActions(
             appointment_id: appointmentId,
             client_id:      clientId,
             user_id:        user.id,
-            title:          'Répondre aux objections détectées',
+            title:          'Répondre aux freins exprimés',
             task_type:      'follow_up',
             priority:       'high',
             status:         'pending',
@@ -346,7 +388,8 @@ export async function ensurePostCompletionActions(
     }
   }
 
-  // Automation : relance générique J+7 après tout RDV complété
+  // Automation : relance générique J+7 après tout RDV complété — jamais si le praticien a
+  // explicitement choisi "aucune suite nécessaire" pour ce RDV (Lot 1.2.1 §12).
   try {
     const { data: clientData, error: clientError } = await supabase
       .from('clients')
@@ -356,7 +399,7 @@ export async function ensurePostCompletionActions(
     if (clientError) throw clientError
     if (clientData) {
       const prénom = clientData.first_name || clientData.full_name.split(' ')[0]
-      await triggerAppointmentCompleted(userId, clientId, prénom)
+      await triggerAppointmentCompleted(userId, clientId, prénom, appointmentId, biz?.no_followup_required ?? false)
     }
   } catch (e) {
     console.error('[ensurePostCompletionActions.automation]', e)
@@ -386,17 +429,56 @@ export async function retryPostCompletionActions(appointmentId: string, plan?: P
 }
 
 export async function cancelAppointment(id: string, reason?: string): Promise<void> {
+  // Chargé avant la mise à jour pour pouvoir tracer l'événement (décision de la refonte) ;
+  // un échec de cette lecture ne doit pas empêcher l'annulation elle-même.
+  const { data: appt } = await supabase
+    .from('appointments')
+    .select('client_id, title, start_at, user_id')
+    .eq('id', id)
+    .single()
+
   const { error } = await supabase
     .from('appointments')
     .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancellation_reason: reason ?? null })
     .eq('id', id)
 
   if (error) throw new Error(error.message)
+
+  if (appt?.client_id) {
+    try {
+      await logClientEvent(appt.user_id, appt.client_id, 'appointment_cancelled', {
+        appointment_title: appt.title,
+        appointment_date: appt.start_at,
+        reason: reason ?? null,
+      })
+    } catch (logError) {
+      console.error('[logClientEvent]', logError)
+    }
+  }
 }
 
 export async function deleteAppointment(id: string): Promise<void> {
+  // Chargé avant la suppression : une fois le RDV supprimé, ces informations
+  // ne seraient plus récupérables pour l'événement de traçabilité.
+  const { data: appt } = await supabase
+    .from('appointments')
+    .select('client_id, title, start_at, user_id')
+    .eq('id', id)
+    .single()
+
   const { error } = await supabase.from('appointments').delete().eq('id', id)
   if (error) throw new Error(error.message)
+
+  if (appt?.client_id) {
+    try {
+      await logClientEvent(appt.user_id, appt.client_id, 'appointment_deleted', {
+        appointment_title: appt.title,
+        appointment_date: appt.start_at,
+      })
+    } catch (logError) {
+      console.error('[logClientEvent]', logError)
+    }
+  }
 }
 
 export async function upsertAppointmentNotes(appointmentId: string, payload: UpdateAppointmentNotesPayload): Promise<void> {
@@ -451,5 +533,12 @@ export async function completeTask(id: string): Promise<void> {
 
 export async function deleteTask(id: string): Promise<void> {
   const { error } = await supabase.from('appointment_tasks').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+// Distinct de completeTask/deleteTask (Lot 1.2 §16) : une tâche annulée n'a jamais été
+// réalisée, contrairement à une tâche terminée — jamais confondues, jamais supprimée.
+export async function cancelTask(id: string): Promise<void> {
+  const { error } = await supabase.from('appointment_tasks').update({ status: 'cancelled' }).eq('id', id)
   if (error) throw new Error(error.message)
 }

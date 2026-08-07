@@ -62,7 +62,7 @@ export async function computeCurrentValues(
       .from('clients')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .in('contact_role', ['distributor', 'leader'])
+      .overlaps('contact_role', ['distributor', 'leader'])
       .gte('created_at', from)
       .lte('created_at', to),
     supabase
@@ -70,6 +70,7 @@ export async function computeCurrentValues(
       .select('amount')
       .eq('user_id', userId)
       .neq('order_type', 'personal')
+      .is('cancelled_at', null)
       .gte('order_date', from.split('T')[0])
       .lte('order_date', to.split('T')[0]),
     supabase

@@ -3,11 +3,18 @@ import ExcelJS from 'exceljs/dist/exceljs.min.js'
 import { supabase } from '@/shared/lib/supabase'
 
 function csvCell(value: unknown) { return `"${String(value ?? '').replace(/"/g, '""')}"` }
+
+// Décision #7 de la refonte : les données de santé ne doivent jamais figurer dans un
+// export rapide. L'export complet (exportAllData / exportAllDataXlsx, sauvegarde
+// explicite de toutes les données) n'est pas concerné par cette exclusion.
+const SENSITIVE_CLIENT_COLUMNS = ['medical_notes', 'medical_treatment', 'particularities']
+
 export async function exportAllClients(userId: string) {
   const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).order('full_name')
   if (error) throw error
   const rows = data ?? []
-  const headers = rows.length ? Object.keys(rows[0]) : ['full_name', 'email', 'phone']
+  const headers = (rows.length ? Object.keys(rows[0]) : ['full_name', 'email', 'phone'])
+    .filter(key => !SENSITIVE_CLIENT_COLUMNS.includes(key))
   const csv = [headers.map(csvCell).join(','), ...rows.map(row => headers.map(key => csvCell((row as any)[key])).join(','))].join('\n')
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }))

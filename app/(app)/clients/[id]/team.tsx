@@ -3,21 +3,11 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator }
 import { router, Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useDirectTeam } from '@/features/network/useNetwork'
+import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { ContactRole } from '@/shared/lib/types'
-
-function rolePalette(role: ContactRole, colors: ThemeColors) {
-  switch (role) {
-    case 'leader':      return { bg: colors.tertiaryLight,  text: colors.tertiary  }
-    case 'distributor': return { bg: colors.secondaryLight, text: colors.secondary }
-    case 'customer':    return { bg: colors.successLight,   text: colors.success   }
-    case 'team_member': return { bg: colors.bgDim,          text: colors.textSecondary }
-    case 'inactive':    return { bg: colors.warningLight,   text: colors.warning   }
-    default:            return { bg: colors.primaryLight,   text: colors.primary   }
-  }
-}
+import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
 
 function activityColor(updatedAt: string | null, colors: ThemeColors): string {
   if (!updatedAt) return colors.textTertiary
@@ -38,6 +28,7 @@ export default function ClientTeamScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const { getRoleLabel } = useAppConfig()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { team, loading } = useDirectTeam(id)
 
@@ -57,7 +48,7 @@ export default function ClientTeamScreen() {
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
-            const rp  = rolePalette(item.contact_role, colors)
+            const rp  = getRoleColors(getPrimaryRole(item.contact_role), colors)
             const dot = activityColor(item.updated_at, colors)
             return (
               <TouchableOpacity
@@ -75,7 +66,7 @@ export default function ClientTeamScreen() {
                 <View style={[styles.dot, { backgroundColor: dot }]} />
                 <View style={[styles.badge, { backgroundColor: rp.bg }]}>
                   <Text style={[styles.badgeText, { color: rp.text }]}>
-                    {t(`clients.contact_role.${item.contact_role}`)}
+                    {item.contact_role.map(r => getRoleLabel(r)).join(' · ')}
                   </Text>
                 </View>
                 <Text style={styles.arrow}>›</Text>

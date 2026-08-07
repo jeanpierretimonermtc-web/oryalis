@@ -21,15 +21,20 @@ import { createCustomTemplate, getCustomTemplates } from '@/features/messages/cu
 
 const CATEGORIES: TemplateCategory[] = ['prospection', 'lrp', 'recrutement', 'suivi']
 
+type MessageClient = Pick<Client, 'first_name' | 'full_name' | 'next_lrp_date' | 'phone'>
+
 interface Props {
   visible:     boolean
   onClose:     () => void
-  client:      Client | null
+  client:      MessageClient | null
   advisorName: string
   lastProduct?: string
+  // Quand fourni, la modale saute directement à l'étape "message prêt" avec ce
+  // modèle (ex: récap de RDV) au lieu d'afficher la liste des modèles génériques.
+  initialTemplate?: MessageTemplate | null
 }
 
-export function MessageModal({ visible, onClose, client, advisorName, lastProduct }: Props) {
+export function MessageModal({ visible, onClose, client, advisorName, lastProduct, initialTemplate }: Props) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -45,6 +50,8 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   const [activeCategory, setActiveCategory] = useState<TemplateCategory>('prospection')
   const [selected, setSelected] = useState<MessageTemplate | null>(null)
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => { if (visible && initialTemplate) setSelected(initialTemplate) }, [visible, initialTemplate])
 
   const prénom = client?.first_name || client?.full_name?.split(' ')[0] || ''
   const date_lrp = client?.next_lrp_date

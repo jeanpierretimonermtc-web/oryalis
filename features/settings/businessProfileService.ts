@@ -19,6 +19,7 @@ export async function upsertBusinessProfile(
   patch: {
     activity_type?: ActivityType
     custom_brand_name?: string | null
+    custom_lrp_name?: string | null
     active_modules?: ModuleKey[]
     automation_delays?: Record<string, number>
   }
@@ -30,6 +31,7 @@ export async function upsertBusinessProfile(
         user_id:       userId,
         activity_type: patch.activity_type ?? 'generic',
         custom_brand_name: patch.custom_brand_name ?? null,
+        custom_lrp_name: patch.custom_lrp_name ?? null,
         active_modules: patch.active_modules ?? DEFAULT_MODULES,
         automation_delays: patch.automation_delays ?? {},
         updated_at: new Date().toISOString(),

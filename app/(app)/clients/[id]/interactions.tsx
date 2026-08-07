@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native'
-import { Stack, useLocalSearchParams } from 'expo-router'
+import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useClientInteractions } from '@/features/interactions/useInteractions'
@@ -42,11 +42,15 @@ function toDDMMYYYY(iso: string): string {
   return `${d ?? '01'}/${m ?? '01'}/${y ?? '2024'}`
 }
 
+// Interprète date+heure comme l'heure LOCALE de l'appareil (celle saisie par l'utilisateur)
+// et convertit correctement en UTC — voir app/(app)/appointments/new.tsx pour le même
+// correctif appliqué aux RDV (l'ancienne version étiquetait à tort l'heure locale "Z"/UTC).
 function buildScheduledAt(ddmmyyyy: string, hhmm: string): string | null {
   if (!ddmmyyyy.match(/^\d{2}\/\d{2}\/\d{4}$/)) return null
-  const [d, m, y] = ddmmyyyy.split('/')
+  const [d, m, y] = ddmmyyyy.split('/').map(Number)
   const time = hhmm.match(/^\d{2}:\d{2}$/) ? hhmm : '00:00'
-  return `${y}-${m}-${d}T${time}:00.000Z`
+  const [hh, mm] = time.split(':').map(Number)
+  return new Date(y, m - 1, d, hh, mm, 0, 0).toISOString()
 }
 
 export default function ClientInteractionsScreen() {
@@ -56,6 +60,7 @@ export default function ClientInteractionsScreen() {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { interactions, loading, refresh } = useClientInteractions(id)
+  useFocusEffect(useCallback(() => { refresh() }, [refresh]))
   const [showModal, setShowModal] = useState(false)
   const [confirmId, setConfirmId] = useState<string | null>(null)
 

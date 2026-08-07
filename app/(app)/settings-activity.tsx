@@ -23,7 +23,7 @@ export default function ActivitySettingsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { profile: bizProfile, saveActivityType } = useAppConfig()
+  const { profile: bizProfile, saveActivityType, isModuleActive, saveLrpName } = useAppConfig()
 
   return (
     <>
@@ -45,6 +45,14 @@ export default function ActivitySettingsScreen() {
         })}
         {bizProfile.activity_type === 'custom' && (
           <Input label="Nom de votre marque" value={bizProfile.custom_brand_name ?? ''} onChangeText={v => saveActivityType('custom', v)} placeholder="Ex : MonBienÊtre" />
+        )}
+        {isModuleActive('renewals_lrp') && (
+          <Input
+            label={t('settings.custom_lrp_name_label')}
+            value={bizProfile.custom_lrp_name ?? ''}
+            onChangeText={saveLrpName}
+            placeholder={t('settings.custom_lrp_name_placeholder')}
+          />
         )}
         <View style={styles.disclaimer}>
           <Text style={styles.disclaimerText}>Oryalis est indépendant. Les marques renseignées servent uniquement à organiser votre activité personnelle. Oryalis n'est ni affilié, ni approuvé, ni sponsorisé par ces marques.</Text>

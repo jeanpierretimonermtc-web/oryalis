@@ -8,10 +8,10 @@ import {
   applyPreset, resetStatusLabels,
 } from './statusLabelsService'
 import type {
-  ClientStatus, ModuleKey, ActivityType,
+  ClientStatus, ContactRole, LabelKey, ModuleKey, ActivityType,
   UserBusinessProfile,
 } from '@/shared/lib/types'
-import { DEFAULT_STATUS_LABELS } from '@/shared/lib/types'
+import { DEFAULT_STATUS_LABELS, DEFAULT_ROLE_LABELS } from '@/shared/lib/types'
 
 // ── Default profile ───────────────────────────────────────────────────────────
 
@@ -19,7 +19,8 @@ const DEFAULT_PROFILE: UserBusinessProfile = {
   id: '', user_id: '',
   activity_type: 'generic',
   custom_brand_name: null,
-  active_modules: ['products', 'renewals_lrp', 'downline', 'goals', 'calendar_sync', 'auto_new_client', 'auto_order', 'auto_appointment', 'auto_no_contact'],
+  custom_lrp_name: null,
+  active_modules: ['products', 'renewals_lrp', 'downline', 'goals', 'calendar_sync', 'auto_first_order', 'auto_order', 'auto_appointment', 'auto_no_contact'],
   automation_delays: {},
   created_at: '', updated_at: '',
 }
@@ -29,21 +30,26 @@ const DEFAULT_PROFILE: UserBusinessProfile = {
 type AppConfigCtx = {
   // ── State ──────────────────────────────────────────────────────────────────
   profile: UserBusinessProfile
-  labels: Partial<Record<ClientStatus, string>>
+  labels: Partial<Record<LabelKey, string>>
   loading: boolean
 
   // ── Read ───────────────────────────────────────────────────────────────────
   isModuleActive: (key: ModuleKey) => boolean
+  /** @deprecated voir `ClientStatus` — utiliser `getRoleLabel`. */
   getStatusLabel: (key: ClientStatus) => string
+  getRoleLabel: (key: ContactRole) => string
   getAutomationDelay: (ruleId: string, fallback: number) => number
+  /** Nom affiché du programme de fidélité (ex. "LRP"), personnalisable par l'utilisateur. */
+  getLrpName: () => string
 
   // ── Business profile writes ────────────────────────────────────────────────
   saveActivityType: (type: ActivityType, customBrand?: string | null) => Promise<void>
   toggleModule: (key: ModuleKey, active: boolean) => Promise<void>
   setAutomationDelay: (ruleId: string, days: number) => Promise<void>
+  saveLrpName: (name: string | null) => Promise<void>
 
   // ── Status label writes ────────────────────────────────────────────────────
-  saveLabel: (key: ClientStatus, value: string) => Promise<void>
+  saveLabel: (key: LabelKey, value: string) => Promise<void>
   applyActivityPreset: (type: ActivityType) => Promise<void>
   resetLabels: () => Promise<void>
 
@@ -57,10 +63,13 @@ const AppConfigContext = createContext<AppConfigCtx>({
   loading:    true,
   isModuleActive:    () => true,
   getStatusLabel:    (k) => DEFAULT_STATUS_LABELS[k] ?? k,
+  getRoleLabel:      (k) => DEFAULT_ROLE_LABELS[k] ?? k,
   getAutomationDelay: (_ruleId, fallback) => fallback,
+  getLrpName:        () => 'LRP',
   saveActivityType:  async () => {},
   toggleModule:      async () => {},
   setAutomationDelay: async () => {},
+  saveLrpName:       async () => {},
   saveLabel:         async () => {},
   applyActivityPreset: async () => {},
   resetLabels:       async () => {},
@@ -74,7 +83,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   const userId = session?.user?.id
 
   const [profile, setProfile] = useState<UserBusinessProfile>(DEFAULT_PROFILE)
-  const [labels,  setLabels]  = useState<Partial<Record<ClientStatus, string>>>({})
+  const [labels,  setLabels]  = useState<Partial<Record<LabelKey, string>>>({})
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -106,9 +115,17 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     labels[key] ?? DEFAULT_STATUS_LABELS[key] ?? key
   , [labels])
 
+  const getRoleLabel = useCallback((key: ContactRole): string =>
+    labels[key] ?? DEFAULT_ROLE_LABELS[key] ?? key
+  , [labels])
+
   const getAutomationDelay = useCallback((ruleId: string, fallback: number): number =>
     profile.automation_delays[ruleId] ?? fallback
   , [profile.automation_delays])
+
+  const getLrpName = useCallback((): string =>
+    profile.custom_lrp_name?.trim() || 'LRP'
+  , [profile.custom_lrp_name])
 
   // ── Business profile writes ──────────────────────────────────────────────────
 
@@ -125,6 +142,17 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       })
       setProfile(updated)
     } catch (e) { console.error('[saveActivityType]', e) }
+  }, [userId, profile])
+
+  const saveLrpName = useCallback(async (name: string | null) => {
+    if (!userId) return
+    try {
+      const updated = await upsertBusinessProfile(userId, {
+        ...profile,
+        custom_lrp_name: name?.trim() || null,
+      })
+      setProfile(updated)
+    } catch (e) { console.error('[saveLrpName]', e) }
   }, [userId, profile])
 
   const toggleModule = useCallback(async (key: ModuleKey, active: boolean) => {
@@ -154,7 +182,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
 
   // ── Status label writes ──────────────────────────────────────────────────────
 
-  const saveLabel = useCallback(async (key: ClientStatus, value: string) => {
+  const saveLabel = useCallback(async (key: LabelKey, value: string) => {
     if (!userId) return
     try {
       await upsertStatusLabel(userId, key, value)
@@ -183,8 +211,8 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   return (
     <AppConfigContext.Provider value={{
       profile, labels, loading,
-      isModuleActive, getStatusLabel, getAutomationDelay,
-      saveActivityType, toggleModule, setAutomationDelay,
+      isModuleActive, getStatusLabel, getRoleLabel, getAutomationDelay, getLrpName,
+      saveActivityType, toggleModule, setAutomationDelay, saveLrpName,
       saveLabel, applyActivityPreset, resetLabels,
       reload: load,
     }}>

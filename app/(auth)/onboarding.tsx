@@ -22,7 +22,7 @@ const ACTIVITIES: ActivityType[] = ['generic', 'doterra', 'zinzino', 'herbalife'
 const ROLES: ContactRole[] = ['prospect', 'customer', 'distributor']
 const ACTIONS: NextActionType[] = ['call', 'whatsapp', 'sms', 'email', 'rdv']
 const BASE_MODULES: ModuleKey[] = ['products', 'downline', 'client_import']
-const AUTOMATIONS: ModuleKey[] = ['auto_new_client', 'auto_order', 'auto_appointment', 'auto_no_contact']
+const AUTOMATIONS: ModuleKey[] = ['auto_first_order', 'auto_order', 'auto_appointment', 'auto_no_contact']
 
 function Stepper({ step, colors }: { step: number; colors: ThemeColors }) {
   return <View style={stylesStatic.stepper}>{[1, 2, 3].map(n => <View key={n} style={[stylesStatic.stepDot, { backgroundColor: step >= n ? colors.primary : colors.bgDim, borderColor: step >= n ? colors.primary : colors.border }]}><Text style={{ color: step >= n ? '#fff' : colors.textTertiary, fontFamily: fonts.bold }}>{step > n ? '✓' : n}</Text></View>)}</View>
@@ -80,10 +80,10 @@ export default function OnboardingScreen() {
     setBusy(true); setError(null)
     try {
       const created = await createClient(session.user.id, {
-        first_name: firstName.trim() || null, full_name: [firstName.trim(), lastName.trim()].filter(Boolean).join(' '), email: null, phone: null,
-        status: 'prospect', source: null, language: locale, birth_date: null, inscription_date: new Date().toISOString().slice(0, 10), profession: null,
+        first_name: firstName.trim() || null, full_name: [firstName.trim(), lastName.trim()].filter(Boolean).join(' '), avatar_url: null, email: null, phone: null,
+        is_vip: false, manually_inactive: false, source: null, language: locale, birth_date: null, inscription_date: new Date().toISOString().slice(0, 10), profession: null,
         children: null, interests: [], client_type: null, medical_treatment: false, medical_notes: null, particularities: null, welcome_email_sent: false,
-        doterra_id: null, next_lrp_date: null, address: null, loyalty_notes: null, sponsor_id: null, contact_role: role,
+        doterra_id: null, next_lrp_date: null, lrp_status: 'not_enrolled', lrp_loyalty_percent: null, lrp_start_date: null, tracking_consent_at: null, address: null, loyalty_notes: null, sponsor_id: null, contact_role: [role],
         pipeline_stage: role === 'distributor' ? 'distributor' : 'new_lead', country: null, first_contact_date: null, first_purchase_date: null,
         acquisition_source: null, journey_stage: null, next_action_date: null, next_action_type: null, referrals_count: 0, referral_count: 0, network_potential: null,
       })

@@ -8,8 +8,8 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
-import type { ActivityType, ModuleKey, ClientStatus } from '@/shared/lib/types'
-import { STATUS_KEYS, DEFAULT_STATUS_LABELS, STATUS_PRESETS } from '@/shared/lib/types'
+import type { ActivityType, ModuleKey, ContactRole } from '@/shared/lib/types'
+import { ROLE_KEYS, DEFAULT_ROLE_LABELS, ROLE_PRESETS } from '@/shared/lib/types'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 
 const ACTIVITY_OPTIONS: { value: ActivityType; label: string; emoji: string }[] = [
@@ -36,21 +36,21 @@ export default function CrmSettingsScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const {
     profile: bizProfile, labels: statusLabels,
-    saveActivityType, toggleModule, isModuleActive,
+    saveActivityType, toggleModule, isModuleActive, saveLrpName,
     saveLabel, applyActivityPreset, resetLabels,
   } = useAppConfig()
 
-  const [labelDraft, setLabelDraft] = useState<Partial<Record<ClientStatus, string>>>({})
+  const [labelDraft, setLabelDraft] = useState<Partial<Record<ContactRole, string>>>({})
   const [labelsSaving, setLabelsSaving] = useState(false)
 
   useEffect(() => { setLabelDraft({ ...statusLabels }) }, [statusLabels])
 
   const activePreset = useMemo((): ActivityType | null => {
-    for (const [type, preset] of Object.entries(STATUS_PRESETS)) {
+    for (const [type, preset] of Object.entries(ROLE_PRESETS)) {
       if (!preset) continue
       const entries = Object.entries(preset)
       if (!entries.length) continue
-      if (entries.every(([k, v]) => statusLabels[k as ClientStatus] === v)) return type as ActivityType
+      if (entries.every(([k, v]) => statusLabels[k as ContactRole] === v)) return type as ActivityType
     }
     return null
   }, [statusLabels])
@@ -59,7 +59,7 @@ export default function CrmSettingsScreen() {
     setLabelsSaving(true)
     try {
       for (const [key, val] of Object.entries(labelDraft)) {
-        if (val?.trim()) await saveLabel(key as ClientStatus, val.trim())
+        if (val?.trim()) await saveLabel(key as ContactRole, val.trim())
       }
     } finally { setLabelsSaving(false) }
   }
@@ -69,7 +69,7 @@ export default function CrmSettingsScreen() {
       <Stack.Screen options={settingsScreenOptions(t('settings.nav_crm'))} />
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        {/* ── Mon activité ─────────────────────────────────────────────────── */}
+        {/* ── Ma marque ────────────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>{t('settings.section_activity').toUpperCase()}</Text>
         <View style={styles.card}>
           <View style={styles.activityGrid}>
@@ -123,6 +123,14 @@ export default function CrmSettingsScreen() {
               />
             </View>
           ))}
+          {isModuleActive('renewals_lrp') && (
+            <Input
+              label={t('settings.custom_lrp_name_label')}
+              value={bizProfile.custom_lrp_name ?? ''}
+              onChangeText={saveLrpName}
+              placeholder={t('settings.custom_lrp_name_placeholder')}
+            />
+          )}
           <Text style={styles.moduleHint}>Désactiver un module masque son interface. Vos données sont conservées.</Text>
         </View>
 
@@ -156,15 +164,15 @@ export default function CrmSettingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {STATUS_KEYS.map(key => (
+          {ROLE_KEYS.map(key => (
             <View key={key} style={styles.labelRow}>
               <Text style={styles.labelKey}>{key}</Text>
               <View style={{ flex: 1 }}>
                 <TextInput
                   style={styles.labelInput}
-                  value={labelDraft[key] ?? DEFAULT_STATUS_LABELS[key]}
+                  value={labelDraft[key] ?? DEFAULT_ROLE_LABELS[key]}
                   onChangeText={v => setLabelDraft(prev => ({ ...prev, [key]: v }))}
-                  placeholder={DEFAULT_STATUS_LABELS[key]}
+                  placeholder={DEFAULT_ROLE_LABELS[key]}
                   placeholderTextColor={colors.textTertiary}
                 />
               </View>

@@ -20,7 +20,12 @@ export async function createRecommendation(
   catalogId: string | null = null,
   productId: string | null = null,
   quantity = 1,
-  objective: string | null = null
+  objective: string | null = null,
+  // Lot 1.2 — RDV source, uniquement quand créée explicitement depuis une clôture (§6).
+  appointmentId: string | null = null,
+  // Lot 1.2.1 §4 — clé d'idempotence déterministe, protégée par un index unique partiel
+  // (appointment_id, closure_action_key) : un rejeu du même plan ne duplique jamais.
+  closureActionKey: string | null = null,
 ) {
   const { data, error } = await supabase
     .from('recommendations')
@@ -34,10 +39,24 @@ export async function createRecommendation(
       product_id: productId,
       quantity,
       objective,
+      appointment_id: appointmentId,
+      closure_action_key: closureActionKey,
     })
     .select('*, catalog:catalogs(name, color, icon)')
     .single()
-  if (error) throw error
+  if (error) {
+    if (error.code === '23505' && closureActionKey && appointmentId) {
+      const { data: existing, error: fetchError } = await supabase
+        .from('recommendations')
+        .select('*, catalog:catalogs(name, color, icon)')
+        .eq('appointment_id', appointmentId)
+        .eq('closure_action_key', closureActionKey)
+        .single()
+      if (fetchError) throw fetchError
+      return existing as Recommendation
+    }
+    throw error
+  }
   return data as Recommendation
 }
 
@@ -51,5 +70,12 @@ export async function updateRecommendationStatus(id: string, status: Recommendat
 
 export async function deleteRecommendation(id: string) {
   const { error } = await supabase.from('recommendations').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Distinct de deleteRecommendation : conserve l'historique (Lot 1.2 §16) plutôt que de
+// supprimer physiquement une recommandation non finalisée devenue caduque.
+export async function cancelRecommendation(id: string): Promise<void> {
+  const { error } = await supabase.from('recommendations').update({ cancelled_at: new Date().toISOString() }).eq('id', id)
   if (error) throw error
 }

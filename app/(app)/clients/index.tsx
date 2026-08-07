@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, Modal } from 'react-native'
+import { View, Text, Image, FlatList, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, Modal } from 'react-native'
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useClients, useClientSearch } from '@/features/clients/useClients'
 import { useLastRdvMap } from '@/features/appointments/useAppointments'
-import { archiveClient, computeProspectScore, deleteClient } from '@/features/clients/clientService'
+import { archiveClient, deleteClient } from '@/features/clients/clientService'
 import { useContactQuota } from '@/features/clients/useContactQuota'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -13,11 +13,15 @@ import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { colors as brandColors, hexToRgba, type ThemeColors } from '@/shared/theme/colors'
+import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
+import { gravatarUrl } from '@/shared/lib/gravatar'
 import { fonts } from '@/shared/theme/fonts'
-import type { ClientListItem, ClientStatus, PipelineStage } from '@/shared/lib/types'
+import type { ClientListItem, ContactRole, PipelineStage } from '@/shared/lib/types'
 import { formatDate } from '@/shared/lib/dateFormat'
+import { computeRelationshipHealth, type RelationshipHealthInput } from '@/features/clients/relationshipHealth'
 
-const STATUS_FILTERS: (ClientStatus | 'all')[] = ['all', 'active', 'new_client', 'loyal', 'prospect', 'inactive', 'vip', 'advisor']
+const ROLE_FILTERS: (ContactRole | 'all' | 'vip')[] =
+  ['all', 'prospect', 'customer', 'distributor', 'leader', 'team_member', 'vip']
 
 function initials(name: string) {
   const parts = name.trim().split(' ').filter(Boolean)
@@ -26,67 +30,96 @@ function initials(name: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-function ClientAvatar({ name, status }: { name: string; status: ClientStatus }) {
-  const { colors, statusColors } = useTheme()
+// Couleur par rôle (pas par santé relationnelle, déjà visible via HealthPill à côté) —
+// même palette que les filtres de rôle et la fiche contact (getRoleColors/getPrimaryRole).
+// Ordre de priorité de la photo : upload manuel → Gravatar (si un email existe) → initiales.
+function ClientAvatar({ name, avatarUrl, contactRole, email }: { name: string; avatarUrl: string | null; contactRole: ContactRole[]; email: string | null }) {
+  const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const sc = statusColors[status] ?? { bg: colors.surfaceContainerHigh, text: colors.textSecondary }
+  const rc = getRoleColors(getPrimaryRole(contactRole), colors)
+  const [gravatarFailed, setGravatarFailed] = useState(false)
+  const photoUrl = avatarUrl ?? (email && !gravatarFailed ? gravatarUrl(email) : null)
+  if (photoUrl) {
+    return (
+      <View style={[styles.avatarRing, { borderColor: rc.text }]}>
+        <Image
+          source={{ uri: photoUrl }}
+          style={styles.avatarRingImg}
+          onError={() => { if (!avatarUrl) setGravatarFailed(true) }}
+        />
+      </View>
+    )
+  }
   return (
-    <View style={[styles.avatar, { backgroundColor: sc.bg }]}>
-      <Text style={[styles.avatarText, { color: sc.text }]}>{initials(name)}</Text>
+    <View style={[styles.avatar, { backgroundColor: rc.bg }]}>
+      <Text style={[styles.avatarText, { color: rc.text }]}>{initials(name)}</Text>
     </View>
   )
 }
 
-function StatusPill({ status }: { status: ClientStatus }) {
+function HealthPill({ health }: { health: RelationshipHealthInput }) {
+  const { t } = useTranslation()
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { getStatusLabel } = useAppConfig()
-  const sc = statusColors[status] ?? { bg: colors.surfaceContainerHighest, text: colors.textTertiary }
+  const { tier } = computeRelationshipHealth(health)
+  const sc = statusColors[tier] ?? { bg: colors.surfaceContainerHighest, text: colors.textTertiary }
   return (
     <View style={[styles.pill, { backgroundColor: sc.bg }]}>
-      <Text style={[styles.pillText, { color: sc.text }]}>{getStatusLabel(status)}</Text>
+      <Text style={[styles.pillText, { color: sc.text }]}>{t(`relationship_health.${tier}`)}</Text>
     </View>
   )
 }
 
-function ScoreBadge({ score }: { score: number }) {
+function RolePill({ role }: { role: ContactRole }) {
   const { colors } = useTheme()
-  if (score <= 0) return null
-  const bg   = score >= 70 ? colors.dangerLight  : score >= 40 ? colors.warningLight : colors.bgDim
-  const text = score >= 70 ? colors.danger        : score >= 40 ? colors.warning      : colors.textSecondary
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const { getRoleLabel } = useAppConfig()
+  const rc = getRoleColors(role, colors)
   return (
-    <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: bg }}>
-      <Text style={{ fontSize: 11, fontFamily: 'Inter_700Bold', color: text }}>{score}</Text>
+    <View style={[styles.pill, { backgroundColor: rc.bg }]}>
+      <Text style={[styles.pillText, { color: rc.text }]}>{getRoleLabel(role)}</Text>
     </View>
   )
 }
 
-function ClientCard({ client, lastRdv, onMenuPress }: { client: ClientListItem; lastRdv?: string; onMenuPress: (c: ClientListItem) => void }) {
+function VipTag() {
+  const { t } = useTranslation()
+  const { colors, statusColors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  return (
+    <View style={[styles.pill, { backgroundColor: statusColors.vip.bg }]}>
+      <Text style={[styles.pillText, { color: statusColors.vip.text }]}>{t('clients.vip_badge')}</Text>
+    </View>
+  )
+}
+
+function ClientCard({ client, nextRdv, lastRdv, onMenuPress }: { client: ClientListItem; nextRdv?: string; lastRdv?: string; onMenuPress: (c: ClientListItem) => void }) {
   const { t, i18n } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
 
-  const rdvText = lastRdv
+  const rdvText = nextRdv
+    ? `${t('clients.next_rdv')} : ${formatDate(nextRdv, locale)}`
+    : lastRdv
     ? `${t('clients.last_rdv')} : ${formatDate(lastRdv, locale)}`
     : t('clients.no_rdv')
-
-  const score = computeProspectScore({ client, lastRdvDate: lastRdv })
 
   return (
     <View style={styles.card}>
       <View style={styles.cardBody}>
         {/* Top: avatar + name/badge + score + menu */}
         <View style={styles.cardTop}>
-          <ClientAvatar name={client.full_name} status={client.status} />
+          <ClientAvatar name={client.full_name} avatarUrl={client.avatar_url} contactRole={client.contact_role} email={client.email} />
           <View style={styles.cardTitle}>
             <Text style={styles.cardName}>{client.full_name}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <StatusPill status={client.status} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <HealthPill health={client} />
+              {client.is_vip ? <VipTag /> : null}
+              {client.contact_role.filter(r => r !== 'customer').map(role => <RolePill key={role} role={role} />)}
               <View style={styles.pipelineMiniPill}>
                 <Text style={styles.pipelineMiniText}>{t(`pipeline_stages.${client.pipeline_stage}`)}</Text>
               </View>
-              <ScoreBadge score={score} />
             </View>
           </View>
           <TouchableOpacity
@@ -129,7 +162,7 @@ function ClientCard({ client, lastRdv, onMenuPress }: { client: ClientListItem; 
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.btnFill}
-          onPress={() => router.push(`/(app)/clients/${client.id}/appointments`)}
+          onPress={() => router.push(`/(app)/appointments/new?clientId=${client.id}&returnTo=${encodeURIComponent('/(app)/clients')}` as any)}
           activeOpacity={0.8}
         >
           <LineIcon name="calendarPlus" size={15} color={colors.textInverse} strokeWidth={2} />
@@ -145,17 +178,17 @@ export default function ClientsScreen() {
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
-  const { status: statusParam, pipeline: pipelineParam } = useLocalSearchParams<{ status?: ClientStatus; pipeline?: PipelineStage }>()
+  const { status: statusParam, pipeline: pipelineParam } = useLocalSearchParams<{ status?: ContactRole | 'all' | 'vip'; pipeline?: PipelineStage }>()
   const [query, setQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<ClientStatus | 'all'>(
-    statusParam && STATUS_FILTERS.includes(statusParam) ? statusParam : 'all'
+  const [roleFilter, setRoleFilter] = useState<ContactRole | 'all' | 'vip'>(
+    statusParam && ROLE_FILTERS.includes(statusParam) ? statusParam : 'all'
   )
   const [pipelineFilter, setPipelineFilter] = useState<PipelineStage | null>(pipelineParam ?? null)
   const { clients, loading, refresh } = useClients()
   const { quota, refresh: refreshQuota } = useContactQuota()
   const { results, search } = useClientSearch()
-  const { labels: statusLabels, getStatusLabel } = useAppConfig()
-  const { lastRdvMap } = useLastRdvMap(session?.user?.id)
+  const { labels: statusLabels, getRoleLabel } = useAppConfig()
+  const { nextRdvMap, lastRdvMap } = useLastRdvMap(session?.user?.id)
   const { width } = useWindowDimensions()
   const isWide = width >= 768
 
@@ -197,22 +230,23 @@ export default function ClientsScreen() {
   useFocusEffect(useCallback(() => { refresh() }, []))
 
   useEffect(() => {
-    if (statusParam && STATUS_FILTERS.includes(statusParam)) {
-      setStatusFilter(statusParam)
+    if (statusParam && ROLE_FILTERS.includes(statusParam)) {
+      setRoleFilter(statusParam)
     }
   }, [statusParam])
 
   useEffect(() => { setPipelineFilter(pipelineParam ?? null) }, [pipelineParam])
 
   useEffect(() => {
-    if (query.length > 0) search(query, statusFilter === 'all' ? undefined : statusFilter)
-  }, [query, statusFilter])
+    if (query.length > 0) search(query, roleFilter === 'all' || roleFilter === 'vip' ? undefined : roleFilter)
+  }, [query, roleFilter])
 
 
-  const baseDisplayed: ClientListItem[] = query.length > 0
-    ? results
-    : statusFilter === 'all' ? clients : clients.filter(c => c.status === statusFilter)
-  const displayed = pipelineFilter ? baseDisplayed.filter(c => c.pipeline_stage === pipelineFilter) : baseDisplayed
+  const baseDisplayed: ClientListItem[] = query.length > 0 ? results : clients
+  const roleFiltered = roleFilter === 'all' ? baseDisplayed
+    : roleFilter === 'vip' ? baseDisplayed.filter(c => c.is_vip)
+    : baseDisplayed.filter(c => c.contact_role.includes(roleFilter))
+  const displayed = pipelineFilter ? roleFiltered.filter(c => c.pipeline_stage === pipelineFilter) : roleFiltered
 
   return (
     <>
@@ -283,14 +317,14 @@ export default function ClientsScreen() {
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={STATUS_FILTERS}
+          data={ROLE_FILTERS}
           keyExtractor={s => s}
           style={styles.filtersList}
           contentContainerStyle={styles.filtersContent}
           ItemSeparatorComponent={() => <View style={{ width: 8 }} />}
           renderItem={({ item: s }) => {
-            const active = statusFilter === s
-            const cs = s === 'all' ? null : (statusColors[s] ?? null)
+            const active = roleFilter === s
+            const cs = s === 'all' ? null : s === 'vip' ? statusColors.vip : getRoleColors(s, colors)
             const bg     = active
               ? (cs ? cs.bg    : colors.primary)
               : colors.card
@@ -303,11 +337,11 @@ export default function ClientsScreen() {
             return (
               <TouchableOpacity
                 style={[styles.chip, { backgroundColor: bg, borderColor: border }]}
-                onPress={() => { setStatusFilter(s); setPipelineFilter(null) }}
+                onPress={() => { setRoleFilter(s); setPipelineFilter(null) }}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.chipText, { color: txtClr, fontFamily: active ? fonts.bold : fonts.medium }]}>
-                  {s === 'all' ? t('clients.filter_all') : getStatusLabel(s as ClientStatus)}
+                  {s === 'all' ? t('clients.filter_all') : s === 'vip' ? t('clients.vip_badge') : getRoleLabel(s)}
                 </Text>
               </TouchableOpacity>
             )
@@ -327,7 +361,7 @@ export default function ClientsScreen() {
               extraData={statusLabels}
               renderItem={({ item }) => (
                 <View style={isWide ? styles.colCard : undefined}>
-                  <ClientCard client={item} lastRdv={lastRdvMap[item.id]} onMenuPress={setMenuClient} />
+                  <ClientCard client={item} nextRdv={nextRdvMap[item.id]} lastRdv={lastRdvMap[item.id]} onMenuPress={setMenuClient} />
                 </View>
               )}
               ListEmptyComponent={
@@ -505,6 +539,8 @@ function makeStyles(colors: ThemeColors) {
   // ── Avatar ─────────────────────────────────────────────────────────────────
   avatar:     { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 17, fontFamily: fonts.bold },
+  avatarRing:    { width: 46, height: 46, borderRadius: 23, borderWidth: 2.5, alignItems: 'center', justifyContent: 'center' },
+  avatarRingImg: { width: 38, height: 38, borderRadius: 19 },
 
   // ── Status pill ────────────────────────────────────────────────────────────
   pill:     { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 9999 },

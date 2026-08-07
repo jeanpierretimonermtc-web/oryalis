@@ -37,7 +37,6 @@ export default function ImportScreen() {
   // Pré-rempli par auto-détection, modifiable manuellement (option "mapping manuel").
   const [columnAssignment, setColumnAssignment] = useState<Record<number, string | null>>({})
   const [pickerForColumn, setPickerForColumn]   = useState<number | null>(null)
-  const [showAiHelp, setShowAiHelp]             = useState(false)
   const [promptCopied, setPromptCopied]         = useState(false)
 
   const mapping = useMemo(() => {
@@ -169,22 +168,17 @@ export default function ImportScreen() {
           </View>
         </View>
 
-        {/* ── Aide IA (optionnelle) ──────────────────────────────────────── */}
-        <TouchableOpacity style={styles.aiToggle} onPress={() => setShowAiHelp(v => !v)} activeOpacity={0.7}>
-          <Text style={styles.aiToggleText}>{t('settings.import_ai_help_toggle')}</Text>
-        </TouchableOpacity>
-        {showAiHelp && (
-          <View style={styles.aiCard}>
-            <Text style={styles.aiTitle}>{t('settings.import_ai_help_title')}</Text>
-            <Text style={styles.aiDesc}>{t('settings.import_ai_help_desc')}</Text>
-            <Text style={styles.aiWarning}>{t('settings.import_ai_help_warning')}</Text>
-            <TouchableOpacity style={styles.aiCopyBtn} onPress={copyAiPrompt} activeOpacity={0.85}>
-              <Text style={styles.aiCopyBtnText}>
-                {promptCopied ? t('settings.import_ai_copied') : t('settings.import_ai_copy')}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* ── Aide IA (toujours visible — un lien à cliquer passait inaperçu) ─ */}
+        <View style={styles.aiCard}>
+          <Text style={styles.aiTitle}>{t('settings.import_ai_help_title')}</Text>
+          <Text style={styles.aiDesc}>{t('settings.import_ai_help_desc')}</Text>
+          <Text style={styles.aiWarning}>{t('settings.import_ai_help_warning')}</Text>
+          <TouchableOpacity style={styles.aiCopyBtn} onPress={copyAiPrompt} activeOpacity={0.85}>
+            <Text style={styles.aiCopyBtnText}>
+              {promptCopied ? t('settings.import_ai_copied') : t('settings.import_ai_copy')}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* ── Picker ─────────────────────────────────────────────────────── */}
         <TouchableOpacity style={styles.pickBtn} onPress={pickFile} activeOpacity={0.85} disabled={importing}>
@@ -432,8 +426,6 @@ function makeStyles(colors: ThemeColors) {
   },
   mappingFieldTextEmpty: { color: colors.textTertiary, backgroundColor: colors.bgDim },
 
-  aiToggle:     { alignItems: 'center', paddingVertical: 4 },
-  aiToggleText: { fontSize: 13, fontFamily: fonts.medium, color: colors.primary },
   aiCard:       { backgroundColor: colors.card, borderRadius: 14, padding: 16, gap: 10, borderWidth: 1, borderColor: colors.border },
   aiTitle:      { fontSize: 14, fontFamily: fonts.bold, color: colors.text },
   aiDesc:       { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18 },

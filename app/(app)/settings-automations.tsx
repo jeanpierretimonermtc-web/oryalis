@@ -15,7 +15,7 @@ import type { AutoTrigger, AutomationRule } from '@/features/automations/automat
 import type { ModuleKey } from '@/shared/lib/types'
 import { AdvisorGate } from '@/features/subscriptions/AdvisorGate'
 
-const TRIGGERS: AutoTrigger[] = ['new_client', 'order', 'appointment', 'no_contact']
+const TRIGGERS: AutoTrigger[] = ['first_order', 'order', 'appointment', 'no_contact']
 
 const ACTION_ICONS: Record<string, string> = {
   whatsapp: '💬',

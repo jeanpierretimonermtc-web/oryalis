@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, Modal } from 'react-native'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { usePendingFollowups } from '@/features/followups/useFollowups'
@@ -48,15 +48,14 @@ function getTabConfig(colors: ThemeColors): Record<Tab, { labelKey: string; acce
 
 // ── FollowupCard ──────────────────────────────────────────────────────────────
 
-function FollowupCard({ f, today, onDone }: {
+function FollowupCard({ f, today, onRequestDone }: {
   f: FollowupWithClient & { _score: number }
   today: string
-  onDone: () => Promise<void>
+  onRequestDone: () => void
 }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const [busy, setBusy] = useState(false)
 
   const isOverdue  = f.due_date < today
   const isToday    = f.due_date === today
@@ -70,11 +69,6 @@ function FollowupCard({ f, today, onDone }: {
     : t(daysAhead === 1 ? 'followups.ahead_day' : 'followups.ahead_days', { days: daysAhead })
 
   const scorePalette = getScorePalette(f._score, colors)
-
-  async function handleDone() {
-    setBusy(true)
-    try { await onDone() } finally { setBusy(false) }
-  }
 
   return (
     <TouchableOpacity
@@ -114,11 +108,8 @@ function FollowupCard({ f, today, onDone }: {
         </View>
 
         {/* Done button */}
-        <TouchableOpacity style={styles.doneBtn} onPress={handleDone} disabled={busy} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          {busy
-            ? <ActivityIndicator size="small" color={colors.textTertiary} />
-            : <View style={[styles.doneCircle, { borderColor: isOverdue ? colors.danger : colors.primary }]} />
-          }
+        <TouchableOpacity style={styles.doneBtn} onPress={onRequestDone} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <View style={[styles.doneCircle, { borderColor: isOverdue ? colors.danger : colors.primary }]} />
         </TouchableOpacity>
       </View>
 
@@ -191,9 +182,19 @@ export default function FollowupsScreen() {
   const tabs: Tab[] = ['overdue', 'today', 'upcoming']
   const counts = { overdue: overdue.length, today: dueToday.length, upcoming: upcoming.length }
 
-  async function handleDone(f: FollowupWithClient) {
-    await toggleFollowupDone(f.id, true)
-    refresh()
+  const [confirmDone, setConfirmDone] = useState<(FollowupWithClient & { _score: number }) | null>(null)
+  const [confirming,  setConfirming]  = useState(false)
+
+  async function handleConfirmDone() {
+    if (!confirmDone) return
+    setConfirming(true)
+    try {
+      await toggleFollowupDone(confirmDone.id, true)
+      await refresh()
+      setConfirmDone(null)
+    } finally {
+      setConfirming(false)
+    }
   }
 
   return (
@@ -243,7 +244,7 @@ export default function FollowupsScreen() {
                   <FollowupCard
                     f={item}
                     today={today}
-                    onDone={() => handleDone(item)}
+                    onRequestDone={() => setConfirmDone(item)}
                   />
                 )}
                 ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
@@ -263,6 +264,43 @@ export default function FollowupsScreen() {
           }
         </View>
       </View>
+
+      {/* ── Confirmation avant de marquer une relance comme terminée ────── */}
+      <Modal visible={!!confirmDone} transparent animationType="fade" onRequestClose={() => { if (!confirming) setConfirmDone(null) }}>
+        <TouchableOpacity
+          style={styles.confirmOverlay}
+          activeOpacity={1}
+          onPress={(e) => { if (!confirming && e.target === e.currentTarget) setConfirmDone(null) }}
+        >
+          <View style={styles.confirmSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.confirmHandle} />
+            <Text style={styles.confirmTitle}>{t('followups.confirm_done_title')}</Text>
+            <Text style={styles.confirmText}>
+              {t('followups.confirm_done_text', { name: confirmDone?.client?.full_name ?? '' })}
+            </Text>
+            <View style={styles.confirmBtnRow}>
+              <TouchableOpacity
+                style={styles.confirmCancelBtn}
+                onPress={() => setConfirmDone(null)}
+                disabled={confirming}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmCancelBtnText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmDoneBtn, confirming && { opacity: 0.6 }]}
+                onPress={handleConfirmDone}
+                disabled={confirming}
+                activeOpacity={0.8}
+              >
+                {confirming
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.confirmDoneBtnText}>{t('followups.confirm_done_action')}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </>
   )
 }
@@ -326,5 +364,17 @@ function makeStyles(colors: ThemeColors) {
   dateIcon:   { fontSize: 11 },
   dateText:   { fontSize: 12, fontFamily: fonts.semibold },
   createdText:{ fontSize: 11, fontFamily: fonts.body, color: colors.textTertiary, marginLeft: 'auto' },
+
+  // ── Confirmation "relance terminée" ───────────────────────────────────────
+  confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  confirmSheet:   { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 4 },
+  confirmHandle:  { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 12 },
+  confirmTitle:   { fontSize: 16, fontFamily: fonts.bold, color: colors.text },
+  confirmText:    { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 4, marginBottom: 16, lineHeight: 19 },
+  confirmBtnRow:  { flexDirection: 'row', gap: 10 },
+  confirmCancelBtn:     { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 13, borderWidth: 1.5, borderColor: colors.border },
+  confirmCancelBtnText: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+  confirmDoneBtn:       { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 13, backgroundColor: colors.primary },
+  confirmDoneBtnText:   { fontSize: 14, fontFamily: fonts.semibold, color: '#fff' },
   })
 }

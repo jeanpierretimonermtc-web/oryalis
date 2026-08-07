@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
-import { router, Stack, useLocalSearchParams } from 'expo-router'
+import { router, Stack, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useClientAppointments } from '@/features/appointments/useAppointments'
@@ -44,6 +44,7 @@ export default function ClientAppointmentsScreen() {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { appointments, loading, refresh } = useClientAppointments(id)
+  useFocusEffect(useCallback(() => { refresh() }, [refresh]))
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
@@ -67,7 +68,8 @@ export default function ClientAppointmentsScreen() {
   }
 
   function goToNew() {
-    router.push(`/(app)/appointments/new?clientId=${id}` as any)
+    const returnTo = encodeURIComponent(`/(app)/clients/${id}/appointments`)
+    router.push(`/(app)/appointments/new?clientId=${id}&returnTo=${returnTo}` as any)
   }
 
   function viewAppointment(apptId: string) {

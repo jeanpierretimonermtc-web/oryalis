@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, useWindowDimensions,
+  StyleSheet, ActivityIndicator, useWindowDimensions, Modal,
 } from 'react-native'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +13,7 @@ import { colors as brandColors, type ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
+import { deleteAppointment } from '@/features/appointments/appointmentService'
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
 
 // ── Local type (joins client for display) ─────────────────────────────────────
@@ -128,6 +129,13 @@ export default function AgendaScreen() {
   const [loadingRange, setLoadingRange] = useState(true)
   const [nextAppt,     setNextAppt]     = useState<CalAppt | null>(null)
 
+  // Menu d'action rapide (Voir / Modifier / Supprimer) ouvert au clic sur un RDV du
+  // calendrier, sans quitter la page — la suppression est irréversible, contrairement à
+  // "Annuler" (statut) déjà disponible depuis la fiche détaillée.
+  const [actionMenuAppt, setActionMenuAppt] = useState<CalAppt | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deletingAppt, setDeletingAppt] = useState(false)
+
   const monthGridStart = useMemo(
     () => getMonday(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1)),
     [monthAnchor]
@@ -181,6 +189,44 @@ export default function AgendaScreen() {
     setWeekStart(getMonday(day))
     setMonthAnchor(new Date(day.getFullYear(), day.getMonth(), 1))
     setViewMode('day')
+  }
+
+  function openApptMenu(appt: CalAppt) {
+    setActionMenuAppt(appt)
+    setConfirmingDelete(false)
+  }
+
+  function closeApptMenu() {
+    if (deletingAppt) return
+    setActionMenuAppt(null)
+    setConfirmingDelete(false)
+  }
+
+  function handleViewAppt() {
+    if (!actionMenuAppt) return
+    router.push(`/(app)/appointments/${actionMenuAppt.id}` as any)
+    closeApptMenu()
+  }
+
+  function handleEditAppt() {
+    if (!actionMenuAppt) return
+    router.push(`/(app)/appointments/new?id=${actionMenuAppt.id}` as any)
+    closeApptMenu()
+  }
+
+  async function handleDeleteAppt() {
+    if (!actionMenuAppt) return
+    setDeletingAppt(true)
+    try {
+      await deleteAppointment(actionMenuAppt.id)
+      setActionMenuAppt(null)
+      setConfirmingDelete(false)
+      await Promise.all([fetchRange(), fetchNextAppt()])
+    } catch (e) {
+      console.error('[Agenda.deleteAppointment]', e)
+    } finally {
+      setDeletingAppt(false)
+    }
   }
 
   const handleGoogleSyncPress = useCallback(async () => {
@@ -403,7 +449,7 @@ export default function AgendaScreen() {
                     <TouchableOpacity
                       key={appt.id}
                       style={[styles.weekApptBlock, { left: dayIdx * weekColW + 3, width: weekColW - 6, top: topPx + 2, height: hPx, backgroundColor: pal.bg, borderLeftColor: accent }]}
-                      onPress={() => router.push(`/(app)/appointments/${appt.id}` as any)}
+                      onPress={() => openApptMenu(appt)}
                       accessibilityLabel={t('appointments.view_detail_hint')}
                       activeOpacity={0.8}
                     >
@@ -470,7 +516,7 @@ export default function AgendaScreen() {
               <TouchableOpacity
                 key={appt.id}
                 style={[styles.dayApptBlock, { top: topPx, height: hPx, backgroundColor: pal.bg, borderLeftColor: accent, zIndex: 1 }]}
-                onPress={() => router.push(`/(app)/appointments/${appt.id}` as any)}
+                onPress={() => openApptMenu(appt)}
                 accessibilityLabel={t('appointments.view_detail_hint')}
                 activeOpacity={0.8}
               >
@@ -622,6 +668,62 @@ export default function AgendaScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <Modal visible={!!actionMenuAppt} transparent animationType="fade" onRequestClose={closeApptMenu}>
+        <TouchableOpacity style={styles.apptMenuOverlay} activeOpacity={1} onPress={closeApptMenu}>
+          <TouchableOpacity activeOpacity={1} style={styles.apptMenuSheet}>
+            {actionMenuAppt ? (
+              <>
+                <View style={styles.apptMenuHeader}>
+                  <Text style={styles.apptMenuTitle} numberOfLines={1}>{actionMenuAppt.title}</Text>
+                  <Text style={styles.apptMenuSub}>
+                    {(() => {
+                      const d = new Date(actionMenuAppt.start_at)
+                      return `${d.getDate()} ${months[d.getMonth()]} · ${formatTime(d)}`
+                    })()}
+                  </Text>
+                </View>
+
+                {confirmingDelete ? (
+                  <>
+                    <Text style={styles.apptMenuConfirmText}>{t('appointments.confirm_delete_appt')}</Text>
+                    <View style={styles.apptMenuConfirmRow}>
+                      <TouchableOpacity
+                        style={styles.apptMenuSecondaryBtn}
+                        onPress={() => setConfirmingDelete(false)}
+                        disabled={deletingAppt}
+                      >
+                        <Text style={styles.apptMenuSecondaryBtnText}>{t('common.cancel')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.apptMenuDangerBtn, deletingAppt && { opacity: 0.6 }]}
+                        onPress={handleDeleteAppt}
+                        disabled={deletingAppt}
+                      >
+                        {deletingAppt
+                          ? <ActivityIndicator size="small" color="#fff" />
+                          : <Text style={styles.apptMenuDangerBtnText}>{t('common.delete')}</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <TouchableOpacity style={styles.apptMenuRow} onPress={handleViewAppt} activeOpacity={0.7}>
+                      <Text style={styles.apptMenuRowText}>{t('appointments.view_detail_hint')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.apptMenuRow} onPress={handleEditAppt} activeOpacity={0.7}>
+                      <Text style={styles.apptMenuRowText}>{t('common.edit')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.apptMenuRow} onPress={() => setConfirmingDelete(true)} activeOpacity={0.7}>
+                      <Text style={[styles.apptMenuRowText, { color: colors.danger }]}>{t('common.delete')}</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </>
+            ) : null}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </>
   )
 }
@@ -629,6 +731,21 @@ export default function AgendaScreen() {
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDim },
+
+  // Menu d'action rapide sur un RDV du calendrier
+  apptMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  apptMenuSheet:   { width: '100%', maxWidth: 320, borderRadius: 16, padding: 16, backgroundColor: colors.card, boxShadow: [{ offsetX: 0, offsetY: 12, blurRadius: 24, color: 'rgba(0, 0, 0, 0.2)' }], elevation: 16 },
+  apptMenuHeader:  { marginBottom: 10, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  apptMenuTitle:   { fontSize: 15, fontFamily: fonts.semibold, color: colors.text },
+  apptMenuSub:     { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 2 },
+  apptMenuRow:     { paddingVertical: 12 },
+  apptMenuRowText: { fontSize: 14, fontFamily: fonts.medium, color: colors.text },
+  apptMenuConfirmText: { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18, marginBottom: 14 },
+  apptMenuConfirmRow:  { flexDirection: 'row', gap: 10 },
+  apptMenuSecondaryBtn:     { flex: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  apptMenuSecondaryBtnText: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+  apptMenuDangerBtn:        { flex: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center', backgroundColor: colors.danger },
+  apptMenuDangerBtnText:    { fontSize: 14, fontFamily: fonts.semibold, color: '#ffffff' },
 
   pageHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
   pageTitle:    { fontSize: 28, fontFamily: fonts.display, color: colors.text },
