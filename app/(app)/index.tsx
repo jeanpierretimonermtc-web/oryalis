@@ -11,7 +11,7 @@ import {
 } from 'react-native'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
-import { Bell, Calendar, CheckCircle2, Flame, RefreshCw, AlertTriangle, ClipboardX, UserMinus } from 'lucide-react-native'
+import { Bell, Calendar, CheckCircle2, Flame, RefreshCw, AlertTriangle, ClipboardX, UserMinus, ChevronRight, User } from 'lucide-react-native'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useDemoState } from '@/features/demo/DemoProvider'
 import {
@@ -240,6 +240,18 @@ const DAILY_ICON: Record<DailyActionKind, typeof Bell> = {
   overdue_task: AlertTriangle, hot_prospect: Flame, incomplete_appointment: ClipboardX,
   at_risk_client: UserMinus, renewal: RefreshCw,
 }
+// Libellé du bouton d'action principal de "Priorités du jour" — spécifique au type d'élément
+// (une tâche en retard n'a pas de "fiche RDV"), jamais un seul mot générique pour tous les cas.
+const PRIMARY_ACTION_LABEL_KEY: Record<DailyActionKind, string> = {
+  overdue_followup: 'dashboard.view_followup',
+  today_appointment: 'dashboard.view_appointment',
+  today_action: 'dashboard.view_detail',
+  overdue_task: 'dashboard.view_task',
+  hot_prospect: 'dashboard.view_detail',
+  incomplete_appointment: 'dashboard.view_appointment',
+  at_risk_client: 'dashboard.view_detail',
+  renewal: 'dashboard.view_detail',
+}
 function dailyAccent(kind: DailyActionKind, colors: ThemeColors) {
   switch (kind) {
     case 'overdue_followup':
@@ -289,29 +301,45 @@ function TopPriorities({ top, loading }: { top: DailyActionItem[]; loading: bool
         const showViewFile = item.clientId && item.href !== `/(app)/clients/${item.clientId}`
         return (
           <View key={item.id} style={[styles.topPriorityCard, { borderLeftColor: accent.fg }]}>
-            <TouchableOpacity style={styles.topPriorityMain} onPress={() => router.push(item.href as any)} activeOpacity={0.75}>
-              <View style={[styles.actionGroupIconBox, { backgroundColor: accent.bg }]}>
-                <Icon size={14} color={accent.fg} strokeWidth={2.2} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={styles.topPriorityHeaderRow}>
-                  <Text style={styles.actionClient} numberOfLines={1}>{item.clientName || item.title}</Text>
-                  <View style={[styles.topPriorityBadge, { backgroundColor: accent.bg }]}>
-                    <Text style={[styles.topPriorityBadgeText, { color: accent.fg }]}>{t(`dashboard.daily.${item.kind}`)}</Text>
-                  </View>
+            <View style={styles.topPriorityRow}>
+              <View style={styles.topPriorityMain}>
+                <View style={[styles.actionGroupIconBox, { backgroundColor: accent.bg }]}>
+                  <Icon size={14} color={accent.fg} strokeWidth={2.2} />
                 </View>
-                <Text style={styles.actionDetail}>
-                  {reasonText(item)}
-                  {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: item.kind === 'today_appointment' ? '2-digit' : undefined, minute: item.kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.topPriorityHeaderRow}>
+                    <Text style={styles.actionClient} numberOfLines={1}>{item.clientName || item.title}</Text>
+                    <View style={[styles.topPriorityBadge, { backgroundColor: accent.bg }]}>
+                      <Text style={[styles.topPriorityBadgeText, { color: accent.fg }]}>{t(`dashboard.daily.${item.kind}`)}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.actionDetail}>
+                    {reasonText(item)}
+                    {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: item.kind === 'today_appointment' ? '2-digit' : undefined, minute: item.kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
+                  </Text>
+                </View>
               </View>
-              <Text style={styles.actionArrow}>→</Text>
-            </TouchableOpacity>
-            {showViewFile ? (
-              <TouchableOpacity onPress={() => router.push(`/(app)/clients/${item.clientId}` as any)} activeOpacity={0.7}>
-                <Text style={styles.topPriorityViewFile}>{t('dashboard.view_file')}</Text>
-              </TouchableOpacity>
-            ) : null}
+              <View style={styles.topPriorityActions}>
+                <TouchableOpacity
+                  style={[styles.topPriorityBtnPrimary, { backgroundColor: accent.fg }]}
+                  onPress={() => router.push(item.href as any)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.topPriorityBtnPrimaryText}>{t(PRIMARY_ACTION_LABEL_KEY[item.kind] as any)}</Text>
+                  <ChevronRight size={14} color="#ffffff" strokeWidth={2.4} />
+                </TouchableOpacity>
+                {showViewFile ? (
+                  <TouchableOpacity
+                    style={styles.topPriorityBtnSecondary}
+                    onPress={() => router.push(`/(app)/clients/${item.clientId}` as any)}
+                    activeOpacity={0.75}
+                  >
+                    <User size={13} color={colors.textSecondary} strokeWidth={2.2} />
+                    <Text style={styles.topPriorityBtnSecondaryText}>{t('dashboard.view_file')}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
           </View>
         )
       })}
@@ -354,7 +382,7 @@ function DailyActionCenter({ items, hasAnyToday, loading }: { items: DailyAction
               {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: kind === 'today_appointment' ? '2-digit' : undefined, minute: kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
             </Text>
           </View>
-          <Text style={styles.actionArrow}>→</Text>
+          <ChevronRight size={16} color={colors.textTertiary} strokeWidth={2.2} />
         </TouchableOpacity>)}
         {group.length > 5 ? <Text style={styles.actionMore}>+{group.length - 5} {t('dashboard.other_actions')}</Text> : null}
       </View>
@@ -1171,16 +1199,21 @@ function makeStyles(colors: ThemeColors) {
     actionRow: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 52, paddingVertical: 8, paddingLeft: 10, borderTopWidth: 1, borderTopColor: colors.border, borderLeftWidth: 2.5 },
     actionRowText: { flex: 1 }, actionClient: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
     actionDetail: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 2 },
-    actionArrow: { color: colors.primary, fontSize: 18 }, actionMore: { textAlign: 'center', fontSize: 12, color: colors.textTertiary, paddingTop: 4 },
+    actionMore: { textAlign: 'center', fontSize: 12, color: colors.textTertiary, paddingTop: 4 },
 
     topPriorities: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 18, gap: 12 },
     topPrioritiesTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text, marginBottom: 2 },
     topPriorityCard: { borderRadius: 12, borderLeftWidth: 3, backgroundColor: colors.bgDim, padding: 10, gap: 6 },
-    topPriorityMain: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    topPriorityRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10 },
+    topPriorityMain: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 180 },
     topPriorityHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     topPriorityBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
     topPriorityBadgeText: { fontSize: 10, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.3 },
-    topPriorityViewFile: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary, alignSelf: 'flex-end' },
+    topPriorityActions: { flexDirection: 'row', gap: 8, marginLeft: 'auto' },
+    topPriorityBtnPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderRadius: 9, paddingVertical: 8, paddingHorizontal: 12 },
+    topPriorityBtnPrimaryText: { fontSize: 12.5, fontFamily: fonts.semibold, color: '#ffffff' },
+    topPriorityBtnSecondary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 9, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+    topPriorityBtnSecondaryText: { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.textSecondary },
 
     allClearRow: {
       backgroundColor: colors.successLight,
