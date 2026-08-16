@@ -11,6 +11,22 @@ export type AppointmentType =
   | 'business_review'
   | 'other'
 
+// Accent unique par type de RDV, identique en light/dark (palette catégorielle, pas des
+// tokens de thème) — source unique pour tous les écrans qui colorent un badge/point par type.
+export const APPOINTMENT_TYPE_COLORS: Record<AppointmentType, string> = {
+  discovery_call:       '#3B82F6',
+  product_presentation: '#8B5CF6',
+  follow_up:             '#10B981',
+  closing_call:          '#F59E0B',
+  customer_support:      '#22D3EE',
+  team_training:         '#EC4899',
+  team_meeting:          '#6366F1',
+  webinar:               '#F97316',
+  onboarding:            '#06B6D4',
+  business_review:       '#84CC16',
+  other:                 '#94A3B8',
+}
+
 export type AppointmentStatus =
   | 'scheduled'
   | 'completed'

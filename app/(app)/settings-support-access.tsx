@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Stack, useFocusEffect } from 'expo-router'
 import { listMySupportAccessRequests, respondToSupportAccessRequest, revokeMySupportAccess, type SupportAccessRequest } from '@/features/admin/adminService'
 import { Button } from '@/shared/components/ui/Button'
@@ -24,7 +24,7 @@ export default function SupportAccessSettingsScreen() {
   }, [])
   useFocusEffect(useCallback(() => { void load() }, [load]))
   const act = async (action: () => Promise<unknown>) => {
-    try { await action(); await load() } catch (e) { Alert.alert('Erreur', e instanceof Error ? e.message : 'Opération impossible.') }
+    try { await action(); await load() } catch (e) { setError(e instanceof Error ? e.message : 'Opération impossible.') }
   }
   return (
     <>

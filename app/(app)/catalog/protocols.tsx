@@ -55,6 +55,8 @@ function ProductRow({ product, selected, onToggle }: { product: ProtocolProduct;
 
 // ── Protocol card ─────────────────────────────────────────────────────────────
 
+function pluralS(count: number) { return count > 1 ? 's' : '' }
+
 function ProtocolCard({ protocol, onRecommend }: { protocol: Protocol; onRecommend: (p: Protocol) => void }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
@@ -84,7 +86,7 @@ function ProtocolCard({ protocol, onRecommend }: { protocol: Protocol; onRecomme
       {expanded && (
         <View style={styles.cardDetail}>
           {/* Products */}
-          <Text style={styles.sectionLabel}>PRODUITS</Text>
+          <Text style={styles.sectionLabel}>{t('catalog.products_label')}</Text>
           {protocol.products.map((p, i) => (
             <View key={i} style={styles.detailProductRow}>
               <View style={[styles.roleDot, { backgroundColor: ROLE_COLORS[p.role].bg }]}>
@@ -103,7 +105,7 @@ function ProtocolCard({ protocol, onRecommend }: { protocol: Protocol; onRecomme
           {/* Tips */}
           {protocol.tips.length > 0 && (
             <>
-              <Text style={[styles.sectionLabel, { marginTop: 14 }]}>CONSEILS</Text>
+              <Text style={[styles.sectionLabel, { marginTop: 14 }]}>{t('catalog.tips_label')}</Text>
               {protocol.tips.map((tip, i) => (
                 <View key={i} style={styles.tipRow}>
                   <Text style={styles.tipBullet}>•</Text>
@@ -199,9 +201,9 @@ function ClientPicker({
           {done ? (
             <View style={styles.doneWrap}>
               <Text style={styles.doneEmoji}>✅</Text>
-              <Text style={styles.doneTitle}>Recommandations créées !</Text>
+              <Text style={styles.doneTitle}>{t('catalog.recommendations_created_title')}</Text>
               <Text style={styles.doneSub}>
-                {selectedProducts.size} produit(s) ajouté(s) à la fiche de {selectedClient?.full_name}
+                {t('catalog.recommendations_created_body', { count: selectedProducts.size, name: selectedClient?.full_name })}
               </Text>
               <TouchableOpacity
                 style={[styles.recommendBtn, { marginTop: 16 }]}
@@ -210,7 +212,7 @@ function ClientPicker({
                 <Text style={styles.recommendBtnText}>{t('catalog.view_contact_file')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.closeLink} onPress={handleReset}>
-                <Text style={styles.closeLinkText}>Fermer</Text>
+                <Text style={styles.closeLinkText}>{t('catalog.close')}</Text>
               </TouchableOpacity>
             </View>
           ) : !selectedClient ? (
@@ -218,7 +220,7 @@ function ClientPicker({
               <Text style={styles.pickerTitle}>{t('catalog.choose_contact')}</Text>
               <TextInput
                 style={styles.pickerSearch}
-                placeholder="Rechercher..."
+                placeholder={t('catalog.client_search_placeholder')}
                 value={query}
                 onChangeText={setQuery}
                 placeholderTextColor={colors.textTertiary}
@@ -248,7 +250,7 @@ function ClientPicker({
                 />
               )}
               <TouchableOpacity style={styles.closeLink} onPress={handleReset}>
-                <Text style={styles.closeLinkText}>Annuler</Text>
+                <Text style={styles.closeLinkText}>{t('catalog.cancel')}</Text>
               </TouchableOpacity>
             </>
           ) : (
@@ -257,7 +259,7 @@ function ClientPicker({
                 {protocol?.emoji} {protocol?.title}
               </Text>
               <Text style={styles.pickerSub}>
-                Sélectionner les produits pour <Text style={{ fontFamily: fonts.bold }}>{selectedClient.full_name}</Text>
+                {t('catalog.select_products_for')} <Text style={{ fontFamily: fonts.bold }}>{selectedClient.full_name}</Text>
               </Text>
               <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
                 {protocol?.products.map((p, i) => (
@@ -284,7 +286,7 @@ function ClientPicker({
                 {saving
                   ? <ActivityIndicator color="#fff" size="small" />
                   : <Text style={styles.recommendBtnText}>
-                      Créer {selectedProducts.size} recommandation{selectedProducts.size > 1 ? 's' : ''}
+                      {t('catalog.create_recommendations_button', { count: selectedProducts.size, plural: pluralS(selectedProducts.size) })}
                     </Text>
                 }
               </TouchableOpacity>
@@ -302,13 +304,14 @@ function ClientPicker({
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function ProtocolsScreen() {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { catalog } = useLocalSearchParams<{ catalog?: string }>()
 
   const brand = (catalog as ProtocolBrand) ?? 'all'
   const brandLabel  = BRAND_LABELS[brand] ?? ''
-  const screenTitle = brand !== 'all' ? `🌿 Protocoles ${brandLabel}` : '🌿 Protocoles bien-être'
+  const screenTitle = brand !== 'all' ? t('catalog.protocols_title', { brand: brandLabel }) : t('catalog.protocols_title_default')
 
   const [search,          setSearch]          = useState('')
   const [categoryFilter,  setCategoryFilter]  = useState<string | null>(null)
@@ -342,7 +345,7 @@ export default function ProtocolsScreen() {
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Problématique, produit..."
+            placeholder={t('catalog.protocols_search_placeholder')}
             value={search}
             onChangeText={setSearch}
             placeholderTextColor={colors.textTertiary}
@@ -357,7 +360,7 @@ export default function ProtocolsScreen() {
             onPress={() => setCategoryFilter(null)}
             activeOpacity={0.7}
           >
-            <Text style={[styles.filterText, !categoryFilter && styles.filterTextActive]}>Toutes</Text>
+            <Text style={[styles.filterText, !categoryFilter && styles.filterTextActive]}>{t('catalog.all_categories')}</Text>
           </TouchableOpacity>
           {availableCategories.map(cat => (
             <TouchableOpacity
@@ -379,7 +382,7 @@ export default function ProtocolsScreen() {
               <Text style={styles.legendLabel}>{ROLE_LABELS[role as keyof typeof ROLE_LABELS]}</Text>
             </View>
           ))}
-          <Text style={styles.legendHint}>Appuyer pour développer</Text>
+          <Text style={styles.legendHint}>{t('catalog.expand_hint')}</Text>
         </View>
 
         {/* List */}
@@ -391,7 +394,7 @@ export default function ProtocolsScreen() {
           {displayed.length === 0 ? (
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyEmoji}>🌿</Text>
-              <Text style={styles.emptyText}>Aucun protocole trouvé</Text>
+              <Text style={styles.emptyText}>{t('catalog.no_protocols_found')}</Text>
             </View>
           ) : (
             displayed.map(protocol => (

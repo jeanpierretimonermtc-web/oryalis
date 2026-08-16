@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { View, Text, Image, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Modal, Platform, Alert } from 'react-native'
+import { View, Text, Image, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Modal, Platform } from 'react-native'
 import { Stack } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import * as ImagePicker from 'expo-image-picker'
@@ -29,17 +29,19 @@ export default function IdentitySettingsScreen() {
   const [showUrl,   setShowUrl]   = useState(false)
   const [urlDraft,  setUrlDraft]  = useState('')
   const [uploading, setUploading] = useState(false)
+  const [errorMsg,  setErrorMsg]  = useState<string | null>(null)
 
   async function uploadImage(uri: string) {
     if (!session?.user.id) return
     setUploading(true)
+    setErrorMsg(null)
     try {
       const blob = await (await fetch(uri)).blob()
       const { error } = await supabase.storage.from('avatars').upload(`${session.user.id}.jpg`, blob, { upsert: true, contentType: 'image/jpeg' })
       if (error) throw error
       const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(`${session.user.id}.jpg`)
       await save({ avatar_url: publicUrl })
-    } catch (e) { console.error(e); Alert.alert('Erreur', "Vérifiez que le bucket 'avatars' existe.") }
+    } catch (e) { console.error(e); setErrorMsg(t('settings.avatar_upload_error')) }
     finally { setUploading(false) }
   }
 
@@ -78,6 +80,8 @@ export default function IdentitySettingsScreen() {
           </TouchableOpacity>
           <Text style={styles.avatarHint}>{t('settings.change_photo')}</Text>
         </View>
+
+        {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
 
         <Input label={t('settings.full_name')} value={data.full_name ?? ''} onChangeText={v => update({ full_name: v })} placeholder="Jean Dupont" />
         <Input label={t('settings.specialty')} value={data.specialty ?? ''} onChangeText={v => update({ specialty: v })} placeholder={t('settings.specialty_placeholder')} />
@@ -129,6 +133,7 @@ function makeStyles(colors: ThemeColors) {
   avatarText: { fontSize: 30, fontFamily: fonts.bold, color: '#fff' },
   avatarEdit: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: colors.card, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   avatarHint: { fontSize: 12, fontFamily: fonts.medium, color: colors.textTertiary },
+  errorText: { fontSize: 13, fontFamily: fonts.medium, color: colors.danger, textAlign: 'center' },
   fieldGroup: { gap: 6 },
   fieldLabel: { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 },
   textArea: { backgroundColor: colors.card, borderRadius: 10, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, fontFamily: fonts.body, color: colors.text, minHeight: 80, textAlignVertical: 'top' },

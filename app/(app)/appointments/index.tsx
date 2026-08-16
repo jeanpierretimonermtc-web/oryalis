@@ -14,6 +14,7 @@ import { fonts } from '@/shared/theme/fonts'
 import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
 import { deleteAppointment } from '@/features/appointments/appointmentService'
+import { APPOINTMENT_TYPE_COLORS as TYPE_COLORS } from '@/features/appointments/appointmentTypes'
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
 
 // ── Local type (joins client for display) ─────────────────────────────────────
@@ -40,20 +41,6 @@ const MONTH_ROWS   = 6
 const START_HOUR   = 8
 const END_HOUR     = 20
 const DURATION_MIN = 60
-
-const TYPE_COLORS: Record<AppointmentType, string> = {
-  discovery_call:        '#3B82F6',
-  product_presentation:  '#8B5CF6',
-  follow_up:             '#10B981',
-  closing_call:          '#F59E0B',
-  customer_support:      '#22D3EE',
-  team_training:         '#EC4899',
-  team_meeting:          '#6366F1',
-  webinar:               '#F97316',
-  onboarding:            '#06B6D4',
-  business_review:       '#84CC16',
-  other:                 '#94A3B8',
-}
 
 const EVENT_PALETTE = [
   { bg: '#ede9f8', text: '#6b4fc8', accent: '#6b4fc8' },

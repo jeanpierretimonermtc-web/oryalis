@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch } from 'react-native'
 import { router, Stack } from 'expo-router'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +9,7 @@ import { useDemoState } from '@/features/demo/DemoProvider'
 import { supabase } from '@/shared/lib/supabase'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
+import { useProfilePlan } from '@/features/settings/useProfilePlan'
 
 const PLAN_CONFIG: Record<string, { label: string; descKey: string }> = {
   free:    { label: 'Gratuit', descKey: 'settings.plan_free_desc'    },
@@ -24,21 +25,7 @@ export default function DisplaySettingsScreen() {
   const { colors, mode, toggleTheme } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { hideDemoCard, setHideDemoCard } = useDemoState()
-
-  const [plan, setPlan] = useState('free')
-  useEffect(() => {
-    if (!session?.user.id) return
-    let active = true
-    ;(async () => {
-      try {
-        const { data } = await supabase.from('profiles').select('plan').eq('id', session.user.id).single()
-        if (active && data?.plan) setPlan(data.plan)
-      } catch (e) {
-        console.error(e)
-      }
-    })()
-    return () => { active = false }
-  }, [session?.user.id])
+  const { plan } = useProfilePlan()
 
   const planCfg = PLAN_CONFIG[plan] ?? PLAN_CONFIG.free
   const isPaid = ['pro', 'cabinet', 'advisor', 'leader', 'enterprise'].includes(plan)

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useClientAppointments } from '@/features/appointments/useAppointments'
 import { deleteAppointment } from '@/features/appointments/appointmentService'
+import { APPOINTMENT_TYPE_COLORS as TYPE_ACCENT } from '@/features/appointments/appointmentTypes'
 import type { Appointment, AppointmentType } from '@/features/appointments/appointmentTypes'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { Card } from '@/shared/components/ui/Card'
@@ -13,20 +14,6 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import { colors as brandColors, type ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { formatDate } from '@/shared/lib/dateFormat'
-
-const TYPE_ACCENT: Record<AppointmentType, string> = {
-  discovery_call:       '#3B82F6',
-  product_presentation: '#8B5CF6',
-  follow_up:            '#10B981',
-  closing_call:         '#F59E0B',
-  customer_support:     '#22D3EE',
-  team_training:        '#EC4899',
-  team_meeting:         '#6366F1',
-  webinar:              '#F97316',
-  onboarding:           '#06B6D4',
-  business_review:      '#84CC16',
-  other:                '#94A3B8',
-}
 
 function pad2(n: number) { return String(n).padStart(2, '0') }
 function formatDateTime(iso: string, locale: string) {

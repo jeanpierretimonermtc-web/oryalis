@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { ActivityIndicator, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Stack } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { supabase } from '@/shared/lib/supabase'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
@@ -11,27 +10,29 @@ import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 import { createBillingPortal, createWebCheckout, getMySubscription, type SubscriptionSnapshot } from '@/features/subscriptions/subscriptionService'
 import { getMobileManagementUrl, initializeMobilePurchases, purchaseAdvisor, restoreMobilePurchases } from '@/features/subscriptions/mobilePurchaseService'
 import { trackProductEvent } from '@/features/analytics/productAnalytics'
+import { useProfilePlan } from '@/features/settings/useProfilePlan'
+
+type Notice = { kind: 'success' | 'error'; title: string; body?: string }
 
 export default function SubscriptionScreen() {
   const { t } = useTranslation()
   const { session } = useAuth()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const { plan: storedPlan } = useProfilePlan()
   const [plan, setPlan] = useState('free')
   const [opening, setOpening] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [interval, setInterval] = useState<'month' | 'year'>('year')
   const [subscription, setSubscription] = useState<SubscriptionSnapshot | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+
+  useEffect(() => { setPlan(storedPlan) }, [storedPlan])
 
   useEffect(() => {
     if (!session) return
     ;(async () => {
-      const [{ data }, snapshot] = await Promise.all([
-        supabase.from('profiles').select('plan').eq('id', session.user.id).single(),
-        getMySubscription().catch(() => null),
-      ])
-      setPlan(data?.plan ?? 'free')
-      setSubscription(snapshot)
+      setSubscription(await getMySubscription().catch(() => null))
       if (Platform.OS !== 'web') initializeMobilePurchases(session.user.id).catch(() => {})
     })()
   }, [session])
@@ -42,6 +43,7 @@ export default function SubscriptionScreen() {
 
   async function openSubscription() {
     setOpening(true)
+    setNotice(null)
     try {
       if (session) await trackProductEvent(session.user.id, 'checkout_started', { platform: Platform.OS, interval })
       if (Platform.OS === 'web') await Linking.openURL(await createWebCheckout(interval))
@@ -49,7 +51,7 @@ export default function SubscriptionScreen() {
         const active = await purchaseAdvisor(interval)
         if (active) {
           setPlan('advisor')
-          Alert.alert(t('subscription.purchase_success_title'), t('subscription.purchase_success_body'))
+          setNotice({ kind: 'success', title: t('subscription.purchase_success_title'), body: t('subscription.purchase_success_body') })
         }
       }
     } catch (error) {
@@ -57,7 +59,7 @@ export default function SubscriptionScreen() {
       const message = error instanceof Error && error.message.includes('REVENUECAT_NOT_CONFIGURED')
         ? t('subscription.mobile_not_configured')
         : error instanceof Error ? error.message : t('common.error')
-      Alert.alert(t('common.error'), message)
+      setNotice({ kind: 'error', title: t('common.error'), body: message })
     } finally {
       setOpening(false)
     }
@@ -65,27 +67,34 @@ export default function SubscriptionScreen() {
 
   async function restore() {
     setRestoring(true)
+    setNotice(null)
     try {
       const active = await restoreMobilePurchases()
       if (active && session) await trackProductEvent(session.user.id, 'purchase_restored', { platform: Platform.OS })
-      Alert.alert(active ? t('subscription.restore_success_title') : t('subscription.restore_empty_title'), active ? t('subscription.restore_success_body') : t('subscription.restore_empty_body'))
+      setNotice({
+        kind: 'success',
+        title: active ? t('subscription.restore_success_title') : t('subscription.restore_empty_title'),
+        body: active ? t('subscription.restore_success_body') : t('subscription.restore_empty_body'),
+      })
       if (active) setPlan('advisor')
     } catch (error) {
-      Alert.alert(t('common.error'), error instanceof Error && error.message.includes('REVENUECAT_NOT_CONFIGURED') ? t('subscription.mobile_not_configured') : error instanceof Error ? error.message : t('common.error'))
+      const message = error instanceof Error && error.message.includes('REVENUECAT_NOT_CONFIGURED') ? t('subscription.mobile_not_configured') : error instanceof Error ? error.message : t('common.error')
+      setNotice({ kind: 'error', title: t('common.error'), body: message })
     } finally {
       setRestoring(false)
     }
   }
 
   async function manage() {
+    setNotice(null)
     try {
       const url = subscription?.provider === 'stripe' || Platform.OS === 'web'
         ? await createBillingPortal()
         : await getMobileManagementUrl()
       if (url) await Linking.openURL(url)
-      else Alert.alert(t('common.error'), t('subscription.manage_unavailable'))
+      else setNotice({ kind: 'error', title: t('common.error'), body: t('subscription.manage_unavailable') })
     } catch (error) {
-      Alert.alert(t('common.error'), error instanceof Error ? error.message : t('common.error'))
+      setNotice({ kind: 'error', title: t('common.error'), body: error instanceof Error ? error.message : t('common.error') })
     }
   }
 
@@ -98,6 +107,13 @@ export default function SubscriptionScreen() {
           <Text style={styles.title}>{t('subscription.title')}</Text>
           <Text style={styles.subtitle}>{t('subscription.subtitle')}</Text>
         </View>
+
+        {notice ? (
+          <View style={[styles.notice, notice.kind === 'error' ? styles.noticeError : styles.noticeSuccess]}>
+            <Text style={styles.noticeTitle}>{notice.title}</Text>
+            {notice.body ? <Text style={styles.noticeBody}>{notice.body}</Text> : null}
+          </View>
+        ) : null}
 
         <View style={styles.planCard}>
           <View style={styles.planHeader}>
@@ -159,6 +175,11 @@ function makeStyles(colors: ThemeColors) {
     eyebrow: { fontSize: 11, fontFamily: fonts.bold, color: colors.primary, textTransform: 'uppercase', letterSpacing: 1 },
     title: { fontSize: 28, fontFamily: fonts.display, color: colors.text },
     subtitle: { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 21 },
+    notice: { borderRadius: 12, padding: 14, gap: 3, borderWidth: 1 },
+    noticeSuccess: { backgroundColor: colors.successLight, borderColor: colors.success },
+    noticeError: { backgroundColor: colors.dangerLight, borderColor: colors.danger },
+    noticeTitle: { fontSize: 13, fontFamily: fonts.bold, color: colors.text },
+    noticeBody: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 17 },
     planCard: { borderRadius: 20, padding: 22, backgroundColor: colors.card, borderWidth: 2, borderColor: colors.primary, gap: 13 },
     planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 5 },
     planName: { fontSize: 22, fontFamily: fonts.bold, color: colors.text },

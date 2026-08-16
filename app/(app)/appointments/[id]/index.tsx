@@ -14,7 +14,7 @@ import { useRecommendations } from '@/features/recommendations/useRecommendation
 import { createRecommendation } from '@/features/recommendations/recommendationService'
 import { createOrder } from '@/features/orders/orderService'
 import { logClientEvent } from '@/features/clients/clientEventService'
-import { AppointmentCompletionError } from '@/features/appointments/appointmentTypes'
+import { AppointmentCompletionError, APPOINTMENT_TYPE_COLORS as TYPE_COLORS } from '@/features/appointments/appointmentTypes'
 import type {
   AppointmentStatus, AppointmentTask, ProspectTemperature, CommercialIntent, AppointmentOutcome,
   AppointmentOutcomeDetails, OutcomeSaleProduct, OutcomeInterestKind, NotInterestedReason, OutcomeRevisionReason,
@@ -45,20 +45,6 @@ import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const TYPE_COLORS: Record<string, string> = {
-  discovery_call:       '#3B82F6',
-  product_presentation: '#8B5CF6',
-  follow_up:            '#10B981',
-  closing_call:         '#F59E0B',
-  customer_support:     '#22D3EE',
-  team_training:        '#EC4899',
-  team_meeting:         '#6366F1',
-  webinar:              '#F97316',
-  onboarding:           '#06B6D4',
-  business_review:      '#84CC16',
-  other:                '#94A3B8',
-}
 
 const TEMP_COLOR: Record<string, string> = {
   cold: '#3B82F6', warm: '#F59E0B', hot: '#F97316', very_hot: '#EF4444',
