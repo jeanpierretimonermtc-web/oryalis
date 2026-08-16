@@ -57,13 +57,27 @@ app/
 features/
   auth/AuthProvider.tsx
   clients/                 clientService.ts · useClients.ts · useClient.ts
-  appointments/            appointmentTypes.ts (source de vérité TS) · appointmentService.ts · useAppointments.ts · googleCalendarService.ts · useGoogleCalendar.ts
+  appointments/            appointmentTypes.ts (source de vérité TS) · appointmentService.ts · appointmentOutcomeService.ts · useAppointments.ts · googleCalendarService.ts · useGoogleCalendar.ts
   notes/                   noteService.ts · useNotes.ts
   followups/               followupService.ts · useFollowups.ts
   recommendations/         recommendationService.ts · useRecommendations.ts
   dashboard/               useDashboard.ts
   catalogs/                catalogService.ts · useCatalog.ts · CatalogProductPicker.tsx
   demo/                    DemoProvider.tsx (données démo au login)
+  orders/                  orderService.ts · useOrders.ts (historique commandes / LRP)
+  subscriptions/           subscriptionService.ts · mobilePurchaseService.ts (Stripe web + RevenueCat mobile — déjà implémenté, voir État du projet)
+  network/                 uplineService.ts (réseau MLM / parrainage — ⚠️ interroge la table `upline_nodes`, absente de la DB live, voir Points de vigilance)
+  automations/              relances automatiques J+3/J+7/J+15/J+30
+  protocols/               protocoles bien-être par problématique (doTERRA/Zinzino)
+  goals/ · alerts/ · interactions/ · messages/ (message_templates) · analytics/ (product_events)
+  admin/ · security/       console owner, audit log, accès support, rôles
+  onboarding/              événements d'onboarding guidé
+  modules/                 gestion de l'activation des modules par plan
+  notifications/           notifications push relances
+  settings/                paramètres profil, activité, intégrations
+
+  ⚠️ Cette liste features/ a été revérifiée le 2026-08-16 (24 sous-dossiers réels contre 9 documentés
+  auparavant). Si tu ajoutes un module, mets aussi à jour cette liste dans le même commit.
 
 shared/
   lib/
@@ -91,8 +105,11 @@ assets/
   splash.png
   splash-icon.png
 
-supabase/migrations/       SQL de référence (non exécuté via CLI)
-migrate*.mjs               Scripts Node.js + pg (migrate, migrate2, migrate3, migrate4)
+supabase/migrations/       SQL de référence datée (29 fichiers, non exécuté via CLI) — convention à préférer
+supabase/functions/        Edge Functions Deno : stripe-webhook, revenuecat-webhook, create-checkout-session,
+                            create-billing-portal, record-security-login, _shared/ (stripe.ts, http.ts)
+scripts/legacy-migrations/ 52 scripts Node.js + pg historiques (migrate4 → migrate56 + migrate_agenda*),
+                            déplacés hors racine le 2026-08-16 — dette archivée, voir README.md du dossier
 ```
 
 ---
@@ -220,6 +237,31 @@ catalogs          id, slug (UNIQUE), name, brand, type (official|custom), user_i
 catalog_products  id, catalog_id, sku, name, category, created_at
 ```
 
+### Autres tables live (confirmées par introspection `information_schema` le 2026-08-16)
+
+La DB compte **30 tables** au total, pas seulement les 8 ci-dessus. Les 22 suivantes existent aussi en prod
+mais n'ont pas leur schéma détaillé documenté ici — se référer directement à Supabase (Table Editor ou
+requête `information_schema.columns`) avant de les modifier, plutôt qu'aux scripts `migrate*.mjs` qui ne
+sont pas fiables comme source de vérité (voir section Migrations ci-dessous) :
+
+```
+appointment_attendees · appointment_business_context · appointment_notes · appointment_tasks
+  (sous-tables RDV actives, utilisées par appointmentService.ts / appointmentTypes.ts)
+google_calendar_events · google_calendar_tokens   (sync Google Calendar)
+orders                                             (historique commandes / LRP)
+subscriptions                                      (Stripe web + RevenueCat mobile)
+interactions · goals · alerts                      (suivi commercial)
+message_templates                                  (templates de messages personnalisables)
+client_events · product_events · onboarding_events · pilot_participants  (analytics/tracking)
+user_business_profiles · user_status_labels        (personnalisation par utilisateur)
+admin_audit_log · user_roles                       (console owner / rôles)
+security_notifications · security_login_events · support_access_requests  (sécurité / support)
+```
+
+⚠️ `features/network/uplineService.ts` interroge une table `upline_nodes` qui **n'existe pas** dans la DB
+live (confirmé le 2026-08-16) — le module réseau/MLM est cassé en prod tant que cette table n'est pas créée
+ou que le service n'est pas corrigé.
+
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
 `solutions_proposed`, `recap_sent`, `next_appointment_date`, `native_event_id` : elles n'existent plus
@@ -228,7 +270,9 @@ dans le schéma live (ancien modèle, retiré).
 ### Calendriers
 
 - V1 : **Google Calendar** est la seule intégration calendrier externe.
-- La synchronisation avec le calendrier natif du téléphone a été retirée (plus de dépendance à `expo-calendar`).
+- La synchronisation avec le calendrier natif du téléphone a été retirée fonctionnellement (aucune référence
+  à `expo-calendar` dans `app/`/`features/`), mais le package **`expo-calendar` est toujours listé dans
+  `package.json`** (dépendance orpheline, jamais désinstallée) — à retirer via `npm uninstall expo-calendar`.
 - `appointments` reste la source de vérité métier des rendez-vous Oryalis.
 - `google_calendar_events` sert de table de correspondance (mapping `appointment_id` ↔ `google_event_id`).
 - `google_calendar_tokens` stocke la connexion OAuth Google (access/refresh token) par utilisateur.
@@ -271,11 +315,24 @@ try {
 }
 ```
 
-Historique migrations :
-- `migrate.mjs` — init tables + trigger
-- `migrate2.mjs` — correctifs RLS + trigger
-- `migrate3.mjs` — first_name + inscription_date sur clients
+⚠️ **État réel (2026-08-16)** : `migrate.mjs`, `migrate2.mjs`, `migrate3.mjs` référencés ci-dessous **n'existent
+plus sur disque**. Les **52 scripts** `migrate4.mjs` → `migrate56.mjs` (+ `migrate_agenda.mjs`/`migrate_agenda2.mjs`)
+ont été déplacés dans `scripts/legacy-migrations/` (archivés, pas supprimés — aucun registre fiable de ce qui a
+été appliqué en prod). **Ne pas se fier à cette liste pour connaître le schéma réel**, interroger
+`information_schema` sur Supabase directement.
+
+En parallèle, `supabase/migrations/*.sql` contient 29 fichiers datés (`YYYYMMDD_nom.sql`) qui semblent être une
+convention plus récente et mieux organisée — préférer ce format pour toute nouvelle migration plutôt qu'un
+nouveau `migrate*.mjs` à la racine, pour ne pas aggraver la dette existante.
+
+Historique (partiel, non exhaustif) :
 - `migrate4.mjs` — catalogs + catalog_products + seed doTERRA
+- `migrate13.mjs` — interactions + orders
+- `migrate18.mjs` — alerts
+- `migrate21.mjs` — goals
+- `migrate24.mjs` — google_calendar_tokens + google_calendar_events
+- `migrate28.mjs` — upline_nodes (⚠️ table absente de la DB live malgré ce script — voir section Tables)
+- `migrate_agenda.mjs` / `migrate_agenda2.mjs` — appointments + sous-tables (notes/tasks/attendees/business_context)
 
 ### Catalogues
 
@@ -345,21 +402,23 @@ Clients, RDV, Notes, Relances, Recommandations, Module doTERRA, Dashboard KPI, S
 
 ### Phase 2 — Monétisation
 
-- [ ] Stripe abonnements (Free / Pro 29€ / Cabinet 79€)
-- [ ] Webhook Stripe → table `subscriptions`
-- [ ] Gates fonctionnalités selon plan
-- [ ] Landing page oryalis.app
-- [ ] Onboarding guidé 3 étapes
-- [ ] Emails transactionnels (Resend)
-- [ ] Paramètres langue + timezone
+⚠️ Section revérifiée le 2026-08-16 — la plupart de ces items étaient cochés `[ ]` alors qu'ils sont livrés.
+
+- [x] Stripe abonnements (Free / Pro 29€ / Cabinet 79€) — `features/subscriptions/subscriptionService.ts`
+- [x] Webhook Stripe → table `subscriptions` — `supabase/functions/stripe-webhook/`, `create-checkout-session/`, `create-billing-portal/`, `revenuecat-webhook/` (Edge Functions, non listées ailleurs dans ce doc — voir Architecture dossiers)
+- [x] Gates fonctionnalités selon plan — `features/subscriptions/AdvisorGate.tsx` + `useEntitlements.ts`
+- [ ] Landing page oryalis.app — pas trouvée dans ce repo
+- [x] Onboarding guidé — `app/(auth)/onboarding.tsx` + table `onboarding_events` (nombre d'étapes non revérifié)
+- [ ] Emails transactionnels (Resend) — aucune référence trouvée dans le code, pas implémenté
+- [x] Paramètres langue + timezone — `app/(app)/settings.tsx` (champs `locale`, `timezone`)
 
 ### Phase 3 — Rétention
 
-- [ ] Export PDF fiche client
-- [ ] Comptabilité (revenus + URSAF)
-- [ ] Facturation PDF
-- [ ] Dashboard RGPD + consentements
-- [ ] Résumé IA séance (Claude API)
+- [ ] Export PDF fiche client — **`pdfkit` est en devDependency mais 0 référence dans le code** : dépendance orpheline, feature non implémentée
+- [ ] Comptabilité (revenus + URSAF) — pas trouvé
+- [ ] Facturation PDF — pas trouvé
+- [~] Dashboard RGPD + consentements — pas de dashboard dédié, mais `supabase/migrations/20260804_tracking_consent.sql` pose une base (colonne consentement) — travail entamé, pas terminé
+- [ ] Résumé IA séance (Claude API) — pas trouvé, aucun SDK Anthropic dans `package.json`
 
 ### Phase 4 — Croissance mondiale
 
@@ -369,6 +428,17 @@ Clients, RDV, Notes, Relances, Recommandations, Module doTERRA, Dashboard KPI, S
 - [ ] App stores iOS + Android
 - [ ] ES / DE / PT / AR (RTL pour arabe)
 - [ ] White-label associations
+
+### Fonctionnalités livrées hors roadmap ci-dessus (non documentées avant le 2026-08-16)
+
+Du travail conséquent a été fait en dehors de ces 4 phases, sans mise à jour de cette section :
+console owner / audit de sécurité (`features/admin`, `features/security`, tables `admin_audit_log`,
+`security_login_events`, `support_access_requests`), automatisations de relance J+3/J+7/J+15/J+30
+(`features/automations`), réseau MLM / parrainage (`features/network` — **⚠️ cassé en prod**, voir section
+Tables), objectifs et alertes commerciales (`features/goals`, `features/alerts`), templates de messages
+personnalisables (`features/messages`), analytics produit (`features/analytics`, table `product_events`),
+export Excel/JSON, et protocoles bien-être doTERRA/Zinzino (`features/protocols`). À intégrer dans une
+prochaine passe de la roadmap plutôt que de les laisser invisibles ici.
 
 ---
 
