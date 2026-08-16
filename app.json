@@ -63,12 +63,6 @@
           "cameraPermission": "Oryalis utilise l'appareil photo pour mettre à jour votre photo de profil."
         }
       ],
-      [
-        "expo-calendar",
-        {
-          "calendarPermission": "Oryalis a besoin d'accéder à votre calendrier pour synchroniser vos rendez-vous."
-        }
-      ],
       "expo-sharing"
     ],
     "extra": {

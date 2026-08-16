@@ -319,7 +319,6 @@ export default function AppLayout() {
             <Tabs.Screen name="import"              options={{ title: t('settings.import_title'),      href: null }} />
             <Tabs.Screen name="export"              options={{ title: t('settings.export_title'),      href: null }} />
             <Tabs.Screen name="settings-subscription" options={{ href: null }} />
-            <Tabs.Screen name="settings-profile"      options={{ href: null }} />
             <Tabs.Screen name="settings-identity"    options={{ href: null }} />
             <Tabs.Screen name="settings-contact"     options={{ href: null }} />
             <Tabs.Screen name="settings-org"         options={{ href: null }} />
