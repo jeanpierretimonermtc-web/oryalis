@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import {
   fetchBusinessProfile, upsertBusinessProfile,
@@ -8,10 +9,19 @@ import {
   applyPreset, resetStatusLabels,
 } from './statusLabelsService'
 import type {
-  ClientStatus, ContactRole, LabelKey, ModuleKey, ActivityType,
+  ClientStatus, ContactRole, LabelKey, ModuleKey, ActivityType, PipelineStage,
   UserBusinessProfile,
 } from '@/shared/lib/types'
 import { DEFAULT_STATUS_LABELS, DEFAULT_ROLE_LABELS } from '@/shared/lib/types'
+
+// Seules ces 2 étapes du pipeline commercial représentent exactement le même fait métier
+// qu'un rôle de Mes libellés (synchronisation bidirectionnelle confirmée par les triggers
+// sync_client_role_from_pipeline / sync_client_pipeline_from_role — voir migrations
+// 20260804_role_pipeline_consistency.sql et 20260817_pipeline_role_consistency.sql). Les 6
+// autres valeurs sont de vraies étapes de parcours sans équivalent dans Mes libellés et
+// doivent rester sur leur clé i18n générique — ne jamais étendre cette liste sans revalider
+// qu'une nouvelle valeur de pipeline_stage soit réellement synchronisée avec contact_role.
+const SHARED_PIPELINE_ROLE_STAGES: ReadonlySet<PipelineStage> = new Set(['customer', 'distributor'])
 
 // ── Default profile ───────────────────────────────────────────────────────────
 
@@ -38,6 +48,11 @@ type AppConfigCtx = {
   /** @deprecated voir `ClientStatus` — utiliser `getRoleLabel`. */
   getStatusLabel: (key: ClientStatus) => string
   getRoleLabel: (key: ContactRole) => string
+  /** Résolution centralisée du libellé d'une étape pipeline : les 2 étapes partagées avec
+   * contact_role (customer/distributor) passent par getRoleLabel (personnalisé), les 6
+   * autres restent sur leur clé i18n générique `pipeline_stages.*`. Ne jamais recopier cette
+   * condition dans les écrans — toujours passer par cette fonction. */
+  getPipelineStageLabel: (stage: PipelineStage) => string
   getAutomationDelay: (ruleId: string, fallback: number) => number
   /** Nom affiché du programme de fidélité (ex. "LRP"), personnalisable par l'utilisateur. */
   getLrpName: () => string
@@ -64,6 +79,7 @@ const AppConfigContext = createContext<AppConfigCtx>({
   isModuleActive:    () => true,
   getStatusLabel:    (k) => DEFAULT_STATUS_LABELS[k] ?? k,
   getRoleLabel:      (k) => DEFAULT_ROLE_LABELS[k] ?? k,
+  getPipelineStageLabel: (stage) => SHARED_PIPELINE_ROLE_STAGES.has(stage) ? (DEFAULT_ROLE_LABELS[stage as ContactRole] ?? stage) : stage,
   getAutomationDelay: (_ruleId, fallback) => fallback,
   getLrpName:        () => 'LRP',
   saveActivityType:  async () => {},
@@ -81,6 +97,7 @@ const AppConfigContext = createContext<AppConfigCtx>({
 export function AppConfigProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth()
   const userId = session?.user?.id
+  const { t } = useTranslation()
 
   const [profile, setProfile] = useState<UserBusinessProfile>(DEFAULT_PROFILE)
   const [labels,  setLabels]  = useState<Partial<Record<LabelKey, string>>>({})
@@ -118,6 +135,10 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   const getRoleLabel = useCallback((key: ContactRole): string =>
     labels[key] ?? DEFAULT_ROLE_LABELS[key] ?? key
   , [labels])
+
+  const getPipelineStageLabel = useCallback((stage: PipelineStage): string =>
+    SHARED_PIPELINE_ROLE_STAGES.has(stage) ? getRoleLabel(stage as ContactRole) : t(`pipeline_stages.${stage}`)
+  , [getRoleLabel, t])
 
   const getAutomationDelay = useCallback((ruleId: string, fallback: number): number =>
     profile.automation_delays[ruleId] ?? fallback
@@ -211,7 +232,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   return (
     <AppConfigContext.Provider value={{
       profile, labels, loading,
-      isModuleActive, getStatusLabel, getRoleLabel, getAutomationDelay, getLrpName,
+      isModuleActive, getStatusLabel, getRoleLabel, getPipelineStageLabel, getAutomationDelay, getLrpName,
       saveActivityType, toggleModule, setAutomationDelay, saveLrpName,
       saveLabel, applyActivityPreset, resetLabels,
       reload: load,

@@ -8,6 +8,8 @@ import { useFocusEffect, router } from 'expo-router'
 import { useCatalogs, useCatalogProducts } from '@/features/catalogs/useCatalog'
 import { useCatalogPrefs } from '@/features/catalogs/CatalogPrefsProvider'
 import { createRecommendation } from '@/features/recommendations/recommendationService'
+import { addProductToCatalog, updateCatalogProduct, createCustomCatalog } from '@/features/catalogs/catalogService'
+import type { CatalogProductInput } from '@/features/catalogs/catalogService'
 import { supabase } from '@/shared/lib/supabase'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { Input } from '@/shared/components/ui/Input'
@@ -16,7 +18,7 @@ import { Button } from '@/shared/components/ui/Button'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { Catalog, CatalogProduct, Client } from '@/shared/lib/types'
+import type { Catalog, CatalogProductListItem, Client } from '@/shared/lib/types'
 
 function initials(name: string | null | undefined) {
   const parts = (name ?? '').trim().split(' ').filter(Boolean)
@@ -43,8 +45,24 @@ function fmt(n: number | null) {
   return n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 }
 
+// RDV-PRODUCTS-1 / Lot E.1 — même tolérance virgule/point que le reste d'Oryalis (ex. saisie
+// prix dans Produits discutés) : jamais un second parseur monétaire divergent. Chaîne vide →
+// valide, null (jamais 0, qui serait une vraie valeur métier différente de "non renseigné").
+// Une saisie non vide mais invalide (non numérique, négative) est distinguée explicitement —
+// jamais convertie silencieusement en null : à l'appelant de refuser l'enregistrement avec un
+// retour visible (§ Lot E.1, corrige le comportement précédent qui masquait l'erreur).
+type OptionalNumberResult = { ok: true; value: number | null } | { ok: false }
+
+function parseOptionalNumber(v: string): OptionalNumberResult {
+  const trimmed = v.trim()
+  if (!trimmed) return { ok: true, value: null }
+  const n = parseFloat(trimmed.replace(',', '.'))
+  if (!Number.isFinite(n) || n < 0) return { ok: false }
+  return { ok: true, value: n }
+}
+
 interface RecommendState {
-  product: CatalogProduct
+  product: CatalogProductListItem
   catalogColor: string
   catalogName: string
 }
@@ -57,10 +75,10 @@ function ProductCard({
   onDetail,
   onRecommend,
 }: {
-  product: CatalogProduct
+  product: CatalogProductListItem
   catalog: Catalog | null
-  onDetail: (p: CatalogProduct) => void
-  onRecommend: (p: CatalogProduct) => void
+  onDetail: (p: CatalogProductListItem) => void
+  onRecommend: (p: CatalogProductListItem) => void
 }) {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -106,14 +124,21 @@ function DetailModal({
   product,
   catalogColor,
   isWide,
+  isCustom,
   onClose,
   onRecommend,
+  onEdit,
 }: {
-  product: CatalogProduct | null
+  product: CatalogProductListItem | null
   catalogColor: string
   isWide: boolean
+  // RDV-PRODUCTS-1 / Lot E — "Modifier" n'apparaît que pour un produit de catalogue personnel.
+  // La RLS protège déjà réellement l'écriture (§12 du brief) : ce booléen n'est qu'une
+  // affordance, jamais la seule barrière de sécurité.
+  isCustom: boolean
   onClose: () => void
   onRecommend: () => void
+  onEdit: () => void
 }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
@@ -201,6 +226,148 @@ function DetailModal({
             ) : null}
 
             <Button label={t('catalog.recommend')} onPress={onRecommend} />
+            {isCustom ? (
+              <Button label={t('common.edit')} variant="secondary" onPress={onEdit} />
+            ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  )
+}
+
+// ── New custom catalog modal ─────────────────────────────────────────────────
+
+function NewCatalogModal({ isWide, onClose, onCreate }: {
+  isWide: boolean
+  onClose: () => void
+  onCreate: (name: string) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit() {
+    if (!name.trim()) { setError(t('catalog.error_catalog_name_required')); return }
+    setSaving(true)
+    setError(null)
+    try {
+      await onCreate(name.trim())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('common.error'))
+      console.error('[catalog.createCustomCatalog]', e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={[styles.modalOverlay, isWide && styles.modalOverlayWide]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <View style={[styles.modalPanel, isWide && styles.modalPanelWide]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalProductName}>{t('catalog.new_catalog_title')}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} keyboardShouldPersistTaps="handled">
+            <Input label="" value={name} onChangeText={setName} placeholder={t('catalog.new_catalog_name_placeholder')} autoFocus />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <Button label={t('catalog.create_catalog_submit')} onPress={handleSubmit} loading={saving} />
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  )
+}
+
+// ── Product create/edit form modal ───────────────────────────────────────────
+// RDV-PRODUCTS-1 / Lot E §13 — un seul formulaire pour les deux modes (création/édition),
+// jamais deux formulaires quasi identiques.
+
+function ProductFormModal({ catalogId, initial, isWide, onClose, onSaved }: {
+  catalogId: string
+  initial: CatalogProductListItem | null
+  isWide: boolean
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const { t } = useTranslation()
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const isEdit = !!initial
+  const [name, setName] = useState(initial?.name ?? '')
+  const [sku, setSku] = useState(initial?.sku ?? '')
+  const [category, setCategory] = useState(initial?.category ?? '')
+  const [retail, setRetail] = useState(initial?.retail_price_eur != null ? String(initial.retail_price_eur) : '')
+  const [wholesale, setWholesale] = useState(initial?.wholesale_price_eur != null ? String(initial.wholesale_price_eur) : '')
+  const [pv, setPv] = useState(initial?.pv != null ? String(initial.pv) : '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit() {
+    if (!name.trim()) { setError(t('catalog.error_name_required')); return }
+    // Lot E.1 — une saisie non vide mais invalide (négative, non numérique) doit bloquer
+    // l'enregistrement avec un retour visible, jamais être convertie silencieusement en absence.
+    const retailResult = parseOptionalNumber(retail)
+    const wholesaleResult = parseOptionalNumber(wholesale)
+    const pvResult = parseOptionalNumber(pv)
+    if (!retailResult.ok || !wholesaleResult.ok || !pvResult.ok) {
+      setError(t('catalog.error_invalid_number'))
+      return
+    }
+    setSaving(true)
+    setError(null)
+    const input: CatalogProductInput = {
+      name: name.trim(),
+      sku: sku.trim() || null,
+      category: category.trim() || null,
+      retailPriceEur: retailResult.value,
+      wholesalePriceEur: wholesaleResult.value,
+      pv: pvResult.value,
+    }
+    try {
+      if (isEdit && initial) {
+        await updateCatalogProduct(initial.id, input)
+      } else {
+        await addProductToCatalog(catalogId, input)
+      }
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('common.error'))
+      console.error('[catalog.saveProduct]', e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={[styles.modalOverlay, isWide && styles.modalOverlayWide]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <View style={[styles.modalPanel, isWide && styles.modalPanelWide]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalProductName}>
+              {isEdit ? t('catalog.product_form_title_edit') : t('catalog.product_form_title_create')}
+            </Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} keyboardShouldPersistTaps="handled">
+            <Input label="" value={name} onChangeText={setName} placeholder={t('catalog.product_name_placeholder')} autoFocus />
+            <Input label="" value={sku} onChangeText={setSku} placeholder={t('catalog.product_sku_placeholder')} />
+            <Input label="" value={category} onChangeText={setCategory} placeholder={t('catalog.product_category_placeholder')} />
+            <Input label={t('catalog.retail')} value={retail} onChangeText={setRetail} placeholder={t('catalog.price_not_set')} keyboardType="decimal-pad" />
+            <Input label={t('catalog.wholesale')} value={wholesale} onChangeText={setWholesale} placeholder={t('catalog.price_not_set')} keyboardType="decimal-pad" />
+            <Input label={t('catalog.pv')} value={pv} onChangeText={setPv} placeholder="—" keyboardType="decimal-pad" />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <Button label={isEdit ? t('common.save') : t('catalog.product_form_submit_create')} onPress={handleSubmit} loading={saving} />
           </ScrollView>
         </View>
       </View>
@@ -224,13 +391,17 @@ export default function CatalogScreen() {
 
   const { catalogs, loading: catalogsLoading } = useCatalogs(activeSlugs, refreshKey)
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(null)
-  const { products, loading: productsLoading } = useCatalogProducts(selectedCatalogId)
+  const { products, loading: productsLoading } = useCatalogProducts(selectedCatalogId, refreshKey)
 
   const [searchQuery, setSearchQuery]           = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
 
   // Detail modal
-  const [detailProduct, setDetailProduct] = useState<CatalogProduct | null>(null)
+  const [detailProduct, setDetailProduct] = useState<CatalogProductListItem | null>(null)
+
+  // RDV-PRODUCTS-1 / Lot E — création de catalogue personnel + création/édition de produit.
+  const [showNewCatalog, setShowNewCatalog] = useState(false)
+  const [productForm, setProductForm] = useState<{ catalogId: string; initial: CatalogProductListItem | null } | null>(null)
 
   // Recommend modal
   const [recommendState, setRecommendState] = useState<RecommendState | null>(null)
@@ -292,11 +463,11 @@ export default function CatalogScreen() {
     return () => { cancelled = true }
   }, [clientQuery, session, recommendState])
 
-  function openDetail(product: CatalogProduct) {
+  function openDetail(product: CatalogProductListItem) {
     setDetailProduct(product)
   }
 
-  function openRecommend(product: CatalogProduct) {
+  function openRecommend(product: CatalogProductListItem) {
     setDetailProduct(null)
     setRecommendState({
       product,
@@ -312,6 +483,29 @@ export default function CatalogScreen() {
   }
 
   function closeRecommend() { setRecommendState(null) }
+
+  // RDV-PRODUCTS-1 / Lot E — sélectionne automatiquement le catalogue tout juste créé
+  // (createCustomCatalog invalide déjà le cache catalogues côté service ; refreshKey force
+  // useCatalogs à relire) plutôt que de laisser l'utilisateur le retrouver manuellement.
+  async function handleCreateCatalog(name: string) {
+    if (!session) return
+    const catalog = await createCustomCatalog(session.user.id, name)
+    setRefreshKey(k => k + 1)
+    setSelectedCatalogId(catalog.id)
+    setShowNewCatalog(false)
+  }
+
+  function openProductForm(catalogId: string, initial: CatalogProductListItem | null) {
+    setDetailProduct(null)
+    setProductForm({ catalogId, initial })
+  }
+
+  function closeProductForm() { setProductForm(null) }
+
+  function handleProductSaved() {
+    setProductForm(null)
+    setRefreshKey(k => k + 1)
+  }
 
   async function handleRecommend() {
     if (!selectedClient || !recommendState || !session) {
@@ -384,7 +578,7 @@ export default function CatalogScreen() {
 
         {/* Protocols shortcut */}
         <TouchableOpacity
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#D1FAE5', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8, alignSelf: 'flex-start' }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.successLight, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8, alignSelf: 'flex-start' }}
           onPress={() => {
               const slug = selectedCatalog?.slug ?? null
               const path = slug
@@ -395,9 +589,27 @@ export default function CatalogScreen() {
           activeOpacity={0.8}
         >
           <Text style={{ fontSize: 16 }}>🌿</Text>
-          <Text style={{ fontSize: 13, fontFamily: fonts.semibold, color: '#059669' }}>{t('catalog.protocols')}</Text>
-          <Text style={{ fontSize: 11, color: '#059669', opacity: 0.7 }}>→</Text>
+          <Text style={{ fontSize: 13, fontFamily: fonts.semibold, color: colors.success }}>{t('catalog.protocols')}</Text>
+          <Text style={{ fontSize: 11, color: colors.success, opacity: 0.7 }}>→</Text>
         </TouchableOpacity>
+
+        {/* RDV-PRODUCTS-1 / Lot E — création de catalogue toujours disponible ; ajout de produit
+            réservé aux catalogues personnels (les officiels restent protégés par la RLS, cf.
+            catalogService.updateCatalogProduct). */}
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <TouchableOpacity style={styles.catalogActionPill} onPress={() => setShowNewCatalog(true)} activeOpacity={0.8}>
+            <Text style={styles.catalogActionPillText}>{t('catalog.new_catalog_cta')}</Text>
+          </TouchableOpacity>
+          {selectedCatalog?.type === 'custom' ? (
+            <TouchableOpacity
+              style={styles.catalogActionPill}
+              onPress={() => openProductForm(selectedCatalog.id, null)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.catalogActionPillText}>{t('catalog.add_product_cta')}</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         <Input label="" value={searchQuery} onChangeText={setSearchQuery} placeholder={t('catalog.search_placeholder')} />
 
@@ -463,8 +675,28 @@ export default function CatalogScreen() {
           product={detailProduct}
           catalogColor={selectedCatalog?.color ?? colors.primaryAction}
           isWide={isWide}
+          isCustom={selectedCatalog?.type === 'custom'}
           onClose={() => setDetailProduct(null)}
           onRecommend={() => openRecommend(detailProduct)}
+          onEdit={() => selectedCatalog && openProductForm(selectedCatalog.id, detailProduct)}
+        />
+      )}
+
+      {/* ── Lot E — création de catalogue / création-édition de produit personnel ──── */}
+      {showNewCatalog && (
+        <NewCatalogModal
+          isWide={isWide}
+          onClose={() => setShowNewCatalog(false)}
+          onCreate={handleCreateCatalog}
+        />
+      )}
+      {productForm && (
+        <ProductFormModal
+          catalogId={productForm.catalogId}
+          initial={productForm.initial}
+          isWide={isWide}
+          onClose={closeProductForm}
+          onSaved={handleProductSaved}
         />
       )}
 
@@ -601,6 +833,12 @@ function makeStyles(colors: ThemeColors) {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     padding: 16, borderRadius: 14, borderWidth: 1,
   },
+  catalogActionPill: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.primaryLight, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+  },
+  catalogActionPillText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
   catalogHeroIcon:  { fontSize: 30 },
   catalogHeroName:  { fontSize: 18, fontFamily: fonts.bold },
   catalogHeroCount: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary, marginTop: 2 },

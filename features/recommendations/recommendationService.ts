@@ -68,6 +68,18 @@ export async function updateRecommendationStatus(id: string, status: Recommendat
   if (error) throw error
 }
 
+// ACTION-OUTCOME-1 / P2 — mise à jour ciblée, indépendante de updateRecommendationStatus() :
+// modifier le retour client ne touche jamais le statut, et inversement (§12/§36 du brief —
+// aucun écrasement croisé). '' → null, jamais une chaîne vide stockée (même convention que
+// notes_brutes ailleurs dans le projet).
+export async function updateRecommendationFeedback(id: string, feedback: string | null) {
+  const { error } = await supabase
+    .from('recommendations')
+    .update({ client_feedback: feedback?.trim() || null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
 export async function deleteRecommendation(id: string) {
   const { error } = await supabase.from('recommendations').delete().eq('id', id)
   if (error) throw error

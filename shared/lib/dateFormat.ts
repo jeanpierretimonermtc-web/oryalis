@@ -18,6 +18,12 @@ export function formatDate(
   return d.toLocaleDateString(locale, options)
 }
 
+/** Formats the time-of-day as 'HH:MM' (24h), locale-independent. */
+export function formatTime(value: string | Date): string {
+  const d = typeof value === 'string' ? new Date(value) : value
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
 /** Converts an ISO date ('YYYY-MM-DD') to a DD/MM/YYYY display string. */
 export function isoToDisplayDate(iso: string): string {
   const [y, m, d] = iso.split('-')

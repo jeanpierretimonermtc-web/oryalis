@@ -1,16 +1,20 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
-import { router, Stack } from 'expo-router'
+import { router, Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useOrders } from '@/features/orders/useOrders'
+import { getOrderById } from '@/features/orders/orderService'
+import { fetchOrderItemsForOrders, getOrderReturnStatus } from '@/features/orders/orderItemService'
 import { OrderEditModal } from '@/features/orders/OrderEditModal'
+import { getOrderProgramBadge } from '@/features/clients/lrpProgramService'
+import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { formatDate } from '@/shared/lib/dateFormat'
 import { AdvisorGate } from '@/features/subscriptions/AdvisorGate'
-import type { Order } from '@/shared/lib/types'
+import type { OrderListItem, OrderItem } from '@/shared/lib/types'
 
 function getMonthOptions(): { label: string; value: string }[] {
   const now = new Date()
@@ -28,6 +32,7 @@ export default function OrdersScreen() {
   const { t, i18n } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const { getLrpName } = useAppConfig()
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
 
   const now = new Date()
@@ -43,13 +48,43 @@ export default function OrdersScreen() {
 
   const { orders, loading, totalAmount, update, cancel, remove } = useOrders({ from: monthFrom, to: monthTo })
   const monthOptions = getMonthOptions()
-  const [editingOrder, setEditingOrder] = useState<Order | null>(null)
+  const [editingOrder, setEditingOrder] = useState<OrderListItem | null>(null)
   const [confirmAction, setConfirmAction] = useState<{ id: string; type: 'cancel' | 'delete' } | null>(null)
+
+  // RÉCAP-6.1.1 §8 — "Voir la commande" depuis la fiche RDV (/orders?orderId=<id>). Lecture
+  // ciblée par id uniquement (getOrderById), indépendante du filtre mois ci-dessus : une
+  // commande d'un autre mois reste ouvrable. Le paramètre est nettoyé immédiatement après
+  // lecture pour ne jamais rouvrir la modale involontairement (retour arrière, refresh, etc.).
+  const { orderId } = useLocalSearchParams<{ orderId?: string }>()
+  useEffect(() => {
+    if (!orderId) return
+    router.setParams({ orderId: undefined } as any)
+    getOrderById(orderId).then(found => { if (found) setEditingOrder(found) }).catch(() => {})
+  }, [orderId])
 
   const activeOrders = orders.filter(o => !o.cancelled_at)
   const sortedOrders = orders
     .slice()
     .sort((a, b) => new Date(b.order_date).getTime() - new Date(a.order_date).getTime())
+
+  // ORDER-BUSINESS-4.2.1 §6/§7/§8/§10/§12 — lecture GROUPÉE des order_items pour TOUTES les
+  // commandes visibles (jamais une requête par commande), pour dériver un indicateur de retour
+  // partiel sans jamais lire/modifier `orders.status`. Reclenchée automatiquement à chaque
+  // changement de `orders` (filtre mois, ou après update/cancel/remove qui appellent tous
+  // setOrders). Un retour enregistré via OrderItemReturnModal (dans OrderEditModal) n'appelle PAS
+  // `update`/`onSave` — il écrit directement order_items sans jamais changer `orders` ici — donc
+  // reclenchée EN PLUS explicitement à la fermeture de la modale (OrderEditModal étant une modale
+  // sur cet écran, jamais une navigation de route, aucun useFocusEffect ne peut la couvrir ici,
+  // contrairement à clients/[id]/index.tsx et appointments/[id]/index.tsx qui rechargent déjà au
+  // focus après une navigation réelle vers/depuis /orders).
+  const [orderItemsByOrderId, setOrderItemsByOrderId] = useState<Map<string, OrderItem[]>>(new Map())
+  const loadOrderItems = useCallback(() => {
+    let cancelled = false
+    fetchOrderItemsForOrders(orders.map(o => o.id)).then(map => { if (!cancelled) setOrderItemsByOrderId(map) }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders])
+  useEffect(() => loadOrderItems(), [loadOrderItems])
 
   return (
     <>
@@ -98,6 +133,13 @@ export default function OrdersScreen() {
         ) : (
           sortedOrders.map(order => {
             const isCancelled = !!order.cancelled_at
+            const programBadge = getOrderProgramBadge(order, getLrpName())
+            // ORDER-BUSINESS-4.2.1 §7/§9 — `status='returned'` garde TOUJOURS la priorité (retour
+            // total déjà confirmé, y compris une commande legacy avec returned_qty=0 sur ses
+            // lignes — §9 : le statut historique prime, jamais reconstruit depuis les lignes).
+            // Le statut dérivé des lignes n'intervient QUE si le statut DB n'est pas déjà 'returned'.
+            const returnStatus = order.status === 'returned' ? 'none' : getOrderReturnStatus(orderItemsByOrderId.get(order.id))
+            const hasBadges = isCancelled || order.order_type === 'personal' || order.status === 'returned' || returnStatus !== 'none' || !!programBadge
             return (
               <TouchableOpacity
                 key={order.id}
@@ -107,17 +149,23 @@ export default function OrdersScreen() {
               >
                 <View style={styles.cardTop}>
                   <View style={styles.cardLeft}>
-                    <View style={styles.cardDateRow}>
-                      <Text style={styles.cardDate}>{formatDate(order.order_date, locale)}</Text>
-                      {order.client?.full_name ? (
-                        <TouchableOpacity onPress={(e) => { e.stopPropagation?.(); router.push(`/(app)/clients/${order.client_id}` as any) }}>
-                          <Text style={styles.cardClient} numberOfLines={1}>{order.client.full_name}</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
+                    {/* LRP-4.5 §4 — le contact doit être identifié en premier, avant la date :
+                        avec un volume élevé de commandes, c'est la première question de
+                        l'utilisateur ("à qui appartient cette commande ?"), pas "quand". */}
+                    {order.client?.full_name ? (
+                      <TouchableOpacity onPress={(e) => { e.stopPropagation?.(); router.push(`/(app)/clients/${order.client_id}` as any) }}>
+                        <Text style={styles.cardClient} numberOfLines={1}>{order.client.full_name}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    <Text style={styles.cardDate} numberOfLines={1}>{formatDate(order.order_date, locale)}</Text>
                     <Text style={[styles.cardProduct, isCancelled && styles.cardTextCancelled]} numberOfLines={1}>{order.product_name}</Text>
                   </View>
-                  <View style={styles.cardRight}>
+                  {order.amount != null ? (
+                    <Text style={[styles.cardAmount, isCancelled && styles.cardTextCancelled]} numberOfLines={1}>{order.amount.toFixed(2)}€</Text>
+                  ) : null}
+                </View>
+                {hasBadges ? (
+                  <View style={styles.badgeRow}>
                     {isCancelled ? (
                       <View style={[styles.badge, { backgroundColor: colors.bgDim }]}>
                         <Text style={[styles.badgeText, { color: colors.textTertiary }]}>{t('orders.status_cancelled')}</Text>
@@ -132,17 +180,24 @@ export default function OrdersScreen() {
                       <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
                         <Text style={[styles.badgeText, { color: colors.danger }]}>{t('orders.status_returned')}</Text>
                       </View>
-                    ) : null}
-                    {order.is_lrp ? (
-                      <View style={[styles.badge, { backgroundColor: colors.secondaryLight }]}>
-                        <Text style={[styles.badgeText, { color: colors.secondary }]}>{t('orders.lrp')}</Text>
+                    ) : returnStatus === 'partial' ? (
+                      <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
+                        <Text style={[styles.badgeText, { color: colors.danger }]}>{t('orders.status_partial_return')}</Text>
+                      </View>
+                    ) : returnStatus === 'full_pending' ? (
+                      <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
+                        <Text style={[styles.badgeText, { color: colors.danger }]}>{t('orders.status_full_return_pending')}</Text>
                       </View>
                     ) : null}
-                    {order.amount != null ? (
-                      <Text style={[styles.cardAmount, isCancelled && styles.cardTextCancelled]}>{order.amount.toFixed(2)}€</Text>
+                    {programBadge ? (
+                      <View style={[styles.badge, { backgroundColor: programBadge.kind === 'linked' ? colors.secondaryLight : colors.bgDim }]}>
+                        <Text style={[styles.badgeText, { color: programBadge.kind === 'linked' ? colors.secondary : colors.textTertiary }]}>
+                          {programBadge.kind === 'linked' ? programBadge.label : t('orders.legacy_program_badge', { name: programBadge.label })}
+                        </Text>
+                      </View>
                     ) : null}
                   </View>
-                </View>
+                ) : null}
                 {order.notes ? <Text style={styles.cardNotes}>{order.notes}</Text> : null}
                 {confirmAction?.id === order.id ? (
                   <View style={styles.inlineConfirmRow}>
@@ -195,7 +250,11 @@ export default function OrdersScreen() {
       </AdvisorGate>
 
       {editingOrder ? (
-        <OrderEditModal order={editingOrder} onClose={() => setEditingOrder(null)} onSave={update} />
+        <OrderEditModal
+          order={editingOrder}
+          onClose={() => { setEditingOrder(null); loadOrderItems() }}
+          onSave={update}
+        />
       ) : null}
     </>
   )
@@ -245,17 +304,20 @@ function makeStyles(colors: ThemeColors) {
     gap: 6,
   },
   cardCancelled: { opacity: 0.55 },
-  cardTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  cardTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 },
   cardLeft:   { flex: 1, gap: 2 },
-  cardDateRow:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardDate:   { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
-  cardClient: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
-  cardProduct:{ fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+  // LRP-4.5 §4/§17 — le contact prime visuellement sur la date (taille/graisse), sans surcharger
+  // la carte : même hiérarchie de champs qu'avant, ordre et poids inversés.
+  cardClient: { fontSize: 15, fontFamily: fonts.bold, color: colors.primary },
+  cardDate:   { fontSize: 12, fontFamily: fonts.medium, color: colors.textTertiary, marginTop: 1, flexShrink: 0 },
+  cardProduct:{ fontSize: 14, fontFamily: fonts.semibold, color: colors.text, marginTop: 2 },
   cardTextCancelled: { textDecorationLine: 'line-through' },
-  cardRight:  { alignItems: 'flex-end', gap: 4 },
-  cardAmount: { fontSize: 16, fontFamily: fonts.bold, color: colors.text },
+  // LRP-4.6 §21 — flexShrink:0 défensif : un montant/nom ne doit jamais se compresser
+  // caractère par caractère sur une carte étroite, même si ce n'est pas le cas observé ici.
+  cardAmount: { fontSize: 16, fontFamily: fonts.bold, color: colors.text, flexShrink: 0 },
   cardNotes:  { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, lineHeight: 18 },
 
+  badgeRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   badge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   badgeText: { fontSize: 11, fontFamily: fonts.bold },
 

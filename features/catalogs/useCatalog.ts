@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getCatalogs, getCatalogProducts } from './catalogService'
 import { useAuth } from '@/features/auth/AuthProvider'
-import type { Catalog, CatalogProduct } from '@/shared/lib/types'
+import type { Catalog, CatalogProductListItem } from '@/shared/lib/types'
 
 export function useCatalogs(activeSlugs: string[] | null = null, refreshKey = 0) {
   const { session } = useAuth()
@@ -25,18 +25,22 @@ export function useCatalogs(activeSlugs: string[] | null = null, refreshKey = 0)
   return { catalogs, loading }
 }
 
-export function useCatalogProducts(catalogId: string | null) {
-  const [products, setProducts] = useState<CatalogProduct[]>([])
+// RDV-PRODUCTS-1 / Lot E — refreshKey optionnel, même convention que useCatalogs : permet à
+// l'écran Catalogue de forcer un rechargement après addProductToCatalog/updateCatalogProduct
+// (dont le cache mémoire est déjà invalidé côté service) sans changer catalogId/session.
+export function useCatalogProducts(catalogId: string | null, refreshKey = 0) {
+  const { session } = useAuth()
+  const [products, setProducts] = useState<CatalogProductListItem[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!catalogId) { setProducts([]); return }
+    if (!catalogId || !session) { setProducts([]); return }
     setLoading(true)
-    getCatalogProducts(catalogId)
+    getCatalogProducts(session.user.id, catalogId)
       .then(setProducts)
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [catalogId])
+  }, [catalogId, session, refreshKey])
 
   return { products, loading }
 }

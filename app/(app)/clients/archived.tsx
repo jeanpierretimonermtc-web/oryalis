@@ -10,7 +10,7 @@ import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { Client } from '@/shared/lib/types'
+import type { ArchivedClientListItem } from '@/shared/lib/types'
 
 export default function ArchivedClientsScreen() {
   const { t } = useTranslation()
@@ -18,7 +18,7 @@ export default function ArchivedClientsScreen() {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { quota, refresh: refreshQuota } = useContactQuota()
-  const [clients, setClients] = useState<Client[]>([])
+  const [clients, setClients] = useState<ArchivedClientListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [restoringId, setRestoringId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +38,7 @@ export default function ArchivedClientsScreen() {
 
   useFocusEffect(useCallback(() => { load() }, [load]))
 
-  async function restore(client: Client) {
+  async function restore(client: ArchivedClientListItem) {
     setRestoringId(client.id)
     setError(null)
     try {

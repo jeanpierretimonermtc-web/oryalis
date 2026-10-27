@@ -5,7 +5,6 @@ import { StatusBar } from 'expo-status-bar'
 import { View, Text, Image, TouchableOpacity, StyleSheet, useWindowDimensions, ActivityIndicator } from 'react-native'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { supabase } from '@/shared/lib/supabase'
-import { DemoProvider, useDemoState } from '@/features/demo/DemoProvider'
 import { CatalogPrefsProvider } from '@/features/catalogs/CatalogPrefsProvider'
 import { useNotificationSetup } from '@/features/notifications/useNotifications'
 import { useSecurityNotifications } from '@/features/security/useSecurityNotifications'
@@ -130,20 +129,8 @@ function Sidebar({ pathname }: { pathname: string }) {
   const { session } = useAuth()
   const { colors, mode } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { demoCount, demoLoading, demoFailed, checkDemo, handleLoadDemo, handleDeleteDemo } = useDemoState()
   const { isModuleActive } = useAppConfig()
   const visibleNavItems = NAV_ITEMS.filter(item => !item.module || isModuleActive(item.module as ModuleKey))
-
-  useEffect(() => { checkDemo() }, [checkDemo, pathname])
-
-  async function toggleDemo() {
-    if (demoCount > 0) {
-      await handleDeleteDemo()
-    } else {
-      await handleLoadDemo()
-    }
-    router.replace('/')
-  }
 
   function isActive(segment: string) {
     if (segment === '') return pathname === '/'
@@ -195,18 +182,6 @@ function Sidebar({ pathname }: { pathname: string }) {
           </View>
           <Text style={styles.userName} numberOfLines={1}>{firstName}</Text>
         </View>
-        <TouchableOpacity style={styles.demoBtn} onPress={toggleDemo} disabled={demoLoading} activeOpacity={0.7}>
-          {demoLoading
-            ? <ActivityIndicator size="small" color={colors.textSecondary} style={{ marginLeft: 4 }} />
-            : <>
-                <Text style={styles.demoIcon}>🧪</Text>
-                <Text style={[styles.demoText, demoCount > 0 && styles.demoTextActive]}>
-                  {demoCount > 0 ? t('dashboard.demo_delete') : t('dashboard.demo_load')}
-                </Text>
-              </>
-          }
-        </TouchableOpacity>
-        {demoFailed ? <Text style={styles.demoErrText}>{t('common.error')}</Text> : null}
         <TouchableOpacity style={styles.logoutBtn} onPress={() => supabase.auth.signOut()} activeOpacity={0.7}>
           <Text style={styles.logoutIcon}>↩</Text>
           <Text style={styles.logoutText}>{t('auth.logout')}</Text>
@@ -228,7 +203,7 @@ export default function AppLayout() {
   const isWide = width >= SIDEBAR_BREAKPOINT
   const isRootRoute = pathname === '/' || pathname === '/clients' || pathname === '/appointments' || pathname === '/followups' || pathname === '/network' || pathname === '/catalog'
 
-  useNotificationSetup()
+  useNotificationSetup(session?.user?.id)
   useSecurityNotifications(session)
 
 
@@ -277,7 +252,6 @@ export default function AppLayout() {
 
   return (
     <CatalogPrefsProvider>
-    <DemoProvider>
     <AppConfigProvider>
       <View style={[styles.root, isWide && styles.rootWide]}>
         {isWide
@@ -340,7 +314,6 @@ export default function AppLayout() {
         </View>
       </View>
     </AppConfigProvider>
-    </DemoProvider>
     </CatalogPrefsProvider>
   )
 }
@@ -412,11 +385,5 @@ function makeStyles(colors: ThemeColors) {
   logoutBtn:  { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, borderRadius: 8 },
   logoutIcon: { fontSize: 15, color: colors.textSecondary },
   logoutText: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
-
-  demoBtn:        { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, borderRadius: 8 },
-  demoIcon:       { fontSize: 14 },
-  demoText:       { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
-  demoTextActive: { color: colors.danger },
-  demoErrText:    { fontSize: 12, fontFamily: fonts.medium, color: colors.danger, paddingHorizontal: 8 },
   })
 }

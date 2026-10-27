@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { supabase } from '@/shared/lib/supabase'
+import { updateProfile } from '@/features/settings/profileService'
 
 export interface ProfileData {
   full_name: string; specialty: string; bio: string
@@ -55,10 +56,7 @@ export function useProfileData() {
     if (!session?.user.id) return false
     setSaving(true); setSaved(false)
     try {
-      const { error } = await supabase.from('profiles')
-        .update({ ...patch, updated_at: new Date().toISOString() })
-        .eq('id', session.user.id)
-      if (error) throw error
+      await updateProfile(session.user.id, patch)
       setData(prev => ({ ...prev, ...patch }))
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)

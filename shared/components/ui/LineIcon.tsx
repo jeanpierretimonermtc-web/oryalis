@@ -9,7 +9,6 @@ export type LineIconName =
   | 'chevronRight'
   | 'contact'
   | 'copy'
-  | 'demo'
   | 'display'
   | 'edit'
   | 'eye'
@@ -152,13 +151,6 @@ export function LineIcon({ name, size = 18, color, strokeWidth = 2 }: Props) {
           <Path d="M9 20h6" {...common} />
           <Path d="M12 16v4" {...common} />
           <Circle cx="17" cy="9" r="1" {...common} />
-        </>
-      )}
-      {name === 'demo' && (
-        <>
-          <Path d="M9 3v5l-4 8a3 3 0 0 0 2.7 5h8.6A3 3 0 0 0 19 16l-4-8V3" {...common} />
-          <Path d="M8 3h8" {...common} />
-          <Path d="M8 15h8" {...common} />
         </>
       )}
       {name === 'subscription' && (

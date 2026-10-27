@@ -1,5 +1,7 @@
 import { supabase } from '@/shared/lib/supabase'
 import type { Goal, GoalMetric } from '@/shared/lib/types'
+import { isOrderNetRevenue } from '@/features/orders/orderService'
+import { fetchOrderItemsForOrders, computeOrderNetAmount } from '@/features/orders/orderItemService'
 
 export function currentPeriod(): string {
   const now = new Date()
@@ -65,9 +67,14 @@ export async function computeCurrentValues(
       .overlaps('contact_role', ['distributor', 'leader'])
       .gte('created_at', from)
       .lte('created_at', to),
+    // LRP-4.6 §6 — trouvé lors de l'audit du calcul de CA net (une commande retournée gonflait
+    // aussi cet objectif "revenue") : même définition d'ÉLIGIBILITÉ qu'ailleurs (isOrderNetRevenue),
+    // status ajouté à la sélection pour pouvoir l'appliquer. ORDER-BUSINESS-4.2 §13/§21 — `id`
+    // ajouté pour permettre la jointure applicative vers order_items (montant NET des retours
+    // partiels, voir plus bas).
     supabase
       .from('orders')
-      .select('amount')
+      .select('id, amount, status, order_type, cancelled_at')
       .eq('user_id', userId)
       .neq('order_type', 'personal')
       .is('cancelled_at', null)
@@ -97,7 +104,11 @@ export async function computeCurrentValues(
       .lte('due_date', to.split('T')[0]),
   ])
 
-  const revenue = (revenueRes.data ?? []).reduce((s, r) => s + (r.amount ?? 0), 0)
+  // ORDER-BUSINESS-4.2 §13/§21/§35 — montant NET des retours partiels, lecture groupée des
+  // order_items (jamais un fetch par commande).
+  const eligibleOrders = (revenueRes.data ?? []).filter(isOrderNetRevenue)
+  const itemsByOrder = await fetchOrderItemsForOrders(eligibleOrders.map(o => o.id))
+  const revenue = eligibleOrders.reduce((s, r) => s + computeOrderNetAmount(r, itemsByOrder.get(r.id)), 0)
 
   return {
     new_clients:      newClientsRes.count ?? 0,

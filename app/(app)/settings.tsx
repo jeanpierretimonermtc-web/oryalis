@@ -19,7 +19,6 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
-import { useDemoState } from '@/features/demo/DemoProvider'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
 import type { LineIconName } from '@/shared/components/ui/LineIcon'
 import { getMyAppRole, type AppRole } from '@/features/admin/adminService'
@@ -80,7 +79,6 @@ export default function SettingsMenuScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { profile: businessProfile, isModuleActive } = useAppConfig()
   const { isConnected: gcConnected } = useGoogleCalendar()
-  const { hideDemoCard, setHideDemoCard } = useDemoState()
 
   const [fullName, setFullName] = useState('')
   const [specialty, setSpecialty] = useState('')
@@ -285,6 +283,8 @@ export default function SettingsMenuScreen() {
               <NavRow icon="org" title={t('settings.section_org')} desc={t('settings.org_desc')} onPress={nav('/(app)/settings-org')} styles={styles} colors={colors} />
               <View style={styles.sep} />
               <NavRow icon="language" title={t('settings.nav_preferences')} desc={t('settings.preferences_desc')} meta={locale.toUpperCase()} onPress={nav('/(app)/settings-language')} styles={styles} colors={colors} />
+              <View style={styles.sep} />
+              <NavRow icon="activity" title={t('settings.section_notifications')} desc={t('settings.notifications_desc')} onPress={nav('/(app)/settings-notifications')} styles={styles} colors={colors} />
             </View>
 
             <View style={styles.group}>
@@ -296,6 +296,8 @@ export default function SettingsMenuScreen() {
               <NavRow icon="activity" title={t('settings.section_automations')} desc={t('settings.automations_desc')} onPress={nav('/(app)/settings-automations')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
               <NavRow icon="labels" title={t('settings.section_labels')} desc={t('settings.labels_desc')} onPress={nav('/(app)/settings-labels')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
+              <View style={styles.sep} />
+              <NavRow icon="catalogs" title={t('settings.section_mlm_values')} desc={t('settings.mlm_values_desc')} onPress={nav('/(app)/settings-mlm-values')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
               <NavRow icon="import" title={t('settings.nav_import')} desc={t('settings.import_short_desc')} onPress={nav('/(app)/import')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
@@ -324,16 +326,6 @@ export default function SettingsMenuScreen() {
                   <Text style={styles.navDesc}>{t('settings.dark_mode_desc')}</Text>
                 </View>
                 <Switch value={mode === 'dark'} onValueChange={toggleTheme}
-                  trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.card} />
-              </View>
-              <View style={styles.sep} />
-              <View style={styles.navRow}>
-                <View style={styles.navIconWrap}><LineIcon name="demo" size={18} color={colors.primary} strokeWidth={2.15} /></View>
-                <View style={styles.navBody}>
-                  <Text style={styles.navTitle}>{t('settings.hide_demo')}</Text>
-                  <Text style={styles.navDesc}>{t('settings.hide_demo_desc')}</Text>
-                </View>
-                <Switch value={hideDemoCard} onValueChange={v => setHideDemoCard(v)}
                   trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.card} />
               </View>
               <View style={styles.sep} />

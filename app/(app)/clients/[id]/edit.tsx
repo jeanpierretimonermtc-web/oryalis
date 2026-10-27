@@ -14,11 +14,12 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import { PIPELINE_STAGES, LRP_STATUSES } from '@/shared/lib/types'
-import type { NetworkPotential, ContactRole, PipelineStage, LrpStatus } from '@/shared/lib/types'
+import { PIPELINE_STAGES } from '@/shared/lib/types'
+import type { NetworkPotential, ContactRole, PipelineStage } from '@/shared/lib/types'
 import { computeRelationshipHealth } from '@/features/clients/relationshipHealth'
 import { deriveLastName } from '@/shared/lib/clientName'
 import { formatDate } from '@/shared/lib/dateFormat'
+import { fetchProgramsForClient } from '@/features/clients/recurringProgramService'
 
 const CONTACT_ROLES: ContactRole[] = ['prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive']
 const NETWORK_POTENTIALS: NetworkPotential[] = ['low', 'medium', 'high']
@@ -28,7 +29,8 @@ const SECTION_ACCENTS: Record<string, (colors: ThemeColors) => { fg: string; bg:
   'clients.sections.status':   c => ({ fg: c.tertiary,  bg: c.tertiaryLight }),
   'clients.sections.profile':  c => ({ fg: c.secondary, bg: c.secondaryLight }),
   'clients.sections.medical':  c => ({ fg: c.danger,    bg: c.dangerLight }),
-  'clients.sections.journey':  c => ({ fg: c.warning,   bg: c.warningLight }),
+  'clients.sections.journey':      c => ({ fg: c.warning,   bg: c.warningLight }),
+  'clients.sections.development':  c => ({ fg: c.warning,   bg: c.warningLight }),
   'clients.sections.doterra':  c => ({ fg: c.success,   bg: c.successLight }),
 }
 
@@ -54,7 +56,7 @@ export default function EditClientScreen() {
   const { t, i18n } = useTranslation()
   const locale = i18n.language.startsWith('fr') ? 'fr-FR' : 'en-US'
   const { colors, statusColors } = useTheme()
-  const { isModuleActive, getRoleLabel, getLrpName } = useAppConfig()
+  const { isModuleActive, getRoleLabel, getPipelineStageLabel, getLrpName } = useAppConfig()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { id } = useLocalSearchParams<{ id: string }>()
   const { width } = useWindowDimensions()
@@ -84,10 +86,7 @@ export default function EditClientScreen() {
   const [doterraId, setDoterraId]           = useState('')
   const [loyaltyNotes, setLoyaltyNotes]     = useState('')
   const [trackingConsentAt, setTrackingConsentAt] = useState<string | null>(null)
-  const [lrpStatus, setLrpStatus]           = useState<LrpStatus>('not_enrolled')
-  const [nextLrpDate, setNextLrpDate]       = useState('')
   const [lrpLoyaltyPercent, setLrpLoyaltyPercent] = useState('')
-  const [lrpStartDate, setLrpStartDate]     = useState('')
   const [address, setAddress]               = useState('')
   const [contactRole, setContactRole]       = useState<ContactRole[]>(['prospect'])
   const [pipelineStage, setPipelineStage]   = useState<PipelineStage>('new_lead')
@@ -95,6 +94,11 @@ export default function EditClientScreen() {
   const [saving, setSaving]         = useState(false)
   const [errorMsg, setErrorMsg]     = useState<string | null>(null)
   const [confirmDel, setConfirmDel] = useState(false)
+  // LRP-4.4 §5 / LRP-4.5 §15 — juste de quoi savoir si un CTA "Voir le programme" a un sens ici
+  // (aucune édition de programme sur cet écran, uniquement un lien vers la fiche dédiée) et où
+  // il doit mener : programme unique → ouverture directe (jamais un choix arbitraire si 2+
+  // programmes existent, auquel cas on renvoie vers la fiche contact qui les liste tous).
+  const [recurringProgramIds, setRecurringProgramIds] = useState<string[]>([])
 
   useEffect(() => {
     if (!client) return
@@ -120,15 +124,17 @@ export default function EditClientScreen() {
     setDoterraId(client.doterra_id ?? '')
     setLoyaltyNotes(client.loyalty_notes ?? '')
     setTrackingConsentAt(client.tracking_consent_at ?? null)
-    setLrpStatus(client.lrp_status ?? 'not_enrolled')
-    setNextLrpDate(client.next_lrp_date ?? '')
     setLrpLoyaltyPercent(client.lrp_loyalty_percent != null ? String(client.lrp_loyalty_percent) : '')
-    setLrpStartDate(client.lrp_start_date ?? '')
     setAddress(client.address ?? '')
     setNetworkPotential(client.network_potential ?? null)
     setContactRole(client.contact_role?.length ? client.contact_role : ['prospect'])
     setPipelineStage(client.pipeline_stage ?? 'new_lead')
   }, [client])
+
+  useEffect(() => {
+    if (!id) return
+    fetchProgramsForClient(id).then(programs => setRecurringProgramIds(programs.map(p => p.id))).catch(() => {})
+  }, [id])
 
   async function handleSave() {
     setErrorMsg(null)
@@ -163,12 +169,11 @@ export default function EditClientScreen() {
         doterra_id: doterraId.trim() || null,
         loyalty_notes: loyaltyNotes.trim() || null,
         tracking_consent_at: trackingConsentAt,
-        lrp_status: lrpStatus,
-        next_lrp_date: nextLrpDate || null,
+        // LRP-4 — lrp_status/next_lrp_date/lrp_frequency_value/lrp_frequency_unit/lrp_start_date
+        // ne sont plus écrits depuis ce formulaire (recurring_programs est la source de vérité,
+        // voir hint ci-dessus) : ces colonnes gardent leur dernière valeur telle quelle, gelée.
         lrp_loyalty_percent: lrpLoyaltyPercent.trim() ? Math.max(0, Math.min(100, parseInt(lrpLoyaltyPercent, 10) || 0)) : null,
-        lrp_start_date: lrpStartDate || null,
         address: address.trim() || null,
-        journey_stage: client?.journey_stage ?? null, // retiré du formulaire, remplacé par pipeline_stage — valeur existante préservée
         network_potential: networkPotential,
         contact_role: contactRole,
         pipeline_stage: pipelineStage,
@@ -371,7 +376,7 @@ export default function EditClientScreen() {
         </SectionCard>
 
         {/* ── Parcours ───────────────────────────────────────────── */}
-        <SectionCard icon="🗺" titleKey="clients.sections.journey">
+        <SectionCard icon="🗺" titleKey="clients.sections.development">
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>{t('clients.fields.pipeline_stage')}</Text>
             <View style={styles.chipRow}>
@@ -379,7 +384,7 @@ export default function EditClientScreen() {
                 const active = pipelineStage === stage
                 return (
                   <TouchableOpacity key={stage} style={[styles.smallChip, active && styles.smallChipActive]} onPress={() => setPipelineStage(stage)} activeOpacity={0.7}>
-                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{t(`pipeline_stages.${stage}`)}</Text>
+                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{getPipelineStageLabel(stage)}</Text>
                   </TouchableOpacity>
                 )
               })}
@@ -412,33 +417,34 @@ export default function EditClientScreen() {
           <SectionCard icon="⭐" titleKey="clients.sections.doterra">
             <Input label={`${t('clients.fields.doterra_id')} (${t('common.optional')})`} value={doterraId} onChangeText={setDoterraId} />
 
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>{t('clients.fields.lrp_status', { name: getLrpName() })}</Text>
-              <View style={styles.chipRow}>
-                {LRP_STATUSES.map(status => {
-                  const active = lrpStatus === status
-                  return (
-                    <TouchableOpacity key={status} style={[styles.smallChip, active && styles.smallChipActive]} onPress={() => setLrpStatus(status)} activeOpacity={0.7}>
-                      <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{t(`lrp_statuses.${status}`)}</Text>
-                    </TouchableOpacity>
-                  )
-                })}
-              </View>
-            </View>
+            {/* LRP-4 — statut/fréquence/dates du programme récurrent ne se gèrent plus depuis ce
+                formulaire : recurring_programs (créé/géré depuis une commande ou la fiche
+                contact, "Voir le programme") est désormais la source de vérité. Les anciens
+                champs clients.lrp_status, next_lrp_date, lrp_frequency_value, lrp_frequency_unit
+                et lrp_start_date restent en base (historique, LRP-4 §27) mais ne sont plus
+                modifiables ici pour éviter de laisser croire qu'ils pilotent encore les
+                alertes/dashboard/réseau. */}
+            <Text style={styles.lrpMovedHint}>{t('clients.lrp_program_moved_hint', { name: getLrpName() })}</Text>
+            {recurringProgramIds.length > 0 ? (
+              <TouchableOpacity
+                onPress={() => router.push(
+                  recurringProgramIds.length === 1
+                    ? `/(app)/recurring-programs/${recurringProgramIds[0]}` as any
+                    : `/(app)/clients/${id}` as any
+                )}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={styles.lrpMovedLink}>{t('clients.lrp_program_moved_cta', { name: getLrpName() })}</Text>
+              </TouchableOpacity>
+            ) : null}
 
-            {lrpStatus !== 'not_enrolled' && (
-              <>
-                <DateInput label={t('clients.fields.next_lrp_date', { name: getLrpName() })} value={nextLrpDate} onChangeValue={setNextLrpDate} />
-                <DateInput label={`${t('clients.fields.lrp_start_date')} (${t('common.optional')})`} value={lrpStartDate} onChangeValue={setLrpStartDate} />
-                <Input
-                  label={`${t('clients.fields.lrp_loyalty_percent')} (${t('common.optional')})`}
-                  value={lrpLoyaltyPercent}
-                  onChangeText={v => setLrpLoyaltyPercent(v.replace(/\D/g, '').slice(0, 3))}
-                  placeholder="0-100"
-                  keyboardType="number-pad"
-                />
-              </>
-            )}
+            <Input
+              label={`${t('clients.fields.lrp_loyalty_percent')} (${t('common.optional')})`}
+              value={lrpLoyaltyPercent}
+              onChangeText={v => setLrpLoyaltyPercent(v.replace(/\D/g, '').slice(0, 3))}
+              placeholder="0-100"
+              keyboardType="number-pad"
+            />
 
             <TextArea label={`${t('clients.fields.loyalty_notes')} (${t('common.optional')})`} value={loyaltyNotes} onChangeText={setLoyaltyNotes} />
           </SectionCard>
@@ -529,6 +535,8 @@ function makeStyles(colors: ThemeColors) {
   // ── Field group + small chips ─────────────────────────────────────────────────
   fieldGroup:  { gap: 8 },
   fieldLabel:  { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6 },
+  lrpMovedHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, fontStyle: 'italic' },
+  lrpMovedLink: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary, marginTop: 4 },
   smallChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
   smallChipActive:      { backgroundColor: colors.primaryLight, borderColor: colors.primary },
   smallChipIcon:        { fontSize: 13 },

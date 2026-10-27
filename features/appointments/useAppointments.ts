@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { supabase } from '@/shared/lib/supabase'
 import {
   fetchAppointments,
   fetchAppointmentsWithContext,
   fetchAppointmentById,
+  fetchCalendarAppointments,
+  fetchNextAppointment,
   createAppointment,
   updateAppointment,
   completeAppointment,
@@ -15,12 +17,15 @@ import {
   fetchTasksByUser,
   createTask,
   completeTask,
+  setAppointmentTaskDone,
+  fetchTasksForAppointment,
   deleteTask,
 } from './appointmentService'
 import type {
   Appointment,
   AppointmentFull,
   AppointmentWithContext,
+  CalendarAppointment,
   AppointmentTask,
   AppointmentFilters,
   CreateAppointmentPayload,
@@ -101,6 +106,55 @@ export function useAppointments(filters: AppointmentFilters = {}) {
   return { appointments, loading, error, reload: load, add, update, cancel, remove }
 }
 
+// Orchestration des lectures du calendrier (écran AgendaScreen) : RDV d'une plage affichée +
+// prochain RDV global, deux requêtes à responsabilités distinctes, jamais fusionnées (le
+// prochain RDV doit rester exact même si la plage actuellement affichée est vide/ailleurs —
+// voir fetchNextAppointment). rangeStart/rangeEnd sont réduits à leur valeur primitive
+// (.getTime()) dès l'entrée du hook : reloadRange ne change d'identité que si la plage change
+// réellement, jamais à cause d'un re-render, quelle que soit la stabilité des objets Date
+// passés par l'appelant — cette hypothèse ne casse donc pas le correctif déjà en place côté
+// écran (rangeEnd mémoïsé sur des primitives dans AgendaScreen).
+// userId (string | undefined, jamais l'objet session complet) : tant qu'il est absent (session
+// pas encore chargée), reload* ne font rien — reprend exactement la garde `if (!session) return`
+// de l'ancien fetchRange()/fetchNextAppt() (CAL-2.1), déplacée ici plutôt que côté écran.
+export function useCalendarAppointments(rangeStart: Date, rangeEnd: Date, userId: string | undefined) {
+  const [rangeAppointments, setRangeAppointments] = useState<CalendarAppointment[]>([])
+  const [loadingRange, setLoadingRange] = useState(true)
+  const [nextAppointment, setNextAppointment] = useState<CalendarAppointment | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const rangeStartMs = rangeStart.getTime()
+  const rangeEndMs   = rangeEnd.getTime()
+
+  const reloadRange = useCallback(async () => {
+    if (!userId) return
+    setLoadingRange(true)
+    try {
+      setRangeAppointments(await fetchCalendarAppointments(new Date(rangeStartMs).toISOString(), new Date(rangeEndMs).toISOString(), userId))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur inconnue')
+      console.error('[useCalendarAppointments.reloadRange]', err)
+    } finally {
+      setLoadingRange(false)
+    }
+  }, [userId, rangeStartMs, rangeEndMs])
+
+  const reloadNextAppointment = useCallback(async () => {
+    if (!userId) return
+    try {
+      setNextAppointment(await fetchNextAppointment(userId))
+    } catch (err) {
+      console.error('[useCalendarAppointments.reloadNextAppointment]', err)
+    }
+  }, [userId])
+
+  const reloadAll = useCallback(async () => {
+    await Promise.all([reloadRange(), reloadNextAppointment()])
+  }, [reloadRange, reloadNextAppointment])
+
+  return { rangeAppointments, loadingRange, nextAppointment, error, reloadRange, reloadNextAppointment, reloadAll }
+}
+
 export function useAppointmentDetail(id: string | null) {
   const [appointment, setAppointment] = useState<AppointmentFull | null>(null)
   const [loading, setLoading] = useState(false)
@@ -144,7 +198,7 @@ export function useAppointmentDetail(id: string | null) {
       setAppointment(prev => prev ? {
         ...prev,
         business_context: {
-          ...(prev.business_context ?? { id: '', appointment_id: id, brand_id: null, catalog_id: null, main_product_id: null, pipeline_stage: 'new_lead' as const, prospect_temperature: null, commercial_intent: null, estimated_value: null, currency: 'EUR', outcome: null, no_followup_required: false, outcome_details: null, outcome_other_label: null, outcome_revision: 1, created_at: '', updated_at: '' }),
+          ...(prev.business_context ?? { id: '', appointment_id: id, brand_id: null, catalog_id: null, main_product_id: null, pipeline_stage: 'new_lead' as const, prospect_temperature: null, commercial_intent: null, commercial_intent_other_label: null, estimated_value: null, currency: 'EUR', outcome: null, no_followup_required: false, outcome_details: null, outcome_other_label: null, outcome_revision: 1, discussed_products: [], other_outcomes: [], created_at: '', updated_at: '' }),
           ...payload,
         },
       } : prev)
@@ -167,16 +221,37 @@ export function useAppointmentDetail(id: string | null) {
     }
   }, [id])
 
-  const doneTask = useCallback(async (taskId: string): Promise<boolean> => {
+  // TASK-RDV-1 — remplace l'ancien doneTask (unidirectionnel) : bascule réversible, même
+  // fonction pour terminer et rouvrir (§7). Jamais de suppression (§5).
+  const setTaskDone = useCallback(async (taskId: string, done: boolean): Promise<boolean> => {
     try {
-      await completeTask(taskId)
-      setAppointment(prev => prev ? { ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, status: 'done' as const, completed_at: new Date().toISOString() } : t) } : prev)
+      await setAppointmentTaskDone(taskId, done)
+      setAppointment(prev => prev ? {
+        ...prev,
+        tasks: prev.tasks.map(t => t.id === taskId
+          ? { ...t, status: done ? ('done' as const) : ('pending' as const), completed_at: done ? new Date().toISOString() : null }
+          : t),
+      } : prev)
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur complétion tâche')
       return false
     }
   }, [])
+
+  // TASK-RDV-1 (fix) — une tâche liée à ce RDV peut être terminée/rouverte depuis un autre écran
+  // (fiche Contact) pendant que cette fiche RDV reste montée dans la pile de navigation. Refetch
+  // ciblé (tâches uniquement, jamais tout l'appointment — évite de réinitialiser des brouillons
+  // en cours sur d'autres champs, ex. estValue/discussedProducts), déclenché au retour sur focus.
+  const refreshTasks = useCallback(async () => {
+    if (!id) return
+    try {
+      const tasks = await fetchTasksForAppointment(id)
+      setAppointment(prev => prev ? { ...prev, tasks } : prev)
+    } catch {
+      // Silencieux : un échec de ce refresh ciblé ne doit pas dégrader le reste de la fiche.
+    }
+  }, [id])
 
   const removeTask = useCallback(async (taskId: string): Promise<boolean> => {
     try {
@@ -241,7 +316,7 @@ export function useAppointmentDetail(id: string | null) {
     }
   }, [id])
 
-  return { appointment, loading, error, reload: load, saveNotes, saveBusinessContext, addTask, doneTask, removeTask, update, complete, retryPostCompletion, cancel }
+  return { appointment, loading, error, reload: load, saveNotes, saveBusinessContext, addTask, setTaskDone, refreshTasks, removeTask, update, complete, retryPostCompletion, cancel }
 }
 
 export function useAppointmentTasks() {
@@ -297,12 +372,25 @@ export function useAppointmentTasks() {
 
 // ── Backward-compat — à retirer après migration des écrans ──────────────────
 export function useUpcomingAppointments(limit = 10) {
-  const now = new Date()
-  const filters: AppointmentFilters = {
-    from: now.toISOString(),
-    to: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    status: 'scheduled',
-  }
+  // Fenêtre "maintenant → +30 jours" stabilisée à la journée : new Date() était appelé
+  // directement au render, produisant des chaînes from/to (quasi) différentes à chaque
+  // render — ce qui changeait l'identité de `filters`, donc celle de `load` dans
+  // useAppointments() (dépend de filters.from/filters.to), relançant son effet en boucle
+  // (render → load → useEffect → requête → setState → render...). `todayKey` est un
+  // primitif qui ne change qu'une fois par jour calendaire : `filters` garde la même
+  // référence tant que le jour ne change pas réellement, ce qui est suffisant pour une
+  // fenêtre de 30 jours — tout rafraîchissement réel (montage, focus Dashboard, pull-to-
+  // refresh) continue de passer par `reload`, inchangé.
+  const todayKey = new Date().toDateString()
+  const filters = useMemo<AppointmentFilters>(() => {
+    const now = new Date()
+    return {
+      from: now.toISOString(),
+      to: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'scheduled',
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayKey])
   const { appointments, loading, reload } = useAppointments(filters)
   return { appointments: appointments.slice(0, limit), loading, refresh: reload }
 }
@@ -334,6 +422,41 @@ export function useClientAppointmentsWithContext(clientId: string) {
   useEffect(() => { load() }, [load])
 
   return { appointments, loading, error, refresh: load }
+}
+
+// CONTACT-RDV-TASKS/P3 — audit préalable : aucun hook équivalent n'existait (seule
+// fetchTasksByUser()/useAppointmentTasks() existent, non filtrées par client). Tâches actives
+// uniquement (pending/in_progress, même filtre que "tâches en attente" déjà utilisé côté fiche
+// RDV) — les tâches terminées/annulées ne sont pas le rôle de ce hook, réservé aux zones
+// "à faire" de la fiche contact (Autres actions / Tâches à faire), jamais un historique complet.
+export function useClientTasks(clientId: string) {
+  const [tasks, setTasks] = useState<AppointmentTask[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    if (!clientId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('appointment_tasks')
+        .select('id, appointment_id, user_id, client_id, title, task_type, priority, status, due_at, completed_at, created_at, updated_at')
+        .eq('client_id', clientId)
+        .in('status', ['pending', 'in_progress'])
+        .order('due_at', { ascending: true })
+      if (fetchError) throw fetchError
+      setTasks(data ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur inconnue')
+    } finally {
+      setLoading(false)
+    }
+  }, [clientId])
+
+  useEffect(() => { load() }, [load])
+
+  return { tasks, loading, error, refresh: load }
 }
 
 // Pour chaque client : le prochain RDV à venir (le plus proche) s'il y en a un, sinon le

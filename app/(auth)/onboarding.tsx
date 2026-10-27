@@ -8,7 +8,7 @@ import { createClient } from '@/features/clients/clientService'
 import { createFollowup } from '@/features/followups/followupService'
 import { trackOnboardingEvent } from '@/features/onboarding/onboardingService'
 import { upsertBusinessProfile } from '@/features/settings/businessProfileService'
-import { supabase } from '@/shared/lib/supabase'
+import { updateProfile } from '@/features/settings/profileService'
 import { Input } from '@/shared/components/ui/Input'
 import { DateInput } from '@/shared/components/ui/DateInput'
 import { Button } from '@/shared/components/ui/Button'
@@ -56,8 +56,7 @@ export default function OnboardingScreen() {
 
   async function finish(destination: '/(app)' | '/(app)/import' = '/(app)') {
     if (!session) return
-    const { error: profileError } = await supabase.from('profiles').update({ onboarding_completed: true }).eq('id', session.user.id)
-    if (profileError) throw profileError
+    await updateProfile(session.user.id, { onboarding_completed: true })
     await trackOnboardingEvent(session.user.id, 'completed', 3, { destination })
     router.replace(destination)
   }
@@ -66,8 +65,7 @@ export default function OnboardingScreen() {
     if (!session || !fullName.trim()) { setError(t('onboarding.error_name')); return }
     setBusy(true); setError(null)
     try {
-      const { error: profileError } = await supabase.from('profiles').update({ full_name: fullName.trim(), locale, timezone }).eq('id', session.user.id)
-      if (profileError) throw profileError
+      await updateProfile(session.user.id, { full_name: fullName.trim(), locale, timezone })
       await upsertBusinessProfile(session.user.id, { activity_type: activity, custom_brand_name: brand.trim() || null, active_modules: automations ? [...BASE_MODULES, ...AUTOMATIONS] : BASE_MODULES })
       await trackOnboardingEvent(session.user.id, 'profile_completed', 1, { activity, automations })
       await i18n.changeLanguage(locale)
@@ -83,9 +81,9 @@ export default function OnboardingScreen() {
         first_name: firstName.trim() || null, full_name: [firstName.trim(), lastName.trim()].filter(Boolean).join(' '), avatar_url: null, email: null, phone: null,
         is_vip: false, manually_inactive: false, source: null, language: locale, birth_date: null, inscription_date: new Date().toISOString().slice(0, 10), profession: null,
         children: null, interests: [], client_type: null, medical_treatment: false, medical_notes: null, particularities: null, welcome_email_sent: false,
-        doterra_id: null, next_lrp_date: null, lrp_status: 'not_enrolled', lrp_loyalty_percent: null, lrp_start_date: null, tracking_consent_at: null, address: null, loyalty_notes: null, sponsor_id: null, contact_role: [role],
+        doterra_id: null, next_lrp_date: null, lrp_status: 'not_enrolled', lrp_loyalty_percent: null, lrp_start_date: null, lrp_frequency_value: null, lrp_frequency_unit: null, tracking_consent_at: null, address: null, loyalty_notes: null, sponsor_id: null, contact_role: [role],
         pipeline_stage: role === 'distributor' ? 'distributor' : 'new_lead', country: null, first_contact_date: null, first_purchase_date: null,
-        acquisition_source: null, journey_stage: null, next_action_date: null, next_action_type: null, referrals_count: 0, referral_count: 0, network_potential: null,
+        acquisition_source: null, next_action_date: null, next_action_type: null, referrals_count: 0, referral_count: 0, network_potential: null,
       })
       setClientId(created.id)
       await trackOnboardingEvent(session.user.id, 'contact_created', 2, { role })

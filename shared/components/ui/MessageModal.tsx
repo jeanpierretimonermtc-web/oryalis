@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Modal, View, Text, TouchableOpacity, ScrollView,
@@ -21,7 +22,11 @@ import { createCustomTemplate, getCustomTemplates } from '@/features/messages/cu
 
 const CATEGORIES: TemplateCategory[] = ['prospection', 'lrp', 'recrutement', 'suivi']
 
-type MessageClient = Pick<Client, 'first_name' | 'full_name' | 'next_lrp_date' | 'phone'>
+// RÉCAP-4 — `email` additif, optionnel comme le reste de MessageClient : les consommateurs qui
+// chargent déjà `client.email` (fiche contact) l'exposent automatiquement, ceux qui n'ont pas
+// encore cette colonne (voir ClientInfo de la fiche RDV avant ce lot) continuent de fonctionner
+// avec `email` simplement absent (bouton E-mail non affiché, aucune régression).
+type MessageClient = Pick<Client, 'first_name' | 'full_name' | 'next_lrp_date' | 'phone' | 'email'>
 
 interface Props {
   visible:     boolean
@@ -32,9 +37,48 @@ interface Props {
   // Quand fourni, la modale saute directement à l'étape "message prêt" avec ce
   // modèle (ex: récap de RDV) au lieu d'afficher la liste des modèles génériques.
   initialTemplate?: MessageTemplate | null
+  // RÉCAP-2 — API additive, défaut = comportement historique inchangé pour tous les
+  // appelants existants (message générique, résumé de profil, réseau) :
+  //  - `title` : libellé de l'écran "message prêt" (sinon `messages.title_ready` par défaut).
+  //  - `editable` : bascule le texte affiché d'un <Text> figé vers une zone modifiable qui
+  //    devient la source de vérité pour Copier/WhatsApp/SMS. false par défaut.
+  title?: string
+  editable?: boolean
+  // RÉCAP-3 — nœud neutre optionnel, affiché uniquement à l'étape "message prêt", juste
+  // au-dessus du texte. MessageModal l'affiche tel quel sans connaître son contenu ni sa
+  // logique (§16/17) : les règles métier (produits discutés, considered, prix snapshot RDV,
+  // legacy products_discussed) restent entièrement dans l'appelant (fiche RDV +
+  // features/appointments/recapProducts.ts). undefined par défaut pour tous les autres usages.
+  beforeMessageContent?: ReactNode
+  // RÉCAP-4 §6 — objet du mail préparé par l'appelant (dates/locale RDV inconnues de ce
+  // composant générique). Sans valeur, retombe sur le nom du message sélectionné (`selected.name`,
+  // déjà affiché tel quel dans l'écran) — jamais un texte français en dur ici.
+  emailSubject?: string
+  // RÉCAP-4.1 — canal E-mail strictement opt-in (défaut false, comme `editable`). RÉCAP-4 avait
+  // affiché le bouton dès que `client.email` existait, ce qui l'a fait apparaître par effet de
+  // bord sur les 3 autres usages de MessageModal (message générique, résumé profil, réseau) —
+  // hors périmètre de ce lot-là. Seul l'appelant qui passe `enableEmail` obtient le canal.
+  enableEmail?: boolean
+  // RÉCAP-5C — callback neutre, optionnel : MessageModal signale qu'un partage externe a été
+  // initié (WhatsApp/SMS/E-mail cliqué), avec le payload exact au moment du clic. Il ne
+  // signifie jamais "envoyé"/"livré"/"reçu" — juste "l'utilisateur a initié ce partage" (voir
+  // supabase/migrations/20260824_appointment_recap_shares.sql). MessageModal n'importe ni
+  // recapShareService, ni AppointmentRecapShare/RecapShareChannel, ni Supabase, ni appointment :
+  // la persistance appartient entièrement à l'appelant (fiche RDV). Jamais appelé pour Copier
+  // (Copier ne prouve même pas qu'une appli de communication a été ouverte, voir RÉCAP-5A §9).
+  onExternalShareInitiated?: (payload: ExternalShareInitiatedPayload) => void
 }
 
-export function MessageModal({ visible, onClose, client, advisorName, lastProduct, initialTemplate }: Props) {
+export type ExternalShareChannel = 'whatsapp' | 'sms' | 'email'
+export interface ExternalShareInitiatedPayload {
+  channel: ExternalShareChannel
+  // Texte exact déjà visible au moment du clic (= `rendered`), jamais reconstruit.
+  message: string
+  // Sujet réellement utilisé dans le mailto: (email uniquement) — undefined pour whatsapp/sms.
+  subject?: string
+}
+
+export function MessageModal({ visible, onClose, client, advisorName, lastProduct, initialTemplate, title, editable = false, beforeMessageContent, emailSubject, enableEmail = false, onExternalShareInitiated }: Props) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -50,8 +94,36 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   const [activeCategory, setActiveCategory] = useState<TemplateCategory>('prospection')
   const [selected, setSelected] = useState<MessageTemplate | null>(null)
   const [copied, setCopied] = useState(false)
+  // RÉCAP-2 — message réellement modifié par l'utilisateur (source de vérité pour Copier/
+  // WhatsApp/SMS quand `editable`). Distinct du texte généré par le template : ce dernier
+  // reste recalculable à tout moment depuis `selected`+`vars`, jamais modifié en place.
+  const [editedMessage, setEditedMessage] = useState('')
+  // RÉCAP-3 (§14/15) — devient vrai dès la première frappe manuelle dans `editedMessage`.
+  // Remplace l'ancien garde-fou "consommé une seule fois par ouverture" (RÉCAP-2) par un
+  // garde-fou plus précis : tant que l'utilisateur n'a rien tapé, `initialTemplate` peut
+  // continuer à régénérer le message (ex. case à cocher produit/toggle prix côté appelant) ;
+  // dès la première frappe, plus aucune régénération silencieuse (§14 — point critique).
+  const dirtyRef = useRef(false)
+  const [dirty, setDirty] = useState(false)
+  // Corps du template effectivement utilisé pour la dernière génération de `editedMessage` —
+  // sert uniquement à détecter qu'un `initialTemplate` plus récent diffère (produits changés
+  // pendant que le texte est déjà modifié) pour proposer une mise à jour explicite (§15),
+  // jamais à décider quoi que ce soit côté domaine (MessageModal ne lit que la chaîne `body`).
+  const appliedTemplateBodyRef = useRef<string | null>(null)
 
-  useEffect(() => { if (visible && initialTemplate) setSelected(initialTemplate) }, [visible, initialTemplate])
+  useEffect(() => {
+    if (!visible) { dirtyRef.current = false; setDirty(false); appliedTemplateBodyRef.current = null; return }
+    if (dirtyRef.current) return
+    if (initialTemplate) setSelected(initialTemplate)
+  }, [visible, initialTemplate])
+
+  const canUpdateFromLatestTemplate = editable && dirty && !!initialTemplate && initialTemplate.body !== appliedTemplateBodyRef.current
+  function applyLatestTemplate() {
+    if (!initialTemplate) return
+    setSelected(initialTemplate)
+    dirtyRef.current = false
+    setDirty(false)
+  }
 
   const prénom = client?.first_name || client?.full_name?.split(' ')[0] || ''
   const date_lrp = client?.next_lrp_date
@@ -61,9 +133,25 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
 
   const vars = { prénom, nom_complet: client?.full_name ?? '', date_lrp, produit: lastProduct ?? '', mon_prénom }
 
+  // RÉCAP-2 — initialise (ou réinitialise) editedMessage uniquement quand `selected` change
+  // de référence, jamais sur un changement de `vars` (client/advisorName/lastProduct) : couvre
+  // à la fois l'arrivée du template initial (recap) et un choix explicite d'un autre modèle
+  // (§6 — remplacement volontaire uniquement), jamais un rerender sans rapport.
+  useEffect(() => {
+    if (selected) {
+      setEditedMessage(renderTemplate(selected.body, vars))
+      appliedTemplateBodyRef.current = selected.body
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected])
+
   const allowedTemplates = isAdvisor ? [...BUILT_IN_TEMPLATES, ...customTemplates] : BUILT_IN_TEMPLATES.slice(0, 3)
   const templates = allowedTemplates.filter(t => t.category === activeCategory)
-  const rendered  = selected ? renderTemplate(selected.body, vars) : ''
+  // RÉCAP-2 — en mode éditable, la source de vérité affichée/copiée/envoyée est le message
+  // modifié par l'utilisateur, jamais recalculé depuis le template au moment de l'action
+  // (§7/§8/§9 du brief). En mode lecture seule (tous les autres appelants existants), le
+  // comportement reste strictement identique à avant ce lot.
+  const rendered = editable ? editedMessage : (selected ? renderTemplate(selected.body, vars) : '')
 
   async function handleCopy() {
     await Clipboard.setStringAsync(rendered)
@@ -72,6 +160,10 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   }
 
   function handleWhatsApp() {
+    // RÉCAP-5C — capturé avant toute ouverture externe, jamais attendu (payload synchrone,
+    // le fire-and-forget réel vit chez l'appelant) : ne doit jamais retarder ni bloquer
+    // window.open/Linking.openURL ci-dessous (§10 — critique sur web, popup blockers).
+    onExternalShareInitiated?.({ channel: 'whatsapp', message: rendered })
     const raw = client?.phone?.trim() ?? ''
     let phone = ''
     if (raw) {
@@ -111,6 +203,8 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   }
 
   function handleSMS() {
+    // RÉCAP-5C — voir handleWhatsApp ci-dessus, même principe (synchrone, non bloquant).
+    onExternalShareInitiated?.({ channel: 'sms', message: rendered })
     const phone = client?.phone?.replace(/\D/g, '') ?? ''
     const sep   = Platform.OS === 'ios' ? '&' : '?'
     const url   = phone
@@ -119,9 +213,33 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
     Linking.openURL(url)
   }
 
+  // RÉCAP-4 §7/§8 — corps = `rendered` tel quel (déjà égal à `editedMessage` en mode `editable`,
+  // jamais recalculé via renderTemplate() ici, comme WhatsApp/SMS ci-dessus). Sujet et corps
+  // passent par encodeURIComponent (accents, apostrophes, &, ?, retours à ligne, URL internes au
+  // message) ; seule l'adresse du destinataire n'est pas encodée (convention mailto: standard).
+  // Aucune promesse d'envoi (§12) : Oryalis ouvre le client mail, rien de plus.
+  function handleEmail() {
+    if (!enableEmail) return
+    const email = client?.email?.trim()
+    if (!email) return
+    const subject = emailSubject ?? selected?.name ?? ''
+    // RÉCAP-5C — après les gardes ci-dessus (bouton réellement disponible, §9), avec le sujet
+    // EXACT effectivement utilisé dans le mailto: ci-dessous (jamais recalculé séparément).
+    onExternalShareInitiated?.({ channel: 'email', message: rendered, subject })
+    const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(rendered)}`
+    Linking.openURL(url)
+  }
+
+  // RÉCAP-2 / Test H — fermer puis rouvrir repart du message généré initial (jamais une édition
+  // en attente conservée entre deux ouvertures) : comportement le plus simple et le plus
+  // prévisible, cohérent avec `selected` déjà remis à null ici avant ce lot.
   function handleClose() {
     setSelected(null)
+    setEditedMessage('')
     setCopied(false)
+    dirtyRef.current = false
+    setDirty(false)
+    appliedTemplateBodyRef.current = null
     onClose()
   }
 
@@ -141,7 +259,7 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text style={styles.title}>
-              {selected ? t('messages.title_ready') : t('messages.title_for', { name: prénom || '…' })}
+              {selected ? (title ?? t('messages.title_ready')) : t('messages.title_for', { name: prénom || '…' })}
             </Text>
             <TouchableOpacity onPress={handleClose} style={styles.closeBtn} hitSlop={8}>
               <Text style={styles.closeIcon}>✕</Text>
@@ -196,17 +314,48 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
             </>
           ) : (
             <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+              {/* RÉCAP-3 — slot neutre fourni par l'appelant (ex. sélecteur "Produits abordés"
+                  de la fiche RDV), rendu avant le message, jamais interprété par MessageModal. */}
+              {beforeMessageContent}
               {/* Rendered message */}
               <View style={styles.renderedCard}>
                 <Text style={styles.renderedName}>{selected.name}</Text>
-                <Text style={styles.renderedBody}>{rendered}</Text>
+                {/* RÉCAP-2 — zone réellement éditable uniquement quand `editable` est activé par
+                    l'appelant (récap RDV) ; tous les autres usages de MessageModal conservent le
+                    <Text> figé d'origine, aucun changement de comportement pour eux (§15). */}
+                {editable ? (
+                  <TextInput
+                    style={[styles.renderedBody, styles.renderedBodyEditable]}
+                    value={editedMessage}
+                    onChangeText={(v) => { setEditedMessage(v); dirtyRef.current = true; setDirty(true) }}
+                    multiline
+                    textAlignVertical="top"
+                  />
+                ) : (
+                  <Text style={styles.renderedBody}>{rendered}</Text>
+                )}
               </View>
+
+              {/* RÉCAP-3 §15 — dès que le texte a été modifié manuellement, plus aucune
+                  régénération silencieuse : si les options du slot ci-dessus changent ensuite
+                  (ex. produit coché/décoché), ce bouton explicite est le seul moyen de reprendre
+                  le message généré, jamais automatique. */}
+              {canUpdateFromLatestTemplate ? (
+                <TouchableOpacity style={styles.updateMessageBtn} onPress={applyLatestTemplate} activeOpacity={0.75}>
+                  <Text style={styles.updateMessageBtnText}>{t('messages.update_with_changes')}</Text>
+                </TouchableOpacity>
+              ) : null}
 
               {/* Actions */}
               <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success }]} onPress={handleCopy} activeOpacity={0.85}>
                 <Text style={styles.actionBtnText}>{copied ? t('messages.copied') : t('messages.copy')}</Text>
               </TouchableOpacity>
 
+              {/* RÉCAP-4 §10 / RÉCAP-4.1 §4 — WhatsApp/SMS et E-mail sont des canaux
+                  indépendants, chacun affiché seulement si sa donnée de contact existe. Le canal
+                  E-mail (bouton et message d'indisponibilité) n'existe que si l'appelant l'a
+                  explicitement activé via `enableEmail` — sinon ce bloc entier est absent et le
+                  comportement retombe exactement sur l'historique pré-RÉCAP-4. */}
               {client?.phone ? (
                 <>
                   <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success }]} onPress={handleWhatsApp} activeOpacity={0.85}>
@@ -218,10 +367,30 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
                     </TouchableOpacity>
                   )}
                 </>
+              ) : null}
+
+              {enableEmail ? (
+                client?.email ? (
+                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.primary }]} onPress={handleEmail} activeOpacity={0.85}>
+                    <Text style={styles.actionBtnText}>{t('messages.open_email')}</Text>
+                  </TouchableOpacity>
+                ) : client?.phone ? (
+                  <Text style={styles.channelUnavailableHint}>{t('messages.email_unavailable')}</Text>
+                ) : null
+              ) : null}
+
+              {enableEmail ? (
+                !client?.phone && !client?.email ? (
+                  <View style={styles.noPhoneNote}>
+                    <Text style={styles.noPhoneText}>{t('messages.no_contact_channel')}</Text>
+                  </View>
+                ) : null
               ) : (
-                <View style={styles.noPhoneNote}>
-                  <Text style={styles.noPhoneText}>{t('messages.no_phone')}</Text>
-                </View>
+                !client?.phone ? (
+                  <View style={styles.noPhoneNote}>
+                    <Text style={styles.noPhoneText}>{t('messages.no_phone')}</Text>
+                  </View>
+                ) : null
               )}
 
               {/* Back button */}
@@ -292,12 +461,26 @@ function makeStyles(colors: ThemeColors) {
   },
   renderedName: { fontSize: 12, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 },
   renderedBody: { fontSize: 15, fontFamily: fonts.body, color: colors.text, lineHeight: 22 },
+  // RÉCAP-2 — identifiable comme un vrai champ (bordure + fond distinct de la carte), assez
+  // haut pour lire le message sans scroll excessif (§13), sans refonte du reste de la modale.
+  renderedBodyEditable: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 10,
+    backgroundColor: colors.bg, padding: 10, minHeight: 160,
+  },
 
   actionBtn:     { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
   actionBtnText: { fontSize: 15, fontFamily: fonts.semibold, color: '#fff' },
 
+  updateMessageBtn: {
+    borderRadius: 10, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryLight,
+    paddingVertical: 10, alignItems: 'center', marginBottom: 12,
+  },
+  updateMessageBtnText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
+
   noPhoneNote: { backgroundColor: colors.bgDim, borderRadius: 10, padding: 12, marginBottom: 10 },
   noPhoneText: { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, textAlign: 'center' },
+  // RÉCAP-4 §9/§10 — discret, pas un panneau : un canal manquant à côté d'actions disponibles.
+  channelUnavailableHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, textAlign: 'center', marginBottom: 10 },
 
   backBtn:     { alignItems: 'center', paddingVertical: 12 },
   backBtnText: { fontSize: 14, fontFamily: fonts.medium, color: colors.textSecondary },

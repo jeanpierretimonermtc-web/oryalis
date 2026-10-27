@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import { useDemoState } from '@/features/demo/DemoProvider'
 import { supabase } from '@/shared/lib/supabase'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
@@ -24,7 +23,6 @@ export default function DisplaySettingsScreen() {
   const { session } = useAuth()
   const { colors, mode, toggleTheme } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { hideDemoCard, setHideDemoCard } = useDemoState()
   const { plan } = useProfilePlan()
 
   const planCfg = PLAN_CONFIG[plan] ?? PLAN_CONFIG.free
@@ -44,14 +42,6 @@ export default function DisplaySettingsScreen() {
               <Text style={styles.switchDesc}>{t('settings.dark_mode_desc')}</Text>
             </View>
             <Switch value={mode === 'dark'} onValueChange={toggleTheme}
-              trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.card} />
-          </View>
-          <View style={[styles.switchRow, styles.switchRowBorder]}>
-            <View style={styles.switchInfo}>
-              <Text style={styles.switchLabel}>{t('settings.hide_demo')}</Text>
-              <Text style={styles.switchDesc}>{t('settings.hide_demo_desc')}</Text>
-            </View>
-            <Switch value={hideDemoCard} onValueChange={v => setHideDemoCard(v)}
               trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.card} />
           </View>
         </View>
@@ -107,7 +97,6 @@ function makeStyles(colors: ThemeColors) {
   sectionLabel: { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, letterSpacing: 0.6, paddingHorizontal: 2, paddingTop: 6 },
   card: { backgroundColor: colors.card, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  switchRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 14, marginTop: 2 },
   switchInfo: { flex: 1, gap: 2 },
   switchLabel: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
   switchDesc: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 17 },

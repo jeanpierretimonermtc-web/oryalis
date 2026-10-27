@@ -6,8 +6,7 @@ import type { Client } from '@/shared/lib/types'
 
 type DirectMember = Pick<Client,
   'id' | 'full_name' | 'first_name' | 'email' | 'phone' |
-  'status' | 'contact_role' | 'sponsor_id' |
-  'next_lrp_date' | 'updated_at' | 'created_at'
+  'contact_role' | 'sponsor_id' | 'updated_at' | 'created_at'
 >
 
 export function useNetworkTree() {

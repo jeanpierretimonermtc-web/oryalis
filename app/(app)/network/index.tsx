@@ -12,6 +12,7 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { NetworkNode, Client } from '@/shared/lib/types'
 import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
+import { getDaysUntilLrp } from '@/features/clients/clientService'
 
 const INDENT = 22
 
@@ -25,11 +26,6 @@ function activityColor(updatedAt: string | null, colors: ThemeColors): string {
   if (days < 15) return colors.success
   if (days < 30) return colors.warning
   return colors.danger
-}
-
-function lrpDaysLeft(nextLrpDate: string | null | undefined): number | null {
-  if (!nextLrpDate) return null
-  return Math.ceil((new Date(nextLrpDate).getTime() - Date.now()) / 86400000)
 }
 
 // DFS flatten en sautant les enfants des nœuds collapsed
@@ -71,14 +67,19 @@ function NodeRow({ node, collapsed, onToggle, onMessage }: NodeRowProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { getRoleLabel, getLrpName } = useAppConfig()
+  const { getRoleLabel, getLrpName, isModuleActive } = useAppConfig()
 
   const rp          = getRoleColors(getPrimaryRole(node.contact_role), colors)
   const dot         = activityColor(node.updated_at, colors)
   const isNetwork   = node.contact_role.includes('distributor') || node.contact_role.includes('leader')
   const hasChildren = node.children.length > 0
   const isCollapsed = collapsed.has(node.id)
-  const lrpDays     = lrpDaysLeft(node.next_lrp_date)
+  // LRP-4 — activeProgramId/nextOccurrenceDate viennent de recurring_programs (déjà filtré
+  // status='active' côté service, voir networkService.fetchActiveProgramsByClientId) : un
+  // programme paused/cancelled/completed, ou le module renewals_lrp désactivé, ne doit plus
+  // jamais afficher de badge d'alerte réseau — même règle que LRP-2 sur le nouveau modèle.
+  const lrpProgramActive = isModuleActive('renewals_lrp') && node.activeProgramId != null && node.nextOccurrenceDate != null
+  const lrpDays     = lrpProgramActive ? getDaysUntilLrp(node.nextOccurrenceDate as string) : null
   const lrpAlert    = lrpDays !== null && lrpDays <= 7
 
   return (

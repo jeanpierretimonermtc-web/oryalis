@@ -1,5 +1,8 @@
 import { supabase } from '@/shared/lib/supabase'
 import type { Alert } from '@/shared/lib/types'
+import { getDaysUntilLrp } from '@/features/clients/clientService'
+import { isProgramEligibleForNextOccurrence } from '@/features/clients/recurringProgramService'
+import { formatProgramTitle } from '@/features/clients/lrpProgramService'
 
 export async function fetchUnreadAlerts(userId: string): Promise<Alert[]> {
   const { data, error } = await supabase
@@ -109,39 +112,69 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
     }
   }
 
-  // ── Rule 3 — lrp_due (LRP dans <5 jours) ────────────────────────────────────
-  const fiveDaysLater = new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0]
-  const { data: lrpClients } = await supabase
-    .from('clients')
-    .select('id, full_name, next_lrp_date')
-    .eq('user_id', userId)
-    .is('archived_at', null)
-    .gte('next_lrp_date', today)
-    .lte('next_lrp_date', fiveDaysLater)
-    .limit(10)
-
-  for (const c of lrpClients ?? []) {
-    const daysUntil = Math.ceil(
-      (new Date(c.next_lrp_date).getTime() - Date.now()) / 86400000
-    )
-    add({
-      user_id:    userId,
-      type:       'lrp_due',
-      client_id:  c.id,
-      message:    `${c.full_name} — LRP dans ${daysUntil} jour${daysUntil > 1 ? 's' : ''}`,
-      action_url: `/(app)/clients/${c.id}`,
-      read:       false,
-    })
-  }
-
-  // ── Rule 4 — distributor_dormant (module downline requis) ────────────────────
+  // ── Modules actifs — chargés une seule fois, réutilisés par les règles 3 et 4 ──
+  // LRP-5.1 §25 — custom_lrp_name ajouté à cette même requête (aucune requête séparée) : le nom
+  // de programme configuré par l'utilisateur (getLrpName() côté UI) doit apparaître dans le
+  // message d'alerte, jamais la chaîne générique "LRP" en dur.
   const { data: bizProfile } = await supabase
     .from('user_business_profiles')
-    .select('active_modules')
+    .select('active_modules, custom_lrp_name')
     .eq('user_id', userId)
     .single()
 
-  const downlineActive = !bizProfile || (bizProfile.active_modules as string[]).includes('downline')
+  const lrpName = bizProfile?.custom_lrp_name?.trim() || 'LRP'
+  const activeModules = bizProfile ? (bizProfile.active_modules as string[]) : null
+  const lrpModuleActive = !activeModules || activeModules.includes('renewals_lrp')
+  const downlineActive  = !activeModules || activeModules.includes('downline')
+
+  // ── Rule 3 — lrp_due (programme récurrent dans <5 jours) ─────────────────────
+  // LRP-4 — source de vérité : recurring_programs (status='active' + next_occurrence_date),
+  // plus clients.lrp_status/next_lrp_date (gelés). Même règle LRP-2 : paused/cancelled/
+  // completed ne doit plus jamais alerter. action_url ouvre désormais le programme précis
+  // (LRP-4 §1 — corrige le manque de détail signalé sur "Ouvrir" depuis les échéances).
+  if (lrpModuleActive) {
+    const fiveDaysLater = new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0]
+    // LRP-5 §23 — plus de borne basse `gte(today)` : une échéance dépassée sans confirmation
+    // (status='scheduled' ET scheduled_date <= aujourd'hui, "à confirmer" côté fiche programme)
+    // doit continuer à alerter tant qu'elle n'est ni confirmée ni marquée non réalisée — avant
+    // ce correctif, l'alerte disparaissait dès que la date était dépassée, alors que l'action
+    // ("Confirmer l'échéance") restait toujours nécessaire.
+    const { data: duePrograms } = await supabase
+      .from('recurring_programs')
+      .select('id, client_id, label, status, next_occurrence_date, end_mode, end_date, client:clients(full_name, archived_at)')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .lte('next_occurrence_date', fiveDaysLater)
+      .limit(10)
+
+    // LRP-4.2 §5/§6 — règle métier UNIQUE (isProgramEligibleForNextOccurrence), jamais
+    // redupliquée : un programme end_date dépassée ne doit jamais alerter, même si son statut
+    // DB n'a pas encore été normalisé à 'completed' (pas de tâche planifiée dans cette app).
+    for (const p of (duePrograms ?? []).filter(p => isProgramEligibleForNextOccurrence(p, today))) {
+      const c = p.client as unknown as { full_name: string; archived_at: string | null } | null
+      if (!c || c.archived_at) continue
+      const daysUntil = getDaysUntilLrp(p.next_occurrence_date as string)
+      // LRP-5.1 §25 — nom du programme (nom global personnalisé + label d'instance), jamais
+      // "LRP" en dur : formatProgramTitle est la même fonction que l'UI (lrpProgramService.ts).
+      const programName = formatProgramTitle(lrpName, p.label)
+      // LRP-5 §5/§23 — jamais "Commande envoyée/reçue" sans confirmation : dès que l'échéance
+      // est atteinte, l'action utile est de la confirmer, pas d'annoncer qu'une commande a eu
+      // lieu (Oryalis n'est connecté à aucun système officiel de l'entreprise).
+      const message = daysUntil <= 0
+        ? `${c.full_name} — ${programName} à confirmer`
+        : `${c.full_name} — ${programName} dans ${daysUntil} jour${daysUntil > 1 ? 's' : ''}`
+      add({
+        user_id:    userId,
+        type:       'lrp_due',
+        client_id:  p.client_id,
+        message,
+        action_url: `/(app)/recurring-programs/${p.id}`,
+        read:       false,
+      })
+    }
+  }
+
+  // ── Rule 4 — distributor_dormant (module downline requis) ────────────────────
 
   if (downlineActive) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString()

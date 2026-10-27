@@ -1,6 +1,40 @@
 import { supabase } from '@/shared/lib/supabase'
-import type { Client, ClientListItem, ContactRole, ProspectTemperature } from '@/shared/lib/types'
+import type { Client, ClientListItem, ArchivedClientListItem, ContactRole, ProspectTemperature, LrpFrequencyUnit } from '@/shared/lib/types'
 import { deriveLastName } from '@/shared/lib/clientName'
+
+// LRP-4 — isLrpProgramActive(status, nextDate) (LRP-2) est retirée : sa condition
+// status==='active'+nextDate!=null est désormais évaluée directement sur recurring_programs
+// (filtrée status='active' côté requête pour alertService/useDashboard/networkService, ou
+// vérifiée inline là où le programme est déjà chargé) — plus de logique séparée à maintenir sur
+// l'ancien modèle clients.lrp_status/next_lrp_date, gelé.
+
+// Nombre de jours (peut être négatif) avant l'échéance LRP — seule implémentation officielle,
+// remplace les calculs dupliqués dans alertService/useDashboard/network.
+export function getDaysUntilLrp(nextDate: string): number {
+  return Math.ceil((new Date(nextDate).getTime() - Date.now()) / 86400000)
+}
+
+// LRP-3 §5 — SEULE implémentation officielle du calcul de prochaine échéance à partir d'une
+// date de référence + une fréquence. Logique calendaire correcte pour 'month' : un mois cible
+// inexistant (ex. 31 janvier + 1 mois → 31 février) est ramené au dernier jour réel de ce mois
+// (28/29 février), jamais un débordement silencieux sur mars. Retourne toujours 'YYYY-MM-DD'.
+export function calculateNextLrpDate(baseDate: string, frequencyValue: number, frequencyUnit: LrpFrequencyUnit): string {
+  const base = new Date(baseDate + 'T00:00:00')
+  let result: Date
+  if (frequencyUnit === 'week') {
+    result = new Date(base)
+    result.setDate(result.getDate() + frequencyValue * 7)
+  } else {
+    const targetYear = base.getFullYear()
+    const targetMonthIndex = base.getMonth() + frequencyValue
+    const lastDayOfTargetMonth = new Date(targetYear, targetMonthIndex + 1, 0).getDate()
+    result = new Date(targetYear, targetMonthIndex, Math.min(base.getDate(), lastDayOfTargetMonth))
+  }
+  const y = result.getFullYear()
+  const m = String(result.getMonth() + 1).padStart(2, '0')
+  const d = String(result.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
 
 // Tri par nom de famille plutôt que par full_name brut (= prénom en premier) — les
 // praticiens pensent "NOM Prénom" (convention observée dans leurs propres classeurs de
@@ -62,7 +96,7 @@ export type ClientInput = Omit<Client,
 export async function getClients(userId: string) {
   const { data, error } = await supabase
     .from('clients')
-    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, is_vip, manually_inactive, created_at')
+    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, next_action_type, next_action_source, is_vip, manually_inactive, created_at')
     .eq('user_id', userId)
     .is('archived_at', null)
   if (error) throw error
@@ -72,12 +106,12 @@ export async function getClients(userId: string) {
 export async function getArchivedClients(userId: string) {
   const { data, error } = await supabase
     .from('clients')
-    .select('*')
+    .select('id, full_name, archived_at')
     .eq('user_id', userId)
     .not('archived_at', 'is', null)
     .order('archived_at', { ascending: false })
   if (error) throw error
-  return data as Client[]
+  return data as ArchivedClientListItem[]
 }
 
 export async function getClient(id: string) {
@@ -119,14 +153,34 @@ export async function deleteClient(id: string) {
 export async function searchClients(userId: string, query: string, role?: ContactRole) {
   let q = supabase
     .from('clients')
-    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, is_vip, manually_inactive, created_at')
+    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, next_action_type, next_action_source, is_vip, manually_inactive, created_at')
     .eq('user_id', userId)
     .is('archived_at', null)
     .ilike('full_name', `%${query}%`)
+    // Recherche interactive : un ensemble utile pour l'UI, pas toute la table — distinct de
+    // la future pagination de la liste Contacts (P2.2.1, hors périmètre de ce champ).
+    .limit(30)
   if (role) q = q.contains('contact_role', [role])
   const { data, error } = await q
   if (error) throw error
   return sortByLastName(data as ClientListItem[])
+}
+
+// Sous-ensemble léger utilisé par les pickers de contact (ex. sélection de contact sur un
+// RDV) — pas besoin des champs complets de Client pour un simple choix dans une liste.
+export type ClientPickerItem = Pick<Client, 'id' | 'full_name' | 'first_name' | 'email' | 'contact_role' | 'pipeline_stage'>
+
+export async function searchClientsForPicker(userId: string, query?: string): Promise<ClientPickerItem[]> {
+  let q = supabase
+    .from('clients')
+    .select('id, full_name, first_name, email, contact_role, pipeline_stage')
+    .eq('user_id', userId)
+    .is('archived_at', null)
+    .order('full_name')
+  q = query && query.length >= 2 ? q.ilike('full_name', `%${query}%`).limit(20) : q.limit(60)
+  const { data, error } = await q
+  if (error) throw error
+  return data as ClientPickerItem[]
 }
 
 export async function archiveClient(id: string) {

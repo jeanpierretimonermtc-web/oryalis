@@ -121,15 +121,30 @@ export function buildAppointmentRecapTemplate(params: {
   typeLabel: string
   needsIdentified?: string | null
   productsDiscussed?: string | null
+  // RÉCAP-6.1 — vraie commande liée au RDV (jamais déduite du résultat "Vente réalisée" ni des
+  // produits envisagés/considered=true — voir getOrdersForAppointment). `headerLabel` reflète le
+  // statut réel au moment de la génération ("Commande effectuée" ou "Commande retournée" — une
+  // commande annulée n'est jamais transmise ici, filtrée en amont par l'appelant). `bodyText` est
+  // déjà entièrement formaté (lignes produit + total éventuel, voir formatOrderProductsForRecap).
+  order?: { headerLabel: string; bodyText: string } | null
+  // RÉCAP-6 — phrase explicitement destinée au contact ("Je t'envoie la doc demain"), saisie
+  // manuellement dans le compositeur. Jamais préremplie depuis une tâche ou une relance interne
+  // (appointment_tasks/followups) — voir resolveClientFacingNextAppointment pour le prochain RDV,
+  // un concept distinct.
+  nextStep?: string | null
   // Prochain RDV proposé en fin de débrief — repris dans le récap quand renseigné, comme
   // dans le workflow réel observé chez les praticiennes ("récap + date du futur RDV,
-  // envoyés ensemble, immédiatement").
+  // envoyés ensemble, immédiatement"). RÉCAP-6 : la source de cette valeur est désormais unique
+  // (resolveClientFacingNextAppointment côté appelant) mais la forme et le texte générés ici
+  // sont inchangés, pour préserver les anciens cas fonctionnels (§16).
   nextAppointment?: { dateLabel: string; purpose: string } | null
 }): MessageTemplate {
-  const { dateLabel, typeLabel, needsIdentified, productsDiscussed, nextAppointment } = params
+  const { dateLabel, typeLabel, needsIdentified, productsDiscussed, order, nextStep, nextAppointment } = params
   const parts = [`Bonjour {prénom}, merci pour notre échange du ${dateLabel} (${typeLabel}).`]
   if (needsIdentified?.trim())   parts.push(`Ce qu'on a retenu :\n${needsIdentified.trim()}`)
   if (productsDiscussed?.trim()) parts.push(`Produits évoqués :\n${productsDiscussed.trim()}`)
+  if (order)                     parts.push(`${order.headerLabel} :\n${order.bodyText}`)
+  if (nextStep?.trim())          parts.push(`Prochaine étape :\n${nextStep.trim()}`)
   if (nextAppointment)           parts.push(`Je te propose qu'on se retrouve le ${nextAppointment.dateLabel} pour ${nextAppointment.purpose}.`)
   parts.push(`À bientôt !\n{mon_prénom}`)
   return {
@@ -143,17 +158,27 @@ export function buildAppointmentRecapTemplate(params: {
 
 // Résumé "copie de vos données" que le client peut demander à tout moment (RGPD) — ne
 // reprend que ce qui est client-facing par nature : intérêts, historique des dates/types
-// de RDV, produits recommandés. Jamais les notes internes, objections, données de santé,
-// pipeline ou température (Décision #7).
+// de RDV, commandes, prochain RDV réel, produits recommandés. Jamais les notes internes,
+// objections, données de santé, pipeline ou température (Décision #7).
 export function buildClientSummaryTemplate(params: {
   interests?: string[]
   appointments: { dateLabel: string; typeLabel: string }[]
   recommendations: { productName: string }[]
+  // PROFILE-SHARE-1 — déjà entièrement formaté par l'appelant (formatOrdersForClientSummary,
+  // features/orders/orderSummary.ts) à partir de la vraie table `orders`, jamais reconstruit
+  // depuis discussed_products/produits envisagés/le résultat "Vente réalisée".
+  ordersText?: string | null
+  // PROFILE-SHARE-1 — vrai RDV futur réellement enregistré (jamais une relance/tâche/date
+  // proposée non enregistrée) ; typeLabel est un type client-facing (ex. "Suivi"), même
+  // convention que les RDV passés ci-dessus.
+  nextAppointment?: { dateLabel: string; timeLabel: string; typeLabel: string } | null
 }): MessageTemplate {
-  const { interests, appointments, recommendations } = params
+  const { interests, appointments, recommendations, ordersText, nextAppointment } = params
   const parts = [`Bonjour {prénom}, comme tu me l'as demandé, voici un résumé de ce qui est noté dans ton suivi chez {mon_prénom}.`]
   if (interests?.length) parts.push(`Centres d'intérêt : ${interests.join(', ')}`)
   if (appointments.length) parts.push(`Rendez-vous :\n${appointments.map(a => `- ${a.dateLabel} — ${a.typeLabel}`).join('\n')}`)
+  if (ordersText?.trim()) parts.push(`Commandes :\n${ordersText.trim()}`)
+  if (nextAppointment) parts.push(`Prochain rendez-vous :\n- ${nextAppointment.dateLabel} à ${nextAppointment.timeLabel} — ${nextAppointment.typeLabel}`)
   if (recommendations.length) parts.push(`Produits recommandés :\n${recommendations.map(r => `- ${r.productName}`).join('\n')}`)
   parts.push(`Si tu remarques une erreur ou que tu veux que je supprime une information, dis-le-moi.\n{mon_prénom}`)
   return {

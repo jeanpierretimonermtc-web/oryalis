@@ -2,8 +2,7 @@ import { Platform } from 'react-native'
 import * as Linking from 'expo-linking'
 import { supabase } from '@/shared/lib/supabase'
 import type { Client } from '@/shared/lib/types'
-import { toggleFollowupDone } from '@/features/followups/followupService'
-import { markInteractionDone } from '@/features/interactions/interactionService'
+import { updateInteraction } from '@/features/interactions/interactionService'
 
 function requireSource(client: Client) {
   if (!client.next_action_source || !client.next_action_source_id) {
@@ -22,7 +21,10 @@ export type CompleteNextActionResult = {
 // est confirmé PUIS le RDV complété (appointmentService.completeAppointment), que le
 // RDV soit déjà completed (débrief affiché en lecture) ou pas encore (confirmation
 // suivie de la complétion). Aucune logique post-RDV n'est dupliquée ici.
-// Pour followup/interaction : délégation inchangée vers leur service dédié.
+// Pour une interaction : délégation inchangée vers son service dédié. Pour une relance :
+// ACTION-OUTCOME-1 / P1.1 — plus aucune clôture directe ici. La fiche Contact ouvre désormais
+// systématiquement FollowupCompletionModal (même moteur que les pages Relances) avant d'appeler
+// quoi que ce soit ; cette fonction n'est donc plus jamais invoquée pour source === 'followup'.
 export async function completeNextAction(client: Client): Promise<CompleteNextActionResult> {
   const { source, id } = requireSource(client)
 
@@ -31,22 +33,33 @@ export async function completeNextAction(client: Client): Promise<CompleteNextAc
   }
 
   if (source === 'interaction') {
-    await markInteractionDone(id)
+    // ACTION-OUTCOME-1 / P0 — même service que la page Interactions (updateInteraction),
+    // jamais un second moteur de clôture. Ce raccourci rapide depuis la fiche Contact reste
+    // volontairement sans résultat/compte-rendu (hors périmètre de ce lot, cf. §2/§41) :
+    // seul completed_at est renseigné, comme avant.
+    await updateInteraction(id, { completed_at: new Date().toISOString() })
     return
   }
 
-  await toggleFollowupDone(id, true)
+  // source === 'followup' : ne devrait structurellement plus jamais arriver (voir commentaire
+  // ci-dessus) — erreur explicite plutôt qu'une clôture silencieuse qui contournerait P1.
+  throw new Error('completeNextAction ne gère plus les relances : passer par FollowupCompletionModal.')
 }
 
-export async function postponeNextAction(client: Client, days = 1) {
+// Reporte la prochaine action à une date/heure choisie explicitement par l'utilisateur
+// (calendrier + heure) plutôt qu'un décalage fixe — l'utilisateur choisit le nouveau
+// moment plutôt que de subir un report systématique d'un jour.
+export async function rescheduleNextAction(client: Client, newDateTime: Date, durationMinutes?: number) {
   const { source, id } = requireSource(client)
-  if (!client.next_action_at) throw new Error('Cette action ne possède pas de date.')
-  const shifted = new Date(new Date(client.next_action_at).getTime() + days * 86400000)
+  const shifted = newDateTime
   let operation
   if (source === 'appointment') {
-    const { data, error } = await supabase.from('appointments').select('start_at, end_at').eq('id', id).single()
-    if (error) throw error
-    const duration = new Date(data.end_at).getTime() - new Date(data.start_at).getTime()
+    let duration = (durationMinutes ?? 0) * 60000
+    if (!duration) {
+      const { data, error } = await supabase.from('appointments').select('start_at, end_at').eq('id', id).single()
+      if (error) throw error
+      duration = new Date(data.end_at).getTime() - new Date(data.start_at).getTime()
+    }
     operation = supabase.from('appointments').update({
       start_at: shifted.toISOString(),
       end_at: new Date(shifted.getTime() + duration).toISOString(),

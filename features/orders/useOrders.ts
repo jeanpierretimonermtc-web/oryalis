@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchOrders, createOrder, deleteOrder, updateOrder, cancelOrder } from './orderService'
+import { fetchOrders, createOrder, deleteOrder, updateOrder, cancelOrder, isOrderNetRevenue } from './orderService'
 import type { OrderFilters, OrderInput, OrderEditInput, CreateOrderResult } from './orderService'
-import type { Order } from '@/shared/lib/types'
+import { fetchOrderItemsForOrders, computeOrderNetAmount } from './orderItemService'
+import type { OrderListItem } from '@/shared/lib/types'
 
 export function useOrders(filters: OrderFilters = {}) {
-  const [orders, setOrders]   = useState<Order[]>([])
+  const [orders, setOrders]   = useState<OrderListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
 
@@ -67,10 +68,27 @@ export function useOrders(filters: OrderFilters = {}) {
     }
   }, [])
 
-  // Une commande annulée n'a jamais été honorée — exclue du chiffre d'affaires affiché.
-  const totalAmount = orders
-    .filter(o => o.order_type !== 'personal' && !o.cancelled_at)
-    .reduce((sum, o) => sum + (o.amount ?? 0), 0)
+  // LRP-4.6 §6 — CA NET : une commande retournée avait été livrée puis reprise, elle ne compte
+  // plus dans le chiffre d'affaires réel malgré son statut "non annulée" (bug corrigé ici,
+  // isOrderNetRevenue étant désormais la seule définition de ce périmètre — reste un simple
+  // prédicat d'ÉLIGIBILITÉ, jamais un calcul de montant, §22 ORDER-BUSINESS-4.2).
+  // ORDER-BUSINESS-4.2 §12/§21 — le MONTANT, lui, doit désormais être NET des retours partiels :
+  // computeOrderNetAmount recalcule depuis les order_items structurés quand ils existent (sinon
+  // repli sur order.amount brut historique, §21 du rapport). Lecture GROUPÉE (une seule requête
+  // pour toutes les commandes éligibles, jamais un fetch par commande, §35) déclenchée à chaque
+  // changement de `orders` (chargement initial ET add/remove/update/cancel, qui appellent tous
+  // setOrders) — reproduit la même réactivité que l'ancien calcul synchrone, devenu asynchrone
+  // uniquement parce qu'il a désormais besoin des lignes.
+  const [totalAmount, setTotalAmount] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    const eligible = orders.filter(isOrderNetRevenue)
+    fetchOrderItemsForOrders(eligible.map(o => o.id)).then(itemsByOrder => {
+      if (cancelled) return
+      setTotalAmount(eligible.reduce((sum, o) => sum + computeOrderNetAmount(o, itemsByOrder.get(o.id)), 0))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [orders])
 
   return { orders, loading, error, reload: load, add, remove, update, cancel, totalAmount }
 }

@@ -252,7 +252,6 @@ export async function importCSVClients(
           first_name:   get(row, 'first_name') || null,
           email:        get(row, 'email') || null,
           phone:        get(row, 'phone') || null,
-          status:       normalizedStatus,
           contact_role: [normalizedRole],
           pipeline_stage: initialPipelineStage(normalizedStatus, normalizedRole),
           is_vip:            normalizedStatus === 'vip',

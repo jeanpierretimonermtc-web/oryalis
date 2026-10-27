@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useMemo } from 'react'
+import { useCallback, useRef, useMemo, useState } from 'react'
 import {
   ScrollView,
   View,
@@ -11,23 +11,26 @@ import {
 } from 'react-native'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
-import { Bell, Calendar, CheckCircle2, Flame, RefreshCw, AlertTriangle, ClipboardX, UserMinus, ChevronRight, User } from 'lucide-react-native'
+import { Bell, Calendar, Flame, RefreshCw, AlertTriangle, ClipboardX, UserMinus, ChevronRight, User, MessageCircle } from 'lucide-react-native'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { useDemoState } from '@/features/demo/DemoProvider'
 import {
   useDashboardStats,
   usePipelineStats,
   useMonthlyRevenue,
   useAlerts,
   useDailyActions,
+  useUrgencyCounts,
   buildTopPriorities,
   DAILY_PRIORITY,
 } from '@/features/dashboard/useDashboard'
-import type { DailyActionItem, DailyActionKind } from '@/features/dashboard/useDashboard'
+import type { DailyActionItem, DailyActionKind, PersonalEventItem } from '@/features/dashboard/useDashboard'
 import { useGoals } from '@/features/goals/useGoals'
+import { useMlmTrackingSummary } from '@/features/catalogs/useMlmTracking'
+import { formatMlmValue } from '@/features/catalogs/mlmTrackingService'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useUpcomingAppointments } from '@/features/appointments/useAppointments'
-import { usePendingFollowups } from '@/features/followups/useFollowups'
+import { useOverdueFollowupCount } from '@/features/followups/useFollowups'
+import { ContactsExamplePreview } from '@/features/clients/ContactsExamplePreview'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Avatar } from '@/shared/components/ui/Avatar'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
@@ -42,13 +45,6 @@ import { formatDate } from '@/shared/lib/dateFormat'
 function useLocale() {
   const { i18n } = useTranslation()
   return i18n.language === 'fr' ? 'fr-FR' : 'en-US'
-}
-
-function formatLocalDate(date: Date) {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
 }
 
 // ── Quick card ────────────────────────────────────────────────────────────────
@@ -179,6 +175,7 @@ function PipelineStrip({ byStage }: { byStage: Record<string, number> }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const { getPipelineStageLabel } = useAppConfig()
 
   const pills = PIPELINE_ORDER.map((stage) => ({ stage, count: byStage[stage] ?? 0 })).filter(
     (p) => p.count > 0,
@@ -217,7 +214,7 @@ function PipelineStrip({ byStage }: { byStage: Record<string, number> }) {
             >
               <Text style={[styles.pipelinePillCount, { color: sc.text }]}>{count}</Text>
               <Text style={[styles.pipelinePillLabel, { color: sc.text }]}>
-                {t(`pipeline_stages.${stage}`)}
+                {getPipelineStageLabel(stage)}
               </Text>
             </TouchableOpacity>
           )
@@ -236,16 +233,22 @@ const DAILY_ORDER: DailyActionKind[] = (Object.keys(DAILY_PRIORITY) as DailyActi
 // Une icône et une couleur d'accent par catégorie — pour que chaque groupe se
 // distingue au premier coup d'œil sans avoir à lire le libellé.
 const DAILY_ICON: Record<DailyActionKind, typeof Bell> = {
-  overdue_followup: Bell, today_appointment: Calendar, today_action: CheckCircle2,
+  overdue_followup: Bell, overdue_appointment: Calendar, overdue_interaction: MessageCircle,
+  today_appointment: Calendar, today_followup: Bell, today_interaction: MessageCircle,
   overdue_task: AlertTriangle, hot_prospect: Flame, incomplete_appointment: ClipboardX,
   at_risk_client: UserMinus, renewal: RefreshCw,
 }
 // Libellé du bouton d'action principal de "Priorités du jour" — spécifique au type d'élément
 // (une tâche en retard n'a pas de "fiche RDV"), jamais un seul mot générique pour tous les cas.
+// Les interactions n'ont pas de fiche dédiée : on réutilise view_detail (fiche contact), comme
+// pour hot_prospect/at_risk_client/renewal.
 const PRIMARY_ACTION_LABEL_KEY: Record<DailyActionKind, string> = {
   overdue_followup: 'dashboard.view_followup',
+  overdue_appointment: 'dashboard.view_appointment',
+  overdue_interaction: 'dashboard.view_detail',
   today_appointment: 'dashboard.view_appointment',
-  today_action: 'dashboard.view_detail',
+  today_followup: 'dashboard.view_followup',
+  today_interaction: 'dashboard.view_detail',
   overdue_task: 'dashboard.view_task',
   hot_prospect: 'dashboard.view_detail',
   incomplete_appointment: 'dashboard.view_appointment',
@@ -255,10 +258,11 @@ const PRIMARY_ACTION_LABEL_KEY: Record<DailyActionKind, string> = {
 function dailyAccent(kind: DailyActionKind, colors: ThemeColors) {
   switch (kind) {
     case 'overdue_followup':
+    case 'overdue_appointment':
+    case 'overdue_interaction':
     case 'overdue_task':          return { fg: colors.danger, bg: colors.dangerLight }
     case 'hot_prospect':          return { fg: colors.warning, bg: colors.warningLight }
     case 'renewal':               return { fg: colors.secondary, bg: colors.secondaryLight }
-    case 'today_action':
     case 'incomplete_appointment':
     case 'at_risk_client':        return { fg: colors.tertiary, bg: colors.tertiaryLight }
     default:                      return { fg: colors.primary, bg: colors.primaryLight }
@@ -390,6 +394,74 @@ function DailyActionCenter({ items, hasAnyToday, loading }: { items: DailyAction
   </View>
 }
 
+// ── DASH/CAL-2 / DASH/CAL-2.2 — Agenda personnel (événements externes d'aujourd'hui et
+// demain, jamais une action CRM) ── Zone volontairement neutre : jamais de rouge/orange,
+// jamais "EN RETARD", jamais de CTA vers une fiche RDV/contact/pipeline — uniquement
+// informatif. Un clic renvoie vers l'Agenda existant (sans paramètre : la vue s'ouvre déjà
+// sur "aujourd'hui" par défaut), jamais une nouvelle route/fiche.
+function PersonalAgendaBlock({ events, loading }: { events: PersonalEventItem[]; loading: boolean }) {
+  const { t } = useTranslation()
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const locale = useLocale()
+  // DASH/CAL-2.1 §18 — état local uniquement (replié à chaque ouverture du Dashboard),
+  // jamais persisté (ni DB ni localStorage).
+  const [isOpen, setIsOpen] = useState(false)
+  if (loading || events.length === 0) return null
+
+  // DASH/CAL-2.2 §9-11 — regroupement par jour calendaire local (jamais une seule liste
+  // chronologique mêlée) : la requête ne couvre déjà qu'aujourd'hui+demain (useDashboard.ts),
+  // donc tout ce qui n'est pas "aujourd'hui" ici est nécessairement "demain". Tri chronologique
+  // dans chaque section, section vide entièrement omise (jamais un en-tête sans ligne).
+  const todayKey = new Date().toDateString()
+  const byDay = (list: PersonalEventItem[]) => list.slice().sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime())
+  const todayEvents    = byDay(events.filter(ev => new Date(ev.start_at).toDateString() === todayKey))
+  const tomorrowEvents = byDay(events.filter(ev => new Date(ev.start_at).toDateString() !== todayKey))
+
+  return (
+    <View style={styles.personalAgenda}>
+      <TouchableOpacity
+        style={styles.personalAgendaHeader}
+        onPress={() => setIsOpen(o => !o)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: isOpen }}
+      >
+        <View style={styles.personalAgendaIconBox}>
+          <Calendar size={13} color={colors.textSecondary} strokeWidth={2.2} />
+        </View>
+        <Text style={styles.personalAgendaTitle}>{t('dashboard.personal_agenda_title')} · {events.length}</Text>
+        {/* Même convention chevron que catalog/protocols.tsx : glyphe ▶ rotaté, pas de nouvelle
+            icône/dépendance. */}
+        <Text style={[styles.personalAgendaChevron, isOpen && styles.personalAgendaChevronOpen]}>▶</Text>
+      </TouchableOpacity>
+      {isOpen && (
+        <>
+          {[
+            { key: 'today', label: t('followups.today'), items: todayEvents },
+            { key: 'tomorrow', label: t('followups.tomorrow'), items: tomorrowEvents },
+          ].map(section => section.items.length === 0 ? null : (
+            <View key={section.key} style={styles.personalAgendaSection}>
+              <Text style={styles.personalAgendaSectionTitle}>{section.label}</Text>
+              {section.items.map(ev => (
+                <View key={ev.id} style={styles.personalAgendaRow}>
+                  <Text style={styles.personalAgendaTime}>
+                    {new Date(ev.start_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                  <Text style={styles.personalAgendaEventTitle} numberOfLines={1}>{ev.title}</Text>
+                </View>
+              ))}
+            </View>
+          ))}
+          <TouchableOpacity onPress={() => router.push('/(app)/appointments' as any)} activeOpacity={0.7}>
+            <Text style={styles.personalAgendaLink}>{t('dashboard.view_calendar')}</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  )
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export default function DashboardScreen() {
   const { t } = useTranslation()
@@ -398,16 +470,19 @@ export default function DashboardScreen() {
   const { session } = useAuth()
   const { width } = useWindowDimensions()
   const isWide = width >= 768
+  const locale = useLocale()
 
   const { stats, loading: statsLoading, refresh: refreshStats } = useDashboardStats()
   const { loading: apptLoading, refresh: refreshAppts } = useUpcomingAppointments(10)
-  const { followups, loading: fuLoading, refresh: refreshFu } = usePendingFollowups()
+  const { count: overdueFollowupCount, loading: fuLoading, refresh: refreshFu } = useOverdueFollowupCount()
   const { byStage, refresh: refreshPipeline } = usePipelineStats()
   const { amount: monthRevenue, refresh: refreshRevenue } = useMonthlyRevenue()
   const { reload: refreshAlerts } = useAlerts()
   const { goals } = useGoals()
+  const { metrics: mlmMetrics, loading: mlmLoading, reload: refreshMlm } = useMlmTrackingSummary(session?.user.id)
   const { isModuleActive } = useAppConfig()
-  const { items: dailyActions, loading: dailyLoading, refresh: refreshDaily } = useDailyActions()
+  const { items: dailyActions, personalEvents, loading: dailyLoading, refresh: refreshDaily } = useDailyActions()
+  const { counts: urgency, refresh: refreshUrgency } = useUrgencyCounts()
 
   // "Priorités du jour" (top 6, dédupliqué) et "À faire aujourd'hui" (tout le reste, par
   // catégorie) ne doivent jamais montrer le même élément deux fois — le second exclut
@@ -418,6 +493,15 @@ export default function DashboardScreen() {
     return dailyActions.filter(item => !shown.has(item.id))
   }, [dailyActions, topPriorities])
 
+  // DASH/CAL-2 §15-17 — "Actions du jour" = ressources CRM concrètes dues AUJOURD'HUI
+  // uniquement (jamais les retards, déjà visibles dans "Priorités du jour" ; jamais les
+  // signaux commerciaux ; jamais les événements Google). Réutilise dailyActions déjà chargé,
+  // aucune requête supplémentaire.
+  const actionsTodayCount = useMemo(
+    () => dailyActions.filter(i => i.kind === 'today_appointment' || i.kind === 'today_followup' || i.kind === 'today_interaction').length,
+    [dailyActions]
+  )
+
   const firstName = session?.user?.user_metadata?.full_name?.split(' ')[0] ?? ''
   const hour = new Date().getHours()
   const greeting =
@@ -427,18 +511,6 @@ export default function DashboardScreen() {
         ? t('dashboard.greeting_afternoon')
         : t('dashboard.greeting_evening')
 
-  const {
-    demoCount,
-    demoLoading,
-    demoFailed,
-    demoVersion,
-    hideDemoCard,
-    checkDemo,
-    handleLoadDemo,
-    handleDeleteDemo,
-    handleResetDemo,
-  } = useDemoState()
-
   function refreshAll() {
     refreshStats()
     refreshAppts()
@@ -447,38 +519,39 @@ export default function DashboardScreen() {
     refreshRevenue()
     refreshAlerts()
     refreshDaily()
+    refreshMlm()
+    refreshUrgency()
   }
+
+  // Chacun des 7 hooks ci-dessus se charge déjà lui-même au montage (son propre
+  // useEffect(() => fetch(), [fetch])) — useFocusEffect() se déclenche AUSSI
+  // immédiatement au montage (un écran qui vient d'apparaître est déjà "focus" pour
+  // React Navigation/Expo Router), ce qui relançait tout refreshAll() une seconde fois
+  // en doublon exact du chargement initial. isFirstFocus ignore uniquement ce premier
+  // déclenchement — tout retour réel sur l'écran (navigation, pull-to-refresh via
+  // onRefresh plus bas, qui n'est pas concerné par ce garde) continue de rafraîchir
+  // normalement.
+  const isFirstFocus = useRef(true)
 
   useFocusEffect(
     useCallback(() => {
-      refreshAll()
-      checkDemo()
+      if (isFirstFocus.current) {
+        isFirstFocus.current = false
+      } else {
+        refreshAll()
+      }
     }, []), // eslint-disable-line react-hooks/exhaustive-deps
   )
 
-  const mountedVersion = useRef(demoVersion)
-
-  useEffect(() => {
-    if (demoVersion !== mountedVersion.current) {
-      refreshAll()
-    }
-  }, [demoVersion]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!statsLoading) checkDemo()
-  }, [statsLoading]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const showLoadDemo = !statsLoading && stats.totalClients === 0
-  const showDemoActive = !statsLoading && demoCount > 0
-  const showDemoLink = !statsLoading && stats.totalClients > 0 && demoCount === 0
-
-  const now = new Date()
-  const todayStr = formatLocalDate(now)
-  const overdueToday = followups.filter((f) => f.due_date <= todayStr)
-
-
   const activePct =
     stats.totalClients > 0 ? Math.round((stats.activeClients / stats.totalClients) * 100) : 0
+
+  // ORDER-BUSINESS-3.6 §29 — seules les métriques à net NON NUL sur le mois en cours sont
+  // affichées (une valeur à 0 n'apporte rien à une vue synthétique) ; §28 — plafonné à 3 pour ne
+  // jamais transformer le dashboard en tableau MLM, le reste résumé par un compteur "+N autres".
+  const mlmMetricsWithNet = useMemo(() => mlmMetrics.filter(m => m.net !== 0), [mlmMetrics])
+  const mlmMetricsShown = mlmMetricsWithNet.slice(0, 3)
+  const mlmMetricsMoreCount = mlmMetricsWithNet.length - mlmMetricsShown.length
 
   return (
     <>
@@ -522,69 +595,56 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        {/* ── Demo active ───────────────────────────────── */}
-        {showDemoActive && (
-          <View style={styles.demoBanner}>
-            <Text style={styles.demoBannerText}>🧪 {t('dashboard.demo_active')}</Text>
-
-            <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-              {demoLoading ? (
-                <ActivityIndicator size="small" color={colors.textSecondary} />
-              ) : (
-                <>
-                  <TouchableOpacity onPress={handleResetDemo} activeOpacity={0.7}>
-                    <Text style={styles.demoBannerReset}>{t('dashboard.demo_reset')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleDeleteDemo} activeOpacity={0.7}>
-                    <Text style={styles.demoBannerDelete}>{t('dashboard.demo_delete')}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        )}
-
-        {!hideDemoCard && !showDemoActive && (
-          <>
-            {showLoadDemo && (
-              <View style={styles.demoCard}>
-                <View style={styles.demoCardLeft}>
-                  <Text style={styles.demoCardTitle}>{t('dashboard.demo_title')}</Text>
-                  <Text style={styles.demoCardSub}>{t('dashboard.demo_subtitle')}</Text>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.demoLoadBtn}
-                  onPress={handleLoadDemo}
-                  activeOpacity={0.8}
-                  disabled={demoLoading}
-                >
-                  {demoLoading ? (
-                    <ActivityIndicator size="small" color="#ffffff" />
-                  ) : (
-                    <Text style={styles.demoLoadBtnText}>{t('dashboard.demo_load')}</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {showDemoLink && (
-              <TouchableOpacity
-                style={styles.demoLink}
-                onPress={handleLoadDemo}
-                disabled={demoLoading}
-                activeOpacity={0.7}
-              >
-                {demoLoading ? (
-                  <ActivityIndicator size="small" color={colors.textSecondary} />
-                ) : (
-                  <Text style={styles.demoLinkText}>🧪 {t('dashboard.demo_load')}</Text>
-                )}
-              </TouchableOpacity>
-            )}
-
-            {demoFailed ? <Text style={styles.demoErrorText}>{t('common.error')}</Text> : null}
-          </>
+        {/* ── DASH-URGENCY-1 — compteurs d'urgence (contacts), cliquables vers la liste
+            Contacts filtrée sur exactement la même fenêtre. Les compteurs de volume restent
+            plus bas. ─────────────────────────────────── */}
+        {/* EMPTY-EXAMPLES-1 — compte sans aucun contact : aperçu d'exemple à la place de 4
+            compteurs d'urgence tous à zéro (qui n'apprendraient rien à un nouvel utilisateur). */}
+        {!statsLoading && stats.totalClients === 0 ? (
+          <ContactsExamplePreview compact={!isWide} />
+        ) : (
+        <View style={[styles.kpiGrid, isWide && styles.kpiGridWide]}>
+          <KpiCard
+            wide={isWide}
+            icon="⏰"
+            value={urgency.overdue}
+            label={t('dashboard.urgency.overdue')}
+            delta={t('dashboard.urgency.overdue_hint')}
+            accent={urgency.overdue > 0 ? colors.danger : colors.textTertiary}
+            bg={urgency.overdue > 0 ? colors.dangerLight : colors.bgDim}
+            onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'todo', horizon: 'overdue' } } as any)}
+          />
+          <KpiCard
+            wide={isWide}
+            icon="📍"
+            value={urgency.due_today}
+            label={t('dashboard.urgency.due_today')}
+            delta={t('dashboard.urgency.due_today_hint')}
+            accent={urgency.due_today > 0 ? colors.warning : colors.textTertiary}
+            bg={urgency.due_today > 0 ? colors.warningLight : colors.bgDim}
+            onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'todo', horizon: 'due_today' } } as any)}
+          />
+          <KpiCard
+            wide={isWide}
+            icon="🗓️"
+            value={urgency.next_7d}
+            label={t('dashboard.urgency.next_7d')}
+            delta={t('dashboard.urgency.next_7d_hint')}
+            accent={colors.primary}
+            bg={colors.primaryLight}
+            onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'todo', horizon: 'next_7d' } } as any)}
+          />
+          <KpiCard
+            wide={isWide}
+            icon="💤"
+            value={urgency.no_action}
+            label={t('dashboard.urgency.no_action')}
+            delta={t('dashboard.urgency.no_action_hint')}
+            accent={urgency.no_action > 0 ? colors.textSecondary : colors.textTertiary}
+            bg={colors.bgDim}
+            onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'none' } } as any)}
+          />
+        </View>
         )}
 
         {/* ── Priorités du jour (condensé, dédupliqué) ──── */}
@@ -592,6 +652,9 @@ export default function DashboardScreen() {
 
         {/* ── Détail par catégorie ──────────────────────── */}
         <DailyActionCenter items={remainingActions} hasAnyToday={dailyActions.length > 0} loading={dailyLoading} />
+
+        {/* ── DASH/CAL-2 — Agenda personnel (jamais mêlé aux actions CRM) ─── */}
+        <PersonalAgendaBlock events={personalEvents} loading={dailyLoading} />
 
         {/* ── KPI principaux ────────────────────────────── */}
         <View style={[styles.kpiGrid, isWide && styles.kpiGridWide]}>
@@ -627,19 +690,19 @@ export default function DashboardScreen() {
             value={stats.pendingFollowups}
             label={t('dashboard.stats.pending_followups')}
             delta={
-              overdueToday.length > 0
-                ? `${overdueToday.length} ${t('dashboard.kpi.overdue')}`
+              overdueFollowupCount > 0
+                ? `${overdueFollowupCount} ${t('dashboard.kpi.overdue')}`
                 : t('dashboard.kpi.active_pct', { pct: activePct })
             }
-            accent={overdueToday.length > 0 ? colors.danger : colors.warning}
-            bg={overdueToday.length > 0 ? colors.dangerLight : colors.warningLight}
+            accent={overdueFollowupCount > 0 ? colors.danger : colors.warning}
+            bg={overdueFollowupCount > 0 ? colors.dangerLight : colors.warningLight}
             onPress={() => router.push('/(app)/followups')}
           />
 
           <KpiCard
             wide={isWide}
             icon="💬"
-            value={stats.interactionsToday}
+            value={actionsTodayCount}
             label={t('dashboard.stats.interactions_today')}
             delta={t('dashboard.kpi.today_delta')}
             accent={colors.tertiary}
@@ -709,6 +772,34 @@ export default function DashboardScreen() {
             }
           />
         </View>
+
+        {/* ── ORDER-BUSINESS-3.6 §27/§28/§29 — Suivi MLM (mois en cours, jusqu'à 3 métriques
+            à net non nul) ─────────────────────────────── */}
+        {!mlmLoading && mlmMetricsWithNet.length > 0 && (
+          <View style={styles.section}>
+            <SectionHeader
+              title={t('dashboard.mlm_tracking_title')}
+              onMore={() => router.push('/(app)/mlm-tracking' as any)}
+            />
+            <View style={styles.listCard}>
+              {mlmMetricsShown.map((m, i) => (
+                <View key={m.key}>
+                  {i > 0 && <View style={styles.divider} />}
+                  <View style={styles.mlmRow}>
+                    <Text style={styles.mlmLabel}>{m.label}</Text>
+                    <Text style={styles.mlmValue}>{formatMlmValue(m.net, locale)}</Text>
+                  </View>
+                </View>
+              ))}
+              {mlmMetricsMoreCount > 0 ? (
+                <>
+                  <View style={styles.divider} />
+                  <Text style={styles.mlmMoreText}>{t('dashboard.mlm_tracking_more', { count: mlmMetricsMoreCount })}</Text>
+                </>
+              ) : null}
+            </View>
+          </View>
+        )}
 
         {/* ── Objectifs du mois ─────────────────────────── */}
         {isModuleActive('goals') && goals.length > 0 && (
@@ -1095,97 +1186,6 @@ function makeStyles(colors: ThemeColors) {
       marginTop: 4,
     },
 
-    demoCard: {
-      backgroundColor: colors.primaryLight,
-      borderRadius: 16,
-      padding: 16,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      borderWidth: 1,
-      borderColor: colors.primaryLighter,
-    },
-
-    demoCardLeft: {
-      flex: 1,
-      gap: 3,
-    },
-
-    demoCardTitle: {
-      fontSize: 14,
-      fontFamily: fonts.semibold,
-      color: colors.primary,
-    },
-
-    demoCardSub: {
-      fontSize: 12,
-      fontFamily: fonts.body,
-      color: colors.textSecondary,
-      lineHeight: 17,
-    },
-
-    demoLoadBtn: {
-      backgroundColor: colors.primaryAction,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 10,
-      minWidth: 80,
-      alignItems: 'center',
-    },
-
-    demoLoadBtnText: {
-      fontSize: 13,
-      fontFamily: fonts.semibold,
-      color: '#ffffff',
-    },
-
-    demoBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: colors.surfaceContainerLow,
-      borderRadius: 12,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-
-    demoBannerText: {
-      fontSize: 13,
-      fontFamily: fonts.medium,
-      color: colors.textSecondary,
-    },
-
-    demoBannerReset: {
-      fontSize: 13,
-      fontFamily: fonts.medium,
-      color: colors.primary,
-    },
-
-    demoBannerDelete: {
-      fontSize: 13,
-      fontFamily: fonts.medium,
-      color: colors.danger,
-    },
-
-    demoLink: {
-      alignSelf: 'flex-start',
-      paddingVertical: 4,
-    },
-
-    demoLinkText: {
-      fontSize: 12,
-      fontFamily: fonts.medium,
-      color: colors.textTertiary,
-    },
-
-    demoErrorText: {
-      fontSize: 13,
-      fontFamily: fonts.medium,
-      color: colors.danger,
-    },
-
     actionCenter: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 18, gap: 16 },
     actionCenterHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     actionCenterTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text },
@@ -1200,6 +1200,24 @@ function makeStyles(colors: ThemeColors) {
     actionRowText: { flex: 1 }, actionClient: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
     actionDetail: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 2 },
     actionMore: { textAlign: 'center', fontSize: 12, color: colors.textTertiary, paddingTop: 4 },
+
+    // ── DASH/CAL-2 / DASH/CAL-2.1 — Agenda personnel : bloc secondaire, repliable, jamais
+    // danger/warning/primary (aucune notion d'urgence CRM ici). Header seul cliquable (zone
+    // tactile suffisante via paddingVertical), contenu masqué tant que isOpen est false.
+    personalAgenda: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 4 },
+    personalAgendaHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+    personalAgendaIconBox: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgDim },
+    personalAgendaTitle: { flex: 1, fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+    personalAgendaChevron: { fontSize: 11, color: colors.textTertiary },
+    personalAgendaChevronOpen: { transform: [{ rotate: '90deg' }] },
+    // DASH/CAL-2.2 §9 — sépare visuellement "Aujourd'hui"/"Demain", typographie secondaire
+    // discrète (jamais un header aussi fort que le titre du bloc).
+    personalAgendaSection: { marginTop: 8 },
+    personalAgendaSectionTitle: { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+    personalAgendaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, marginTop: 6, borderTopWidth: 1, borderTopColor: colors.border },
+    personalAgendaTime: { fontSize: 13, fontFamily: fonts.semibold, color: colors.textSecondary, width: 48 },
+    personalAgendaEventTitle: { flex: 1, fontSize: 13.5, fontFamily: fonts.body, color: colors.textSecondary },
+    personalAgendaLink: { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.textSecondary, marginTop: 8, textAlign: 'center' },
 
     topPriorities: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 18, gap: 12 },
     topPrioritiesTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text, marginBottom: 2 },
@@ -1271,6 +1289,36 @@ function makeStyles(colors: ThemeColors) {
       textTransform: 'uppercase',
       letterSpacing: 0.4,
       opacity: 0.85,
+    },
+
+    mlmRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      gap: 12,
+    },
+
+    mlmLabel: {
+      fontSize: 14,
+      fontFamily: fonts.medium,
+      color: colors.text,
+      flex: 1,
+    },
+
+    mlmValue: {
+      fontSize: 18,
+      fontFamily: fonts.display,
+      color: colors.primary,
+    },
+
+    mlmMoreText: {
+      fontSize: 12,
+      fontFamily: fonts.medium,
+      color: colors.textTertiary,
+      textAlign: 'center',
+      paddingVertical: 10,
     },
 
     goalRow: {

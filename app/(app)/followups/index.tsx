@@ -1,9 +1,13 @@
 import { useState, useCallback, useMemo } from 'react'
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, Modal } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
+import { useAuth } from '@/features/auth/AuthProvider'
 import { usePendingFollowups } from '@/features/followups/useFollowups'
-import { toggleFollowupDone, computeFollowupPriority } from '@/features/followups/followupService'
+import { computeFollowupPriority } from '@/features/followups/followupService'
+import { FollowupCompletionModal } from '@/features/followups/FollowupCompletionModal'
+import { OpenActionLink } from '@/shared/components/ui/OpenActionLink'
+import { CompleteToggle } from '@/shared/components/ui/CompleteToggle'
 import { useFollowupBadge } from '@/features/notifications/useNotifications'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { useTheme } from '@/shared/theme/ThemeProvider'
@@ -70,78 +74,102 @@ function FollowupCard({ f, today, onRequestDone }: {
 
   const scorePalette = getScorePalette(f._score, colors)
 
+  // UI-AFFORDANCE-1.3 — la carte n'est plus elle-même un TouchableOpacity (elle contient un
+  // vrai bouton imbriqué, CompleteToggle : deux <button> HTML imbriqués sont invalides et
+  // provoquent une erreur d'hydratation sur web). La carte est désormais un simple View ; la
+  // navigation reste exactement la même, portée par deux Pressable FRÈRES de CompleteToggle
+  // (jamais un parent commun interactif) qui couvrent la même zone visuelle qu'avant.
+  const goToContact = () => router.push(`/(app)/clients/${f.client_id}/followups` as any)
+
   return (
-    <TouchableOpacity
-      style={[styles.card, isOverdue && styles.cardOverdue]}
-      onPress={() => router.push(`/(app)/clients/${f.client_id}/followups`)}
-      activeOpacity={0.75}
-    >
-      {/* ── Row 1 : avatar + name + badges ── */}
+    <View style={[styles.card, isOverdue && styles.cardOverdue]}>
+      {/* ── Row 1 : avatar + name + badges (ouvrable) + Terminer (frère, jamais imbriqué) ── */}
       <View style={styles.row1}>
-        <View style={[styles.avatar, { backgroundColor: scorePalette.bg }]}>
-          <Text style={[styles.avatarText, { color: scorePalette.text }]}>
-            {initials(f.client?.full_name ?? '?')}
-          </Text>
-        </View>
+        <TouchableOpacity
+          style={styles.row1Content}
+          onPress={goToContact}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel={`${t('common.open')} ${f.title ?? f.content ?? ''}`}
+        >
+          <View style={[styles.avatar, { backgroundColor: scorePalette.bg }]}>
+            <Text style={[styles.avatarText, { color: scorePalette.text }]}>
+              {initials(f.client?.full_name ?? '?')}
+            </Text>
+          </View>
 
-        <View style={styles.nameBlock}>
-          <Text style={styles.clientName} numberOfLines={1}>{f.client?.full_name}</Text>
-        </View>
+          <View style={styles.nameBlock}>
+            <Text style={styles.clientName} numberOfLines={1}>{f.client?.full_name}</Text>
+          </View>
 
-        <View style={styles.badgesRow}>
-          {/* Score */}
-          {f._score > 0 && (
-            <View style={[styles.badge, { backgroundColor: scorePalette.bg }]}>
-              <Text style={[styles.badgeText, { color: scorePalette.text }]}>{f._score}</Text>
+          <View style={styles.badgesRow}>
+            {/* Score */}
+            {f._score > 0 && (
+              <View style={[styles.badge, { backgroundColor: scorePalette.bg }]}>
+                <Text style={[styles.badgeText, { color: scorePalette.text }]}>{f._score}</Text>
+              </View>
+            )}
+            {/* Temperature */}
+            {f.prospect_temperature ? (
+              <Text style={styles.tempEmoji}>{TEMP_EMOJI[f.prospect_temperature] ?? ''}</Text>
+            ) : null}
+            {/* AUTO */}
+            {f.auto_generated ? (
+              <View style={[styles.badge, { backgroundColor: colors.secondaryLight }]}>
+                <Text style={[styles.badgeText, { color: colors.secondary }]}>{t('followups.auto_badge')}</Text>
+              </View>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+
+        {/* UI-AFFORDANCE-1.2 — action métier explicite (jamais un simple carré ambigu) ; cette
+            page ne liste que des relances actives (usePendingFollowups filtre done=false), donc
+            toujours l'état "Terminer", jamais "Terminée" ici. */}
+        <CompleteToggle
+          done={false}
+          onPress={onRequestDone}
+          activeLabel={t('clients.finish_action')}
+          doneLabel={t('followups.done')}
+          accentColor={isOverdue ? colors.danger : colors.primary}
+          accessibilityLabel={`${t('clients.finish_action')} — ${f.client?.full_name ?? ''}`}
+        />
+      </View>
+
+      {/* ── Reste de la carte (titre/produit/méta), même zone ouvrable qu'avant ── */}
+      <TouchableOpacity onPress={goToContact} activeOpacity={0.75}>
+        {/* ── Row 2 : task title ── */}
+        {(f.title ?? f.content) ? (
+          <Text style={styles.taskTitle} numberOfLines={2}>{f.title ?? f.content}</Text>
+        ) : null}
+
+        {/* ── Row 3 : product context ── */}
+        {f.product_context ? (
+          <View style={styles.productRow}>
+            <Text style={styles.productIcon}>📦</Text>
+            <Text style={styles.productText} numberOfLines={1}>{f.product_context}</Text>
+          </View>
+        ) : null}
+
+        {/* ── Row 4 : date + overdue badge + created ── */}
+        <View style={styles.metaRow}>
+          <View style={styles.dateChip}>
+            <Text style={styles.dateIcon}>📅</Text>
+            <Text style={[styles.dateText, { color: isOverdue ? colors.danger : isToday ? colors.secondary : colors.textSecondary }]}>
+              {dateLabel}
+            </Text>
+          </View>
+          {isOverdue && (
+            <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
+              <Text style={[styles.badgeText, { color: colors.danger }]}>{t('followups.overdue_badge')}</Text>
             </View>
           )}
-          {/* Temperature */}
-          {f.prospect_temperature ? (
-            <Text style={styles.tempEmoji}>{TEMP_EMOJI[f.prospect_temperature] ?? ''}</Text>
-          ) : null}
-          {/* AUTO */}
-          {f.auto_generated ? (
-            <View style={[styles.badge, { backgroundColor: colors.secondaryLight }]}>
-              <Text style={[styles.badgeText, { color: colors.secondary }]}>{t('followups.auto_badge')}</Text>
-            </View>
-          ) : null}
+          <Text style={styles.createdText}>{t('followups.created_days', { days: daysOld })}</Text>
+          {/* UI-AFFORDANCE-1 — toute cette zone navigue déjà vers la fiche Relances du contact
+              au clic : décoratif (interactive=false), jamais un second déclencheur. */}
+          <OpenActionLink label={t('common.open')} interactive={false} style={styles.openLink} />
         </View>
-
-        {/* Done button */}
-        <TouchableOpacity style={styles.doneBtn} onPress={onRequestDone} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <View style={[styles.doneCircle, { borderColor: isOverdue ? colors.danger : colors.primary }]} />
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Row 2 : task title ── */}
-      {(f.title ?? f.content) ? (
-        <Text style={styles.taskTitle} numberOfLines={2}>{f.title ?? f.content}</Text>
-      ) : null}
-
-      {/* ── Row 3 : product context ── */}
-      {f.product_context ? (
-        <View style={styles.productRow}>
-          <Text style={styles.productIcon}>📦</Text>
-          <Text style={styles.productText} numberOfLines={1}>{f.product_context}</Text>
-        </View>
-      ) : null}
-
-      {/* ── Row 4 : date + overdue badge + created ── */}
-      <View style={styles.metaRow}>
-        <View style={styles.dateChip}>
-          <Text style={styles.dateIcon}>📅</Text>
-          <Text style={[styles.dateText, { color: isOverdue ? colors.danger : isToday ? colors.secondary : colors.textSecondary }]}>
-            {dateLabel}
-          </Text>
-        </View>
-        {isOverdue && (
-          <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
-            <Text style={[styles.badgeText, { color: colors.danger }]}>{t('followups.overdue_badge')}</Text>
-          </View>
-        )}
-        <Text style={styles.createdText}>{t('followups.created_days', { days: daysOld })}</Text>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </View>
   )
 }
 
@@ -152,6 +180,7 @@ export default function FollowupsScreen() {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const TAB_CONFIG = useMemo(() => getTabConfig(colors), [colors])
+  const { session } = useAuth()
   const { followups, loading, refresh } = usePendingFollowups()
   const [activeTab, setActiveTab] = useState<Tab>('overdue')
   const { width } = useWindowDimensions()
@@ -182,20 +211,11 @@ export default function FollowupsScreen() {
   const tabs: Tab[] = ['overdue', 'today', 'upcoming']
   const counts = { overdue: overdue.length, today: dueToday.length, upcoming: upcoming.length }
 
-  const [confirmDone, setConfirmDone] = useState<(FollowupWithClient & { _score: number }) | null>(null)
-  const [confirming,  setConfirming]  = useState(false)
-
-  async function handleConfirmDone() {
-    if (!confirmDone) return
-    setConfirming(true)
-    try {
-      await toggleFollowupDone(confirmDone.id, true)
-      await refresh()
-      setConfirmDone(null)
-    } finally {
-      setConfirming(false)
-    }
-  }
+  // ACTION-OUTCOME-1 / P1 §23 — remplace l'ancienne confirmation "Marquer terminé ?" (qui
+  // appelait toggleFollowupDone directement, un chemin de clôture parallèle à P1) par la même
+  // modale partagée que la page Relances-contact : un seul comportement de clôture, quelle que
+  // soit la page d'entrée.
+  const [completingFollowup, setCompletingFollowup] = useState<(FollowupWithClient & { _score: number }) | null>(null)
 
   return (
     <>
@@ -244,7 +264,7 @@ export default function FollowupsScreen() {
                   <FollowupCard
                     f={item}
                     today={today}
-                    onRequestDone={() => setConfirmDone(item)}
+                    onRequestDone={() => setCompletingFollowup(item)}
                   />
                 )}
                 ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
@@ -265,42 +285,14 @@ export default function FollowupsScreen() {
         </View>
       </View>
 
-      {/* ── Confirmation avant de marquer une relance comme terminée ────── */}
-      <Modal visible={!!confirmDone} transparent animationType="fade" onRequestClose={() => { if (!confirming) setConfirmDone(null) }}>
-        <TouchableOpacity
-          style={styles.confirmOverlay}
-          activeOpacity={1}
-          onPress={(e) => { if (!confirming && e.target === e.currentTarget) setConfirmDone(null) }}
-        >
-          <View style={styles.confirmSheet} onStartShouldSetResponder={() => true}>
-            <View style={styles.confirmHandle} />
-            <Text style={styles.confirmTitle}>{t('followups.confirm_done_title')}</Text>
-            <Text style={styles.confirmText}>
-              {t('followups.confirm_done_text', { name: confirmDone?.client?.full_name ?? '' })}
-            </Text>
-            <View style={styles.confirmBtnRow}>
-              <TouchableOpacity
-                style={styles.confirmCancelBtn}
-                onPress={() => setConfirmDone(null)}
-                disabled={confirming}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.confirmCancelBtnText}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.confirmDoneBtn, confirming && { opacity: 0.6 }]}
-                onPress={handleConfirmDone}
-                disabled={confirming}
-                activeOpacity={0.8}
-              >
-                {confirming
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.confirmDoneBtnText}>{t('followups.confirm_done_action')}</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {completingFollowup && (
+        <FollowupCompletionModal
+          followup={completingFollowup}
+          userId={session?.user.id ?? ''}
+          onClose={() => setCompletingFollowup(null)}
+          onSaved={() => { setCompletingFollowup(null); refresh() }}
+        />
+      )}
     </>
   )
 }
@@ -341,6 +333,7 @@ function makeStyles(colors: ThemeColors) {
   cardOverdue: { borderLeftWidth: 3, borderLeftColor: colors.danger },
 
   row1:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  row1Content: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   avatar:    { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   avatarText:{ fontSize: 14, fontFamily: fonts.bold },
   nameBlock: { flex: 1 },
@@ -351,8 +344,6 @@ function makeStyles(colors: ThemeColors) {
   badgeText: { fontSize: 10, fontFamily: fonts.bold },
   tempEmoji: { fontSize: 15 },
 
-  doneBtn:    { flexShrink: 0, padding: 4 },
-  doneCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 2 },
 
   taskTitle:  { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18, paddingLeft: 50 },
   productRow: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 50 },
@@ -364,17 +355,6 @@ function makeStyles(colors: ThemeColors) {
   dateIcon:   { fontSize: 11 },
   dateText:   { fontSize: 12, fontFamily: fonts.semibold },
   createdText:{ fontSize: 11, fontFamily: fonts.body, color: colors.textTertiary, marginLeft: 'auto' },
-
-  // ── Confirmation "relance terminée" ───────────────────────────────────────
-  confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  confirmSheet:   { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 4 },
-  confirmHandle:  { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 12 },
-  confirmTitle:   { fontSize: 16, fontFamily: fonts.bold, color: colors.text },
-  confirmText:    { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 4, marginBottom: 16, lineHeight: 19 },
-  confirmBtnRow:  { flexDirection: 'row', gap: 10 },
-  confirmCancelBtn:     { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 13, borderWidth: 1.5, borderColor: colors.border },
-  confirmCancelBtnText: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
-  confirmDoneBtn:       { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 13, backgroundColor: colors.primary },
-  confirmDoneBtnText:   { fontSize: 14, fontFamily: fonts.semibold, color: '#fff' },
+  openLink:   { marginLeft: 8 },
   })
 }

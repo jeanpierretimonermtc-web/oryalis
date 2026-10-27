@@ -1,11 +1,20 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, TextInput, Switch, Modal, StyleSheet, ActivityIndicator } from 'react-native'
 import { router, Stack, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
+import { useClient } from '@/features/clients/useClient'
 import { useClientOrders } from '@/features/orders/useOrders'
 import { updateOrderStatus, confirmOrderFollowups } from '@/features/orders/orderService'
+import { fetchOrderItemsForOrders, getOrderReturnStatus } from '@/features/orders/orderItemService'
 import { OrderEditModal } from '@/features/orders/OrderEditModal'
+import { LrpProgramFields } from '@/features/clients/LrpProgramFields'
+import { initialLrpProgramValue, buildProgramActivationPatch, getOrderProgramBadge } from '@/features/clients/lrpProgramService'
+import type { LrpProgramValue } from '@/features/clients/lrpProgramService'
+import { fetchProgramsForClient, createProgram, updateProgram, completeIfDurationReached } from '@/features/clients/recurringProgramService'
+import { linkOrderToOccurrenceForConfirmation } from '@/features/clients/recurringOccurrenceService'
+import type { RecurringProgram } from '@/shared/lib/types'
+import { OpenActionLink } from '@/shared/components/ui/OpenActionLink'
 import { getSuggestedRules, renderRuleTitle, renderRuleDescription } from '@/features/automations/automationService'
 import type { AutomationPlan } from '@/features/automations/automationService'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
@@ -17,7 +26,7 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { formatDate } from '@/shared/lib/dateFormat'
-import type { OrderType, ModuleKey, Order } from '@/shared/lib/types'
+import type { OrderType, ModuleKey, OrderListItem, OrderItem } from '@/shared/lib/types'
 
 const ORDER_TYPES: OrderType[] = ['customer', 'personal']
 
@@ -34,11 +43,70 @@ export default function ClientOrdersScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { id } = useLocalSearchParams<{ id: string }>()
   const { session } = useAuth()
+  // LRP-4.6 §9 — le titre doit rendre évident de quel contact il s'agit (page déjà filtrée sur
+  // un seul contact) : réutilise le hook déjà existant, aucune nouvelle requête dédiée.
+  const { client } = useClient(id)
   const { orders, loading, add, remove, update, cancel, reload, totalAmount } = useClientOrders(id)
-  const [editingOrder, setEditingOrder] = useState<Order | null>(null)
+  const [editingOrder, setEditingOrder] = useState<OrderListItem | null>(null)
   const [confirmAction, setConfirmAction] = useState<{ id: string; type: 'cancel' | 'delete' } | null>(null)
   useFocusEffect(useCallback(() => { reload() }, [reload]))
-  const { isModuleActive, getAutomationDelay } = useAppConfig()
+
+  // ORDER-BUSINESS-4.2.1 §6/§7/§8/§10/§12 — même indicateur de retour partiel que la liste
+  // globale (app/(app)/orders/index.tsx), même doctrine : lecture GROUPÉE, jamais un fetch par
+  // commande, statut dérivé jamais écrit en base. Reclenchée à la fermeture d'OrderEditModal
+  // (modale, aucune navigation/focus à intercepter ici) en plus du reload naturel via `orders`.
+  const [orderItemsByOrderId, setOrderItemsByOrderId] = useState<Map<string, OrderItem[]>>(new Map())
+  const loadOrderItems = useCallback(() => {
+    let cancelled = false
+    fetchOrderItemsForOrders(orders.map(o => o.id)).then(map => { if (!cancelled) setOrderItemsByOrderId(map) }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders])
+  useEffect(() => loadOrderItems(), [loadOrderItems])
+  // LRP-4.1 §3 — TOUS les programmes actifs du contact (pas "le" programme le plus proche) :
+  // 0/1/2+ n'ont pas le même comportement, décidé dans LrpProgramFields et handleToggleLrp.
+  const [activePrograms, setActivePrograms] = useState<RecurringProgram[]>([])
+  const refreshActivePrograms = useCallback(() => {
+    fetchProgramsForClient(id).then(all => setActivePrograms(all.filter(p => p.status === 'active'))).catch(() => setActivePrograms([]))
+  }, [id])
+  useFocusEffect(useCallback(() => { refreshActivePrograms() }, [refreshActivePrograms]))
+  // LRP-4.1 §9 — récupération explicite si la commande a été enregistrée mais le rattachement
+  // au programme a échoué : ne recrée jamais une seconde commande, ne retente que la partie
+  // manquante (création/mise à jour du programme + pose du lien).
+  const [programLinkError, setProgramLinkError] = useState<{ orderId: string; value: LrpProgramValue; orderDate: string } | null>(null)
+  const [retryingProgramLink, setRetryingProgramLink] = useState(false)
+
+  async function linkOrderToProgram(orderId: string, targetValue: LrpProgramValue, orderDate: string): Promise<void> {
+    const targetProgram = activePrograms.find(p => p.id === targetValue.programId) ?? null
+    const patch = buildProgramActivationPatch(targetProgram?.start_date ?? null, targetValue, orderDate)
+    // LRP-4.2 §8 — closure_action_key déterministe par commande : un réessai (retryProgramLink)
+    // pour CETTE même commande retrouve le programme déjà créé au 1er essai au lieu d'en créer
+    // un second, si l'échec s'est produit après la création du programme mais avant la pose du
+    // lien orders.recurring_program_id.
+    const program = targetProgram
+      ? await updateProgram(targetProgram.id, patch)
+      : await createProgram(session!.user.id, { client_id: id, ...patch, closure_action_key: `${orderId}:recurring_program` })
+    // LRP-5.1 §3 — orchestration UNIQUE : trouve/crée puis confirme l'échéance réellement
+    // consommée, ancrée sur orderDate seulement si c'est le tout premier cycle du programme
+    // (aucune échéance connue avant) — jamais l'avancement recalculé ici séparément.
+    const updatedProgram = await linkOrderToOccurrenceForConfirmation(orderId, program, targetValue, orderDate)
+    await completeIfDurationReached(updatedProgram)
+    refreshActivePrograms()
+  }
+
+  async function retryProgramLink() {
+    if (!programLinkError) return
+    setRetryingProgramLink(true)
+    try {
+      await linkOrderToProgram(programLinkError.orderId, programLinkError.value, programLinkError.orderDate)
+      setProgramLinkError(null)
+    } catch (e) {
+      console.error('[orders.retryProgramLink]', e)
+    } finally {
+      setRetryingProgramLink(false)
+    }
+  }
+  const { isModuleActive, getAutomationDelay, getLrpName } = useAppConfig()
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
 
   const [showForm, setShowForm]       = useState(false)
@@ -50,6 +118,17 @@ export default function ClientOrdersScreen() {
   const [notes, setNotes]             = useState('')
   const [saving, setSaving]           = useState(false)
   const [errorMsg, setErrorMsg]       = useState<string | null>(null)
+  // LRP-3 §9/§12 — jamais pré-coché ni pré-rempli tant que l'utilisateur n'a pas explicitement
+  // activé "Commande LRP" : évite tout faux historique et respecte la préférence V1 du brief.
+  const [lrpProgramValue, setLrpProgramValue] = useState<LrpProgramValue | null>(null)
+
+  function handleToggleLrp(v: boolean) {
+    setIsLrp(v)
+    // LRP-4.1 §3 — présélection automatique seulement si exactement 1 programme actif ; sinon
+    // (0 ou 2+) le brouillon démarre sur "nouveau programme", l'utilisateur choisit explicitement
+    // dans le sélecteur de LrpProgramFields s'il y a 2+ candidats.
+    setLrpProgramValue(v ? initialLrpProgramValue(activePrograms.length === 1 ? activePrograms[0] : null, date) : null)
+  }
 
   const [pendingOrder, setPendingOrder]     = useState<PendingOrderContext | null>(null)
   const [followupPlan, setFollowupPlan]     = useState<Record<string, { create: boolean; delayDays: number }>>({})
@@ -71,11 +150,27 @@ export default function ClientOrdersScreen() {
         notes: notes.trim() || null,
         status: 'delivered',
       })
+      // LRP-4 — écritures séquentielles, jamais transactionnelles : la commande (source de
+      // vérité du chiffre d'affaires) est déjà enregistrée à ce stade quoi qu'il arrive ensuite ;
+      // le programme (créé ou mis à jour) et le lien orders.recurring_program_id sont secondaires
+      // et best-effort (même doctrine que LRP-3 §22/§25). LRP-4.1 §9 — un échec ici n'est jamais
+      // silencieux : mémorisé pour affichage d'un message explicite + retry ciblé (jamais une
+      // seconde commande recréée).
+      if (result && isLrp && lrpProgramValue && session?.user) {
+        try {
+          await linkOrderToProgram(result.order.id, lrpProgramValue, date)
+        } catch (e) {
+          console.error('[orders.recurringProgramUpdate]', e)
+          setProgramLinkError({ orderId: result.order.id, value: lrpProgramValue, orderDate: date })
+        }
+      }
+
       setShowForm(false)
       setDate(new Date().toISOString().split('T')[0])
       setProductName('')
       setAmount('')
       setIsLrp(false)
+      setLrpProgramValue(null)
       setOrderType('customer')
       setNotes('')
 
@@ -117,7 +212,10 @@ export default function ClientOrdersScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: t('orders.title'), headerBackTitle: '' }} />
+      <Stack.Screen options={{
+        title: client?.full_name ? `${client.full_name} — ${t('orders.title')}` : t('orders.title'),
+        headerBackTitle: '',
+      }} />
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         {/* ── KPI total ──────────────────────────────────────────── */}
@@ -125,6 +223,18 @@ export default function ClientOrdersScreen() {
           <Text style={styles.kpiLabel}>{t('orders.total_month')}</Text>
           <Text style={styles.kpiValue}>{totalAmount.toFixed(2)}€</Text>
         </View>
+
+        {/* ── LRP-4.1 §9 — commande enregistrée, rattachement au programme en échec ─ */}
+        {programLinkError ? (
+          <View style={styles.programErrorBanner}>
+            <Text style={styles.programErrorText}>{t('lrp.link_failed_warning')}</Text>
+            <TouchableOpacity onPress={retryProgramLink} disabled={retryingProgramLink} activeOpacity={0.75}>
+              {retryingProgramLink
+                ? <ActivityIndicator size="small" color={colors.warning} />
+                : <Text style={styles.programErrorRetry}>{t('common.retry')}</Text>}
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {/* ── Formulaire ajout ───────────────────────────────────── */}
         {!showForm ? (
@@ -154,8 +264,11 @@ export default function ClientOrdersScreen() {
             />
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>{t('orders.fields.is_lrp')}</Text>
-              <Switch value={isLrp} onValueChange={setIsLrp} trackColor={{ true: colors.secondary }} />
+              <Switch value={isLrp} onValueChange={handleToggleLrp} trackColor={{ true: colors.secondary }} />
             </View>
+            {isLrp && isModuleActive('renewals_lrp') && lrpProgramValue ? (
+              <LrpProgramFields candidatePrograms={activePrograms} orderDate={date} value={lrpProgramValue} onChange={setLrpProgramValue} />
+            ) : null}
             <View style={styles.typeRow}>
               <Text style={styles.switchLabel}>{t('orders.fields.order_type')}</Text>
               <View style={styles.typePicker}>
@@ -197,6 +310,11 @@ export default function ClientOrdersScreen() {
             .sort((a, b) => new Date(b.order_date).getTime() - new Date(a.order_date).getTime())
             .map(order => {
               const isCancelled = !!order.cancelled_at
+              const programBadge = getOrderProgramBadge(order, getLrpName())
+              // ORDER-BUSINESS-4.2.1 §7/§9 — même priorité que la liste globale : status='returned'
+              // toujours prioritaire sur le statut dérivé des lignes.
+              const returnStatus = order.status === 'returned' ? 'none' : getOrderReturnStatus(orderItemsByOrderId.get(order.id))
+              const hasBadges = isCancelled || order.order_type === 'personal' || order.status === 'returned' || returnStatus !== 'none' || !!programBadge || !!order.appointment_id
               return (
                 <TouchableOpacity
                   key={order.id}
@@ -204,14 +322,24 @@ export default function ClientOrdersScreen() {
                   onPress={() => { if (!isCancelled) setEditingOrder(order) }}
                   activeOpacity={isCancelled ? 1 : 0.7}
                 >
-                  <View style={styles.cardTop}>
-                    <View style={styles.cardLeft}>
-                      <Text style={styles.cardDate}>
-                        {formatDate(order.order_date, locale, { day: '2-digit', month: 'long', year: 'numeric' })}
-                      </Text>
-                      <Text style={[styles.cardProduct, isCancelled && styles.cardTextCancelled]} numberOfLines={1}>{order.product_name}</Text>
-                    </View>
-                    <View style={styles.cardRight}>
+                  {/* LRP-4.6 §2/§3 — la date et le montant vivent désormais sur leur PROPRE ligne,
+                      sans partager de conteneur flex avec les badges (l'ancien cardRight
+                      empilait verticalement jusqu'à 4 badges, dont un texte long
+                      "Abonnement historique" depuis LRP-4.5 : sur une carte étroite, ça
+                      réduisait la largeur disponible pour cardLeft au point de faire wrapper la
+                      date caractère par caractère). flexShrink:0 sur les deux textes empêche
+                      toute compression, quelle que soit la largeur des badges en dessous. */}
+                  <View style={styles.cardTopRow}>
+                    <Text style={styles.cardDate} numberOfLines={1}>
+                      {formatDate(order.order_date, locale, { day: '2-digit', month: 'long', year: 'numeric' })}
+                    </Text>
+                    {order.amount != null ? (
+                      <Text style={[styles.cardAmount, isCancelled && styles.cardTextCancelled]} numberOfLines={1}>{order.amount.toFixed(2)}€</Text>
+                    ) : null}
+                  </View>
+                  <Text style={[styles.cardProduct, isCancelled && styles.cardTextCancelled]} numberOfLines={1}>{order.product_name}</Text>
+                  {hasBadges ? (
+                    <View style={styles.badgeRow}>
                       {isCancelled ? (
                         <View style={[styles.badge, { backgroundColor: colors.bgDim }]}>
                           <Text style={[styles.badgeText, { color: colors.textTertiary }]}>{t('orders.status_cancelled')}</Text>
@@ -226,17 +354,33 @@ export default function ClientOrdersScreen() {
                         <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
                           <Text style={[styles.badgeText, { color: colors.danger }]}>{t('orders.status_returned')}</Text>
                         </View>
-                      ) : null}
-                      {order.is_lrp ? (
-                        <View style={[styles.badge, { backgroundColor: colors.secondaryLight }]}>
-                          <Text style={[styles.badgeText, { color: colors.secondary }]}>{t('orders.lrp')}</Text>
+                      ) : returnStatus === 'partial' ? (
+                        <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
+                          <Text style={[styles.badgeText, { color: colors.danger }]}>{t('orders.status_partial_return')}</Text>
+                        </View>
+                      ) : returnStatus === 'full_pending' ? (
+                        <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
+                          <Text style={[styles.badgeText, { color: colors.danger }]}>{t('orders.status_full_return_pending')}</Text>
                         </View>
                       ) : null}
-                      {order.amount != null ? (
-                        <Text style={[styles.cardAmount, isCancelled && styles.cardTextCancelled]}>{order.amount.toFixed(2)}€</Text>
+                      {programBadge ? (
+                        <View style={[styles.badge, { backgroundColor: programBadge.kind === 'linked' ? colors.secondaryLight : colors.bgDim }]}>
+                          <Text style={[styles.badgeText, { color: programBadge.kind === 'linked' ? colors.secondary : colors.textTertiary }]}>
+                            {programBadge.kind === 'linked' ? programBadge.label : t('orders.legacy_program_badge', { name: programBadge.label })}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {/* ORDER-APPOINTMENT-TRACE-1 §6/§7 — indicateur discret seulement, jamais
+                          un second CTA sur une carte déjà dense : la carte entière ouvre déjà
+                          OrderEditModal (onPress ci-dessus), où vit le vrai lien navigable vers
+                          le RDV source. */}
+                      {order.appointment_id ? (
+                        <View style={[styles.badge, { backgroundColor: colors.bgDim }]}>
+                          <Text style={[styles.badgeText, { color: colors.textSecondary }]}>{t('orders.from_appointment_badge')}</Text>
+                        </View>
                       ) : null}
                     </View>
-                  </View>
+                  ) : null}
                   {order.notes ? <Text style={styles.cardNotes}>{order.notes}</Text> : null}
                   {confirmAction?.id === order.id ? (
                     <View style={styles.inlineConfirmRow}>
@@ -262,6 +406,14 @@ export default function ClientOrdersScreen() {
                     </View>
                   ) : (
                     <View style={styles.cardActions}>
+                      {/* UI-AFFORDANCE-1 §12/§13 — la carte entière ouvre déjà OrderEditModal
+                          (formulaire d'édition direct) au clic : "Modifier", décoratif puisque
+                          déjà à l'intérieur de la zone cliquable (interactive=false). Absent si
+                          annulée, comme le clic de la carte lui-même (§20 : rien de métier
+                          changé, seule l'affordance visuelle). */}
+                      {!isCancelled ? (
+                        <OpenActionLink label={t('common.edit')} interactive={false} style={styles.orderEditLink} />
+                      ) : null}
                       {!isCancelled && order.status !== 'returned' ? (
                         <TouchableOpacity
                           onPress={() => updateOrderStatus(order.id, 'returned').then(reload)}
@@ -367,7 +519,11 @@ export default function ClientOrdersScreen() {
       </Modal>
 
       {editingOrder ? (
-        <OrderEditModal order={editingOrder} onClose={() => setEditingOrder(null)} onSave={update} />
+        <OrderEditModal
+          order={editingOrder}
+          onClose={() => { setEditingOrder(null); loadOrderItems() }}
+          onSave={update}
+        />
       ) : null}
     </>
   )
@@ -390,6 +546,10 @@ function makeStyles(colors: ThemeColors) {
   },
   kpiLabel: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
   kpiValue: { fontSize: 22, fontFamily: fonts.bold, color: colors.primary },
+
+  programErrorBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, backgroundColor: colors.warningLight, borderRadius: 12, padding: 12 },
+  programErrorText: { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.warning },
+  programErrorRetry: { fontSize: 13, fontFamily: fonts.bold, color: colors.warning },
 
   addBtn: {
     backgroundColor: colors.primaryLight,
@@ -435,19 +595,22 @@ function makeStyles(colors: ThemeColors) {
     gap: 6,
   },
   cardCancelled: { opacity: 0.55 },
-  cardTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  cardLeft:   { flex: 1, gap: 2 },
-  cardDate:   { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
-  cardProduct:{ fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+  // LRP-4.6 §3/§21 — date et montant sur une ligne dédiée, jamais partagée avec des badges de
+  // largeur variable : flexShrink:0 sur les deux textes interdit toute compression, quelle que
+  // soit la largeur de la carte (desktop large → mobile étroit).
+  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  cardDate:   { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary, flexShrink: 0 },
+  cardProduct:{ fontSize: 14, fontFamily: fonts.semibold, color: colors.text, marginTop: 2 },
   cardTextCancelled: { textDecorationLine: 'line-through' },
-  cardRight:  { alignItems: 'flex-end', gap: 4 },
-  cardAmount: { fontSize: 16, fontFamily: fonts.bold, color: colors.text },
+  cardAmount: { fontSize: 16, fontFamily: fonts.bold, color: colors.text, flexShrink: 0 },
   cardNotes:  { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, lineHeight: 18 },
 
+  badgeRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
   badge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   badgeText: { fontSize: 11, fontFamily: fonts.bold },
 
-  cardActions:   { flexDirection: 'row', justifyContent: 'flex-end', gap: 16 },
+  cardActions:   { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 16 },
+  orderEditLink: { marginRight: 'auto' },
   deleteBtn:     { alignSelf: 'flex-end' },
   deleteBtnText: { fontSize: 11, fontFamily: fonts.medium, color: colors.danger },
   returnBtnText: { fontSize: 11, fontFamily: fonts.medium, color: colors.textSecondary },

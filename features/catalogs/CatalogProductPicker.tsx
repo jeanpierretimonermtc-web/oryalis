@@ -5,7 +5,8 @@ import { useCatalogs, useCatalogProducts } from './useCatalog'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { Catalog, CatalogProduct } from '@/shared/lib/types'
+import type { Catalog, CatalogProductListItem } from '@/shared/lib/types'
+import { formatMoney } from '@/shared/lib/moneyFormat'
 
 export interface CatalogPickerResult {
   productName: string
@@ -14,6 +15,10 @@ export interface CatalogPickerResult {
   catalogName: string
   catalogColor: string
   catalogIcon: string
+  // PRODUCT-VALUE-1 — prix catalogue au moment du choix, à copier tel quel (snapshot) par
+  // l'appelant plutôt que relu plus tard : une modification future du catalogue ne doit jamais
+  // changer rétroactivement un prix déjà utilisé dans un RDV/une commande passée.
+  retailPriceEur: number | null
 }
 
 interface Props {
@@ -22,7 +27,8 @@ interface Props {
 }
 
 export function CatalogProductPicker({ onSelect, onClose }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { catalogs, loading: catalogsLoading } = useCatalogs()
@@ -52,7 +58,7 @@ export function CatalogProductPicker({ onSelect, onClose }: Props) {
     return list
   }, [products, selectedCategory, query])
 
-  function handleSelect(product: CatalogProduct) {
+  function handleSelect(product: CatalogProductListItem) {
     if (!selectedCatalog) return
     onSelect({
       productName: product.name,
@@ -61,6 +67,7 @@ export function CatalogProductPicker({ onSelect, onClose }: Props) {
       catalogName: selectedCatalog.name,
       catalogColor: selectedCatalog.color,
       catalogIcon: selectedCatalog.icon,
+      retailPriceEur: product.retail_price_eur,
     })
     onClose()
   }
@@ -155,6 +162,9 @@ export function CatalogProductPicker({ onSelect, onClose }: Props) {
                   <Text style={styles.productName}>{item.name}</Text>
                   {item.category && <Text style={styles.category}>{item.category}</Text>}
                 </View>
+                <Text style={styles.productPrice}>
+                  {item.retail_price_eur != null ? formatMoney(item.retail_price_eur, locale) : t('catalog.price_not_set')}
+                </Text>
               </TouchableOpacity>
             )}
             ItemSeparatorComponent={() => <View style={styles.sep} />}
@@ -196,6 +206,7 @@ function makeStyles(colors: ThemeColors) {
   productInfo: { flex: 1 },
   productName: { fontSize: 15, fontWeight: '500', color: colors.text },
   category:    { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  productPrice: { fontSize: 13, fontWeight: '500', color: colors.textSecondary, flexShrink: 0 },
   sep:         { height: 1, backgroundColor: colors.border, marginLeft: 36 },
   empty:       { textAlign: 'center', color: colors.textSecondary, marginTop: 40, fontSize: 14 },
   })

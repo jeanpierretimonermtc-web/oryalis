@@ -7,13 +7,18 @@ import { createFollowup } from '@/features/followups/followupService'
 import { cancelFollowup } from '@/features/followups/followupService'
 import { cancelTask } from '@/features/appointments/appointmentService'
 import { cancelRecommendation, createRecommendation } from '@/features/recommendations/recommendationService'
-import { upsertOrderForAppointment, confirmOrderFollowups } from '@/features/orders/orderService'
+import { upsertOrderForAppointment, confirmOrderFollowups, computeOrderProductsTotal, computeOrderProductName } from '@/features/orders/orderService'
+import { buildProgramActivationPatch } from '@/features/clients/lrpProgramService'
+import { fetchProgramById, createProgram, updateProgram, completeIfDurationReached } from '@/features/clients/recurringProgramService'
+import { linkOrderToOccurrenceForConfirmation } from '@/features/clients/recurringOccurrenceService'
 import { AUTOMATION_RULES, type AutoTrigger, type AutomationRule } from '@/features/automations/automationService'
+import type { OrderItem } from '@/shared/lib/types'
 import type {
   AppointmentOutcome,
   AppointmentOutcomeDetails,
   OutcomeRevisionReason,
   AppointmentOutcomeActionPlan,
+  ClientFacingNextAppointment,
 } from './appointmentTypes'
 
 // ── Snapshot sérialisé (client_events.old_value / new_value) ──────────────────
@@ -39,8 +44,10 @@ export function parseOutcomeSnapshot(raw: string | null): OutcomeSnapshot | null
 }
 
 // ── Aperçu des relances automatiques applicables (lecture seule) ──────────────
-// Ne crée jamais de relance — la création reste gérée par le moteur d'automatisation
-// existant (checkNoContact, applyOrderAutomation, triggerAppointmentCompleted).
+// Ne crée jamais de relance — la création reste gérée par le moteur d'automatisation existant
+// (checkNoContact, applyOrderAutomation). RDV-FOLLOWUP-1/P0 : le trigger 'appointment' n'est
+// plus jamais passé ici — la relance après RDV passe désormais par personalFollowup, préremplie
+// par la règle appt_j7 côté UI. Utilisé uniquement pour les triggers order/first_order.
 export function getApplicableAutomationRules(trigger: AutoTrigger): AutomationRule[] {
   return AUTOMATION_RULES.filter(r => r.trigger === trigger)
 }
@@ -60,6 +67,11 @@ export interface UpcomingAppointmentOption {
   title: string
   start_at: string
   status: string
+  // PROFILE-SHARE-1 — nécessaire pour afficher un type client-facing (ex. "Suivi") sur le
+  // prochain RDV du résumé de fiche contact, cohérent avec le format déjà utilisé pour les RDV
+  // passés dans ce même résumé (buildClientSummaryTemplate). Champ additif, ignoré par les
+  // consommateurs existants (sélection d'un RDV futur comme suite, RÉCAP-6).
+  appointment_type: string
 }
 
 export async function fetchUpcomingAppointmentsForClient(
@@ -68,7 +80,7 @@ export async function fetchUpcomingAppointmentsForClient(
 ): Promise<UpcomingAppointmentOption[]> {
   const { data, error } = await supabase
     .from('appointments')
-    .select('id, title, start_at, status')
+    .select('id, title, start_at, status, appointment_type')
     .eq('client_id', clientId)
     .in('status', ['scheduled', 'rescheduled'])
     .neq('id', excludeAppointmentId)
@@ -76,6 +88,39 @@ export async function fetchUpcomingAppointmentsForClient(
     .order('start_at')
   if (error) throw new Error(error.message)
   return data ?? []
+}
+
+// RÉCAP-6 — source unique et fiable du "vrai prochain RDV" pour le récap, qui unifie deux
+// mécanismes existants convergeant structurellement sur followup_of_appointment_id :
+//  A. RDV créé depuis "Suite du rendez-vous" (handleCreateNextRdv, appointments/[id]/index.tsx) ;
+//  B. RDV futur existant choisi via selectedUpcomingId au débrief/à la révision, lié ensuite par
+//     linkAppointmentAsFollowup (voir applyOutcomePlanActions ci-dessus).
+// Priorité 1 (§5) : le RDV explicitement lié à CE RDV, réellement futur et non annulé (jamais un
+// lien devenu obsolète après annulation ou simplement passé — §3/tests E/F). Le plus récemment
+// créé gagne si plusieurs révisions ont changé d'avis (même logique que le hotfix historique
+// côté UI, désormais centralisée ici plutôt que dupliquée). Priorité 2, seulement si rien n'est
+// explicitement lié : prochain RDV futur du contact le plus proche, réutilisant tel quel
+// fetchUpcomingAppointmentsForClient (déjà filtré/trié) — aucune requête supplémentaire.
+export async function resolveClientFacingNextAppointment(
+  appointmentId: string,
+  clientId: string,
+): Promise<ClientFacingNextAppointment | null> {
+  const { data: linked, error: linkedError } = await supabase
+    .from('appointments')
+    .select('start_at, title')
+    .eq('followup_of_appointment_id', appointmentId)
+    .in('status', ['scheduled', 'rescheduled'])
+    .gte('start_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (linkedError) throw new Error(linkedError.message)
+  if (linked) return { startAt: linked.start_at, purpose: linked.title, source: 'linked' }
+
+  const upcoming = await fetchUpcomingAppointmentsForClient(clientId, appointmentId)
+  if (upcoming.length === 0) return null
+  const soonest = upcoming[0]
+  return { startAt: soonest.start_at, purpose: soonest.title, source: 'fallback' }
 }
 
 // Lie un RDV (déjà existant ou tout juste créé) comme suite explicite du RDV source — jamais
@@ -147,6 +192,23 @@ export interface OutcomePlanWarnings {
   recommendation: boolean
   personalFollowup: boolean
   appointmentLink: boolean
+  // LRP-4.1 §9 — distinct de `order` : la commande peut avoir parfaitement réussi tout en
+  // échouant uniquement sur son rattachement au programme récurrent. Permet à l'UI d'afficher
+  // un message précis ("commande enregistrée, rattachement en échec") plutôt que le message
+  // générique de commande en échec.
+  recurringProgram: boolean
+}
+
+// ORDER-BUSINESS-3.1 §3 — `savedSaleOrderItems` porte les order_items RÉELLEMENT écrits pour
+// plan.saleOrder.products, dans le MÊME ORDRE (correspondance par index garantie par
+// upsertOrderForAppointment/saveOrderItems, jamais par nom/catalog_product_id/position devinée
+// après coup) — null si aucun saleOrder n'était présent dans ce plan, tableau vide seulement si
+// l'écriture best-effort à la création a échoué. Permet à l'appelant (UI de clôture/révision RDV)
+// de reporter ces id vers son propre état (saleProducts) puis vers
+// appointment_business_context.outcome_details, pour qu'une révision future les relise (§4).
+export interface OutcomePlanResult {
+  warnings: OutcomePlanWarnings
+  savedSaleOrderItems: OrderItem[] | null
 }
 
 export async function applyOutcomePlanActions(
@@ -155,23 +217,36 @@ export async function applyOutcomePlanActions(
   clientId: string,
   plan: AppointmentOutcomeActionPlan,
   actionKeyPrefix: string,
-): Promise<OutcomePlanWarnings> {
-  const warnings: OutcomePlanWarnings = { order: false, recommendation: false, personalFollowup: false, appointmentLink: false }
+): Promise<OutcomePlanResult> {
+  const warnings: OutcomePlanWarnings = { order: false, recommendation: false, personalFollowup: false, appointmentLink: false, recurringProgram: false }
+  let savedSaleOrderItems: OrderItem[] | null = null
 
   if (plan.saleOrder && plan.saleOrder.products.length > 0) {
     try {
-      const total = plan.saleOrder.products.reduce((sum, p) => sum + (p.amount ?? 0) * p.quantity, 0)
+      // ORDER-SYNC-1 §9/§10 — même logique officielle (unique) que l'édition ultérieure d'une
+      // commande (orderService.updateOrder) : jamais un second calcul divergent du total ou du
+      // résumé produit.
+      // ORDER-BUSINESS-3.1 §3 — `id: p.id` transporte l'identité STABLE de la ligne (si déjà
+      // connue depuis une clôture précédente, voir OutcomeSaleProduct.id) jusqu'à saveOrderItems,
+      // qui reconnaît alors cette ligne par upsert au lieu de la recréer avec un nouvel id.
+      const orderProducts = plan.saleOrder.products.map(p => ({ id: p.id, product_id: p.productId, name: p.label, qty: p.quantity, price: p.amount }))
+      const total = computeOrderProductsTotal(orderProducts)
       // Réutilise (met à jour) la commande déjà liée à ce RDV plutôt que d'en créer une
       // nouvelle à chaque révision (§ correction demandée : plus aucun doublon possible, quel
       // que soit le nombre de fois où le résultat est révisé en gardant "Vente réalisée").
-      const { order, isFirstOrder, clientFirstName, created } = await upsertOrderForAppointment(userId, appointmentId, {
+      const { order, orderItems, isFirstOrder, clientFirstName, created } = await upsertOrderForAppointment(userId, appointmentId, {
         client_id: clientId,
-        product_name: plan.saleOrder.products.map(p => p.label || '—').join(', '),
-        products: plan.saleOrder.products.map(p => ({ product_id: p.productId, name: p.label, qty: p.quantity, price: p.amount })),
+        product_name: computeOrderProductName(orderProducts),
+        products: orderProducts,
         amount: total > 0 ? total : null,
         status: 'delivered',
         order_type: 'customer',
+        is_lrp: plan.saleOrder.isLrp,
       })
+      // ORDER-BUSINESS-3.1 §3 — `orderItems` est dans le même ordre que `orderProducts`
+      // (garanti par saveOrderItems/persistOrderItemsOnCreate), lui-même dans le même ordre que
+      // plan.saleOrder.products : correspondance par index fiable, jamais par nom.
+      savedSaleOrderItems = orderItems
       // Les automatismes de commande restent indépendants de no_followup_required (§12) :
       // une vraie commande déclenche toujours ses relances, jamais gatées par la décision de
       // suite du RDV lui-même. Uniquement à la création réelle — jamais rejoué à chaque mise
@@ -179,6 +254,39 @@ export async function applyOutcomePlanActions(
       // supplémentaire, pas la seule).
       if (created) {
         await confirmOrderFollowups(userId, clientId, clientFirstName, isFirstOrder, undefined, appointmentId, order.id)
+      }
+      // LRP-4 §13/§19 — le programme contact n'avance JAMAIS sur une révision, seulement sur la
+      // clôture initiale — identifié via actionKeyPrefix (':closure') plutôt que `created` :
+      // un réessai après échec partiel (commande déjà créée au 1er essai, patch programme en
+      // échec) doit pouvoir rejouer ce patch, alors que `created` serait déjà passé à false à ce
+      // stade. Même orchestration que la création manuelle (clients/[id]/orders.tsx) : trouver/
+      // créer le programme, lier la commande, vérifier la complétion — jamais une 2e logique.
+      if (actionKeyPrefix.endsWith(':closure') && plan.saleOrder.isLrp && plan.saleOrder.lrpProgram) {
+        try {
+          const orderDate = new Date().toISOString().split('T')[0]
+          // LRP-4.1 §3 — le programme ciblé est celui explicitement choisi dans le sélecteur
+          // (plan.saleOrder.lrpProgram.programId), jamais "le plus proche" déduit silencieusement
+          // parmi plusieurs programmes actifs.
+          const targetProgramId = plan.saleOrder.lrpProgram.programId
+          const targetProgram = targetProgramId
+            ? await fetchProgramById(targetProgramId)
+            : null
+          const patch = buildProgramActivationPatch(targetProgram?.start_date ?? null, plan.saleOrder.lrpProgram, orderDate)
+          // LRP-4.2 §8 — closure_action_key stable sur actionKeyPrefix (':closure', identique à
+          // chaque réessai de handleRetryPlanActions) : un retry après un échec entre la création
+          // du programme et la pose du lien retrouve CE programme au lieu d'en créer un second.
+          const program = targetProgram
+            ? await updateProgram(targetProgram.id, patch)
+            : await createProgram(userId, { client_id: clientId, ...patch, closure_action_key: `${actionKeyPrefix}:recurring_program` })
+          // LRP-5.1 §3 — même orchestration que clients/[id]/orders.tsx (une seule
+          // implémentation, jamais dupliquée) : trouve/crée puis confirme l'échéance réellement
+          // consommée, ancrée sur orderDate seulement si c'est le tout premier cycle.
+          const updatedProgram = await linkOrderToOccurrenceForConfirmation(order.id, program, plan.saleOrder.lrpProgram, orderDate)
+          await completeIfDurationReached(updatedProgram)
+        } catch (e) {
+          console.error('[applyOutcomePlanActions.recurringProgram]', e)
+          warnings.recurringProgram = true
+        }
       }
     } catch (e) {
       console.error('[applyOutcomePlanActions.order]', e)
@@ -188,9 +296,14 @@ export async function applyOutcomePlanActions(
 
   if (plan.recommendation) {
     try {
+      // RDV-CLOSURE-PRODUCTS/P2 — catalogId/productId proviennent désormais du plan (renseignés
+      // uniquement quand la recommandation reprend un seul produit envisagé issu du catalogue) ;
+      // auparavant toujours forcés à null ici, même quand le contexte le permettait. Aucune
+      // autre partie du moteur (idempotence, révision) n'est modifiée.
       await createRecommendation(
         userId, clientId, plan.recommendation.productName, plan.recommendation.reason,
-        'advised', null, null, 1, null, appointmentId, `${actionKeyPrefix}:recommendation`,
+        'advised', plan.recommendation.catalogId ?? null, plan.recommendation.productId ?? null,
+        1, null, appointmentId, `${actionKeyPrefix}:recommendation`,
       )
     } catch (e) {
       console.error('[applyOutcomePlanActions.recommendation]', e)
@@ -221,7 +334,23 @@ export async function applyOutcomePlanActions(
     }
   }
 
-  return warnings
+  return { warnings, savedSaleOrderItems }
+}
+
+// ORDER-BUSINESS-3.1 §3/§4 — reporte les id order_items réellement écrits (savedSaleOrderItems,
+// même ordre que saleOrderProducts) dans une copie de `details` : seule fonction qui sait comment
+// une révision future doit relire ces id (§4 — fallback compatible : une ligne sans id reste
+// sans id si `savedSaleOrderItems` est null ou plus court, jamais reconstruite par nom/position).
+// Pure, ne touche à aucune base — l'appelant décide s'il persiste le résultat (saveBusinessContext).
+export function mergeSaleOrderItemIds(
+  details: AppointmentOutcomeDetails | null,
+  savedSaleOrderItems: OrderItem[] | null,
+): AppointmentOutcomeDetails | null {
+  if (!details || details.kind !== 'sale_completed' || !savedSaleOrderItems) return details
+  return {
+    ...details,
+    products: details.products.map((p, i) => savedSaleOrderItems[i] ? { ...p, id: savedSaleOrderItems[i].id } : p),
+  }
 }
 
 // ── Révision d'un résultat déjà clôturé (§15-19) ───────────────────────────────
@@ -330,12 +459,22 @@ export class OutcomeRevisionConflictError extends Error {
   }
 }
 
+// ORDER-BUSINESS-3.1 §3/§4 — résultat enrichi : `updatedOutcomeDetails` porte `next.outcomeDetails`
+// avec les id order_items appris pendant CETTE révision fusionnés dedans (null si rien à
+// fusionner, ex. pas de saleOrder) — l'appelant doit resynchroniser son état local
+// (setOutcomeDetailsDraft/setSaleProducts) avec cette valeur, jamais garder l'ancien draft
+// sans id, pour que la PROCHAINE révision parte des vrais id.
+export interface ReviseAppointmentOutcomeResult {
+  newRevision: number
+  updatedOutcomeDetails: AppointmentOutcomeDetails | null
+}
+
 // Service métier dédié — ne détourne jamais completeAppointment() (le RDV reste `completed`,
 // seul son résultat change). Toutes les validations précèdent les effets de bord (§19).
 // Noyau atomique (résultat + historique + concurrence optimiste) via la fonction Postgres
 // revise_appointment_outcome (SECURITY DEFINER, §8-9) ; annulations et nouvelles actions
 // restent des étapes idempotentes séparées, rejouables indépendamment du noyau.
-export async function reviseAppointmentOutcome(input: ReviseAppointmentOutcomeInput): Promise<number> {
+export async function reviseAppointmentOutcome(input: ReviseAppointmentOutcomeInput): Promise<ReviseAppointmentOutcomeResult> {
   const {
     userId, appointmentId, clientId, expectedRevision, previous, next,
     reason, reasonOtherText, decision, noFollowupRequired, newActions,
@@ -374,7 +513,25 @@ export async function reviseAppointmentOutcome(input: ReviseAppointmentOutcomeIn
 
   // Nouvelles actions adaptées au nouveau résultat (§6) — clé d'idempotence dérivée de la
   // révision effective renvoyée par le noyau atomique, jamais réutilisée d'une révision à l'autre.
-  await applyOutcomePlanActions(userId, appointmentId, clientId, newActions, `${appointmentId}:revision:${newRevision}`)
+  const { savedSaleOrderItems } = await applyOutcomePlanActions(
+    userId, appointmentId, clientId, newActions, `${appointmentId}:revision:${newRevision}`,
+  )
 
-  return newRevision as number
+  // ORDER-BUSINESS-3.1 §3/§4 — `next.outcomeDetails` vient d'être persisté par le noyau
+  // atomique ci-dessus SANS les id order_items (ils n'existaient pas encore à cet instant,
+  // upsertOrderForAppointment n'a été appelé qu'après). Ce complément écrit directement
+  // outcome_details (pas un second passage par revise_appointment_outcome : l'historique/la
+  // concurrence optimiste du noyau ne concernent que le résultat métier, pas cet enrichissement
+  // technique) pour que la PROCHAINE révision relise les vrais id (§4) — aucune migration DB
+  // requise, `outcome_details` reste le même jsonb existant.
+  const updatedOutcomeDetails = mergeSaleOrderItemIds(next.outcomeDetails, savedSaleOrderItems)
+  if (updatedOutcomeDetails && updatedOutcomeDetails !== next.outcomeDetails) {
+    const { error: detailsError } = await supabase
+      .from('appointment_business_context')
+      .update({ outcome_details: updatedOutcomeDetails })
+      .eq('appointment_id', appointmentId)
+    if (detailsError) console.error('[reviseAppointmentOutcome.mergeSaleOrderItemIds]', detailsError.message)
+  }
+
+  return { newRevision: newRevision as number, updatedOutcomeDetails }
 }

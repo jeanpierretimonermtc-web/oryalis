@@ -12,6 +12,7 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { useProfileData } from '@/features/settings/useProfileData'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
+import { AnchoredMenu } from '@/shared/components/ui/AnchoredMenu'
 
 function initials(n: string) {
   const p = (n ?? '').trim().split(' ').filter(Boolean)
@@ -26,6 +27,7 @@ export default function IdentitySettingsScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { data, update, save, loading, saving, saved } = useProfileData()
   const [showPhoto, setShowPhoto] = useState(false)
+  const [photoPos,  setPhotoPos]  = useState({ x: 0, y: 0 })
   const [showUrl,   setShowUrl]   = useState(false)
   const [urlDraft,  setUrlDraft]  = useState('')
   const [uploading, setUploading] = useState(false)
@@ -72,7 +74,12 @@ export default function IdentitySettingsScreen() {
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         <View style={styles.avatarSection}>
-          <TouchableOpacity onPress={() => setShowPhoto(true)} activeOpacity={0.85} style={styles.avatarWrap}>
+          <TouchableOpacity
+            onPress={(e) => { setPhotoPos({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }); setShowPhoto(true) }}
+            activeOpacity={0.85}
+            style={styles.avatarWrap}
+            accessibilityLabel={t('settings.change_photo')}
+          >
             {uploading ? <View style={styles.avatarBox}><ActivityIndicator color="#fff" /></View>
               : data.avatar_url ? <Image source={{ uri: data.avatar_url }} style={styles.avatarImg} />
               : <View style={styles.avatarBox}><Text style={styles.avatarText}>{initials(data.full_name)}</Text></View>}
@@ -95,16 +102,29 @@ export default function IdentitySettingsScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      <Modal visible={showPhoto} transparent animationType="slide" onRequestClose={() => setShowPhoto(false)}>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowPhoto(false)}>
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>{t('settings.change_photo')}</Text>
-            {Platform.OS !== 'web' && <TouchableOpacity style={styles.sheetRow} onPress={pickCamera} activeOpacity={0.75}><Text style={styles.sheetIcon}>📷</Text><Text style={styles.sheetText}>{t('settings.photo_camera')}</Text></TouchableOpacity>}
-            <TouchableOpacity style={styles.sheetRow} onPress={pickLibrary} activeOpacity={0.75}><Text style={styles.sheetIcon}>🖼️</Text><Text style={styles.sheetText}>{t('settings.photo_library')}</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.sheetRow} onPress={() => { setShowPhoto(false); setShowUrl(true) }} activeOpacity={0.75}><Text style={styles.sheetIcon}>🔗</Text><Text style={styles.sheetText}>{t('settings.photo_url')}</Text></TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      <AnchoredMenu
+        visible={showPhoto}
+        onClose={() => setShowPhoto(false)}
+        anchor={photoPos}
+        title={t('settings.change_photo')}
+        items={[
+          ...(Platform.OS !== 'web' ? [{
+            key: 'camera', label: t('settings.photo_camera'),
+            icon: <Text style={styles.sheetIcon}>📷</Text>,
+            onPress: pickCamera,
+          }] : []),
+          {
+            key: 'library', label: t('settings.photo_library'),
+            icon: <Text style={styles.sheetIcon}>🖼️</Text>,
+            onPress: pickLibrary,
+          },
+          {
+            key: 'url', label: t('settings.photo_url'),
+            icon: <Text style={styles.sheetIcon}>🔗</Text>,
+            onPress: () => setShowUrl(true),
+          },
+        ]}
+      />
 
       <Modal visible={showUrl} transparent animationType="slide" onRequestClose={() => setShowUrl(false)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowUrl(false)}>
@@ -140,9 +160,7 @@ function makeStyles(colors: ThemeColors) {
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 44, gap: 4 },
   sheetTitle: { fontSize: 17, fontFamily: fonts.semibold, color: colors.text, marginBottom: 8, textAlign: 'center' },
-  sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, paddingHorizontal: 12, borderRadius: 12 },
   sheetIcon: { fontSize: 20, width: 28, textAlign: 'center' },
-  sheetText: { fontSize: 15, fontFamily: fonts.medium, color: colors.text, flex: 1 },
   urlInput: { backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontFamily: fonts.body, color: colors.text, marginBottom: 8 },
   saveBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   saveBtnText: { fontSize: 15, fontFamily: fonts.semibold, color: '#fff' },

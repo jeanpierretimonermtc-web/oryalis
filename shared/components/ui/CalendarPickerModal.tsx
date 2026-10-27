@@ -10,6 +10,12 @@ function formatHM(iso: string) {
   const d = new Date(iso)
   return `${pad(d.getHours())}h${pad(d.getMinutes())}`
 }
+function formatDuration(min: number) {
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60), m = min % 60
+  return m === 0 ? `${h}h` : `${h}h${pad(m)}`
+}
+const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120]
 
 function buildCalendarDays(year: number, month: number): (number | null)[] {
   const firstDay = new Date(year, month, 1)
@@ -31,13 +37,23 @@ interface Props {
   value: string
   locale: string
   onClose: () => void
-  onConfirm: (d: string) => void
+  // Les 2e/3e arguments (heure "HH:MM", durée en minutes) ne sont fournis que si
+  // `showTime`/`showDuration` sont activés — les appels existants qui les ignorent
+  // restent valides (compatibilité ascendante).
+  onConfirm: (d: string, t?: string, durationMinutes?: number) => void
   // RDV déjà planifiés — n'importe quel contact confondu — pour voir la charge du jour
   // (point orange) et, en cliquant un jour occupé, les horaires déjà pris ce jour-là.
   dayAppointments?: CalendarBusyAppointment[]
+  // Affiche un sélecteur d'heure directement sous la liste des RDV du jour, pour choisir
+  // date et heure d'un coup d'œil plutôt qu'en deux étapes séparées.
+  showTime?: boolean
+  initialTime?: string
+  // Affiche un sélecteur de durée (chips 15 min → 2h) sous l'heure.
+  showDuration?: boolean
+  initialDurationMinutes?: number
 }
 
-export function CalendarPickerModal({ visible, value, locale, onClose, onConfirm, dayAppointments }: Props) {
+export function CalendarPickerModal({ visible, value, locale, onClose, onConfirm, dayAppointments, showTime, initialTime, showDuration, initialDurationMinutes }: Props) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -47,6 +63,9 @@ export function CalendarPickerModal({ visible, value, locale, onClose, onConfirm
   const [viewYear,  setViewYear]  = useState(new Date().getFullYear())
   const [viewMonth, setViewMonth] = useState(new Date().getMonth())
   const [selected,  setSelected]  = useState(value || todayStr)
+  const [hours,     setHours]     = useState(9)
+  const [minutes,   setMinutes]   = useState(0)
+  const [duration,  setDuration]  = useState(60)
 
   const selectedDayAppointments = useMemo(() =>
     (dayAppointments ?? [])
@@ -60,6 +79,11 @@ export function CalendarPickerModal({ visible, value, locale, onClose, onConfirm
     const base = value || todayStr
     const [y, m] = base.split('-')
     setViewYear(parseInt(y)); setViewMonth(parseInt(m) - 1); setSelected(base)
+    if (showTime) {
+      const [h, mi] = (initialTime || '09:00').split(':')
+      setHours(parseInt(h)); setMinutes(Math.round(parseInt(mi) / 5) * 5 % 60)
+    }
+    if (showDuration) setDuration(initialDurationMinutes || 60)
   }, [visible])
 
   function prevMonth() {
@@ -129,7 +153,59 @@ export function CalendarPickerModal({ visible, value, locale, onClose, onConfirm
               ))}
             </View>
           )}
-          <TouchableOpacity style={styles.confirmBtn} onPress={() => { onConfirm(selected); onClose() }} activeOpacity={0.85}>
+          {showTime && (
+            <View style={styles.timeRow}>
+              <Text style={styles.timeRowLabel}>{t('appointments.time')}</Text>
+              <View style={styles.timePicker}>
+                <View style={styles.timeColumn}>
+                  <TouchableOpacity style={styles.timeArrow} onPress={() => setHours(h => (h + 1) % 24)} activeOpacity={0.7}>
+                    <Text style={styles.timeArrowText}>▲</Text>
+                  </TouchableOpacity>
+                  <View style={styles.timeValueBox}><Text style={styles.timeValueText}>{pad(hours)}</Text></View>
+                  <TouchableOpacity style={styles.timeArrow} onPress={() => setHours(h => (h - 1 + 24) % 24)} activeOpacity={0.7}>
+                    <Text style={styles.timeArrowText}>▼</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.timeSep}>:</Text>
+                <View style={styles.timeColumn}>
+                  <TouchableOpacity style={styles.timeArrow} onPress={() => setMinutes(m => (m + 5) % 60)} activeOpacity={0.7}>
+                    <Text style={styles.timeArrowText}>▲</Text>
+                  </TouchableOpacity>
+                  <View style={styles.timeValueBox}><Text style={styles.timeValueText}>{pad(minutes)}</Text></View>
+                  <TouchableOpacity style={styles.timeArrow} onPress={() => setMinutes(m => (m - 5 + 60) % 60)} activeOpacity={0.7}>
+                    <Text style={styles.timeArrowText}>▼</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+          {showDuration && (
+            <View style={styles.timeRow}>
+              <Text style={styles.timeRowLabel}>{t('appointments.duration')}</Text>
+              <View style={styles.durationRow}>
+                {DURATION_OPTIONS.map(min => (
+                  <TouchableOpacity
+                    key={min}
+                    style={[styles.durationChip, duration === min && styles.durationChipActive]}
+                    onPress={() => setDuration(min)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.durationChipText, duration === min && styles.durationChipTextActive]}>
+                      {formatDuration(min)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.confirmBtn}
+            onPress={() => {
+              onConfirm(selected, showTime ? `${pad(hours)}:${pad(minutes)}` : undefined, showDuration ? duration : undefined)
+              onClose()
+            }}
+            activeOpacity={0.85}
+          >
             <Text style={styles.confirmBtnText}>{t('common.confirm')}</Text>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -164,5 +240,21 @@ function makeStyles(colors: ThemeColors) {
     calDayListRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
     calDayListTime:  { fontSize: 12, fontFamily: fonts.semibold, color: colors.warning, minWidth: 88 },
     calDayListLabel: { fontSize: 12, fontFamily: fonts.body, color: colors.text, flex: 1 },
+
+    timeRow:      { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center', gap: 10 },
+    timeRowLabel: { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 },
+    timePicker:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14 },
+    timeColumn:    { alignItems: 'center', gap: 4 },
+    timeArrow:     { padding: 4 },
+    timeArrowText: { fontSize: 18, lineHeight: 20, color: colors.primary },
+    timeValueBox:  { width: 56, height: 44, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgDim, borderColor: colors.border },
+    timeValueText: { fontSize: 22, fontFamily: fonts.bold, lineHeight: 26, color: colors.text },
+    timeSep:       { fontSize: 24, fontFamily: fonts.bold, color: colors.text },
+
+    durationRow:         { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+    durationChip:        { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bg },
+    durationChipActive:  { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+    durationChipText:    { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
+    durationChipTextActive: { color: colors.primary, fontFamily: fonts.semibold },
   })
 }

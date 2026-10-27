@@ -1,5 +1,4 @@
 import { supabase } from '@/shared/lib/supabase'
-import { triggerAppointmentCompleted } from '@/features/automations/automationService'
 import { logClientEvent } from '@/features/clients/clientEventService'
 import {
   AppointmentCompletionError,
@@ -8,6 +7,7 @@ import {
   type Appointment,
   type AppointmentFull,
   type AppointmentWithContext,
+  type CalendarAppointment,
   type AppointmentTask,
   type AppointmentFilters,
   type CreateAppointmentPayload,
@@ -20,6 +20,7 @@ import {
   type PostCompletionWarningCode,
   type PostCompletionPlan,
   type PostCompletionPlanKey,
+  type DiscussedProduct,
 } from './appointmentTypes'
 
 const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, followup_of_appointment_id, created_at, updated_at'
@@ -39,6 +40,90 @@ export async function fetchAppointments(filters: AppointmentFilters = {}): Promi
   const { data, error } = await query
   if (error) throw new Error(error.message)
   return data ?? []
+}
+
+// RDV déjà planifiés (tous contacts confondus) sur une fenêtre donnée — pour afficher la
+// charge du calendrier avant de fixer une nouvelle date (CalendarPickerModal).
+export async function fetchBusyAppointments(from: string, to: string) {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('start_at, end_at, title')
+    .in('status', ['scheduled', 'rescheduled'])
+    .gte('start_at', from)
+    .lte('start_at', to)
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+// ACTION-3.5 — un seul appel groupé par utilisateur (jamais un par contact), pour permettre au
+// filtre Contacts → À traiter → RDV de savoir quels contacts ont un RDV actif, sans N+1.
+// Distincte de fetchAppointments (status scalaire uniquement, pas de .in()) et de
+// fetchBusyAppointments (pas de filtre user_id, pensée pour un calendrier partagé) — un besoin
+// différent, pas une redondance.
+export async function fetchActiveAppointmentsByUser(userId: string): Promise<{ id: string; client_id: string | null; start_at: string }[]> {
+  const { data, error } = await supabase
+    .from('appointments')
+    // CONTACTS-3.6 — id ajouté (même requête) : nécessaire pour cibler la ressource exacte
+    // depuis "Tous types" déplié (navigation RDV, pas de nouvelle route).
+    .select('id, client_id, start_at')
+    .eq('user_id', userId)
+    .in('status', ['scheduled', 'rescheduled'])
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+// contact_role ajouté (CAL-4.5) à la jointure clients déjà existante — même requête, mêmes
+// deux fonctions (fetchCalendarAppointments/fetchNextAppointment la partagent déjà), aucun
+// fetch supplémentaire. Permet au calendrier de réutiliser la couleur de rôle Contacts
+// (getPrimaryRole/getRoleColors) au lieu d'une couleur propre au type de RDV.
+// DASH/CAL-2 — provider ajouté à la même jointure existante (aucun fetch supplémentaire) :
+// permet au calendrier de distinguer un RDV Oryalis d'un événement externe importé.
+const CALENDAR_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, provider, client:clients(id, full_name, status, contact_role)'
+
+// RDV d'une plage [rangeStart, rangeEnd[ (borne haute exclusive), avec jointure client
+// minimale pour l'affichage calendrier (Mois/Semaine/Jour). Distincte de fetchAppointments :
+// celle-ci filtre from/to en bornes inclusives (lte) et ne fait pas la jointure client — un
+// besoin différent, pas une redondance. La notion month/week/day reste une responsabilité de
+// l'écran/hook appelant, pas de cette fonction.
+// userId : filtre explicite conservé du fetchRange() d'origine (CAL-2.1) — l'ancien code
+// écran filtrait déjà .eq('user_id', session.user.id) avant CAL-2 ; RLS reste la protection
+// de sécurité côté base, ce filtre applicatif est un comportement préexistant à préserver,
+// pas une nouvelle vérification de sécurité.
+export async function fetchCalendarAppointments(rangeStart: string, rangeEnd: string, userId: string): Promise<CalendarAppointment[]> {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select(CALENDAR_COLS)
+    .eq('user_id', userId)
+    .gte('start_at', rangeStart)
+    .lt('start_at', rangeEnd)
+    .order('start_at', { ascending: true })
+
+  if (error) throw new Error(error.message)
+  // La jointure clients(...) est inférée en tableau par le client Supabase (relation à N
+  // côté générateur de types), alors qu'il s'agit d'une relation à 1 (client_id est une FK
+  // simple) — cast déjà utilisé tel quel par l'ancien code écran avant ce refactor.
+  return (data ?? []) as unknown as CalendarAppointment[]
+}
+
+// Prochain RDV à venir, indépendamment de toute période affichée (ex. bandeau "Prochain RDV"
+// du calendrier) — jamais fusionnée avec fetchCalendarAppointments : responsabilité distincte
+// (chercher le prochain RDV global, pas les RDV d'une plage donnée).
+// userId : voir commentaire de fetchCalendarAppointments — même filtre préexistant restauré.
+export async function fetchNextAppointment(userId: string): Promise<CalendarAppointment | null> {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select(CALENDAR_COLS)
+    .eq('user_id', userId)
+    // DASH/CAL-2 — la bannière "Prochain RDV" est un repère commercial (pas juste un
+    // affichage calendrier) : un événement personnel/externe ne doit jamais s'y substituer.
+    .eq('provider', 'oryalis')
+    .gte('start_at', new Date().toISOString())
+    .in('status', ['scheduled', 'rescheduled'])
+    .order('start_at', { ascending: true })
+    .limit(1)
+
+  if (error) throw new Error(error.message)
+  return ((data ?? [])[0] as unknown as CalendarAppointment) ?? null
 }
 
 // Variante enrichie pour les listes qui doivent afficher un résumé du contexte commercial
@@ -74,7 +159,7 @@ export async function fetchAppointmentById(id: string): Promise<AppointmentFull 
       .select('id, appointment_id, client_notes, internal_notes, objections, needs_identified, products_discussed, created_at, updated_at')
       .eq('appointment_id', id).maybeSingle(),
     supabase.from('appointment_business_context')
-      .select('id, appointment_id, brand_id, catalog_id, main_product_id, pipeline_stage, prospect_temperature, commercial_intent, estimated_value, currency, outcome, no_followup_required, outcome_details, outcome_other_label, outcome_revision, created_at, updated_at')
+      .select('id, appointment_id, brand_id, catalog_id, main_product_id, pipeline_stage, prospect_temperature, commercial_intent, commercial_intent_other_label, estimated_value, currency, outcome, no_followup_required, outcome_details, outcome_other_label, outcome_revision, discussed_products, other_outcomes, created_at, updated_at')
       .eq('appointment_id', id).maybeSingle(),
     supabase.from('appointment_tasks')
       .select('id, appointment_id, user_id, client_id, title, task_type, priority, status, due_at, completed_at, created_at, updated_at')
@@ -98,10 +183,10 @@ export async function fetchAppointmentById(id: string): Promise<AppointmentFull 
     ? {
         ...(bizRes.data ?? {
           id: '', appointment_id: id, brand_id: null, catalog_id: null, main_product_id: null,
-          prospect_temperature: null, commercial_intent: null, estimated_value: null,
-          currency: 'EUR', outcome: null, no_followup_required: false,
+          prospect_temperature: null, commercial_intent: null, commercial_intent_other_label: null,
+          estimated_value: null, currency: 'EUR', outcome: null, no_followup_required: false,
           outcome_details: null, outcome_other_label: null, outcome_revision: 1,
-          created_at: '', updated_at: '',
+          discussed_products: [], other_outcomes: [], created_at: '', updated_at: '',
         }),
         pipeline_stage: currentPipeline,
       }
@@ -166,7 +251,7 @@ export async function updateAppointment(id: string, payload: UpdateAppointmentPa
 // transitionner ; les effets post-complétion ne sont donc déclenchés qu'une fois, même en
 // cas de double appel rapproché (double-clic, appel depuis deux écrans, etc.).
 // 'rescheduled' est traité comme un RDV actif à honorer (même ligne déplacée à une nouvelle
-// date, cf. nextActionService.postponeNextAction et les requêtes d'agenda qui le groupent
+// date, cf. nextActionService.rescheduleNextAction et les requêtes d'agenda qui le groupent
 // systématiquement avec 'scheduled') — donc complétable au même titre.
 // 'cancelled' et 'no_show' sont explicitement exclus : voir AppointmentCompletionError.
 //
@@ -245,6 +330,22 @@ export async function completeAppointment(
   throw new Error(`Cannot complete appointment with status "${existing.status}".`)
 }
 
+// FOLLOWUP-PRODUCT-CONTEXT-2 — texte lisible pour followups.product_context, à partir des
+// produits structurés du RDV (discussed_products). Volontairement local et minimal (un seul
+// appelant, ensurePostCompletionActions ci-dessous) plutôt qu'un helper partagé avec
+// recapProducts.ts : format différent (une ligne, virgules, jamais de prix — le contexte d'une
+// relance n'est pas une proposition commerciale) et un seul site d'usage ne justifie pas une
+// abstraction supplémentaire. Utilise `label` (snapshot déjà figé au moment du RDV), jamais une
+// jointure catalog_products : un renommage/suppression ultérieur du produit catalogue ne doit
+// jamais changer le contexte d'une relance déjà créée. Aucun filtre sur `considered` : le
+// contexte d'une relance porte sur les produits ABORDÉS pendant le RDV, pas uniquement ceux
+// marqués comme opportunité commerciale.
+function formatDiscussedProductsAsContext(products: DiscussedProduct[]): string {
+  return products
+    .map(p => p.quantity > 1 ? `${p.label} ×${p.quantity}` : p.label)
+    .join(', ')
+}
+
 // Rejeu idempotent des effets post-complétion : ne recrée que ce qui manque, retourne des
 // codes d'avertissement exploitables par l'UI (jamais de texte traduit ici). Appelable à la
 // fois juste après la première transition et lors d'un nouvel essai explicite après échec
@@ -261,7 +362,7 @@ export async function ensurePostCompletionActions(
   const [bizRes, notesRes, existingRes] = await Promise.all([
     supabase
       .from('appointment_business_context')
-      .select('commercial_intent, prospect_temperature, pipeline_stage, no_followup_required')
+      .select('commercial_intent, prospect_temperature, pipeline_stage, discussed_products')
       .eq('appointment_id', appointmentId)
       .maybeSingle(),
     supabase
@@ -295,6 +396,14 @@ export async function ensurePostCompletionActions(
   // déjà une relance auto en attente, aucune des relances ci-dessous n'est créée.
   if (biz && !hasExistingAuto) {
     const intents = biz.commercial_intent ?? []
+    // FOLLOWUP-PRODUCT-CONTEXT-2 — discussed_products (structuré) prioritaire ; le texte libre
+    // legacy `appointment_notes.products_discussed` ne sert plus que de repli pour les RDV qui
+    // n'ont jamais eu de produits structurés (anciens RDV) — jamais les deux combinés, pour ne
+    // jamais produire un contexte redondant ou incohérent.
+    const discussedProducts: DiscussedProduct[] = biz.discussed_products ?? []
+    const productContext = discussedProducts.length > 0
+      ? formatDiscussedProductsAsContext(discussedProducts)
+      : (notes?.products_discussed ?? null)
 
     const buyProductItem = planItem('buy_product')
     const shouldCreateBuyProduct = plan ? !!buyProductItem?.create : intents.includes('buy_product')
@@ -310,7 +419,7 @@ export async function ensurePostCompletionActions(
           auto_generated:       true,
           prospect_temperature: biz.prospect_temperature ?? null,
           pipeline_stage:       biz.pipeline_stage ?? null,
-          product_context:      notes?.products_discussed ?? null,
+          product_context:      productContext,
           // Lot 1.2.1 — sans ce lien, cette relance est invisible pour buildOutcomeRevisionPlan
           // (filtre appointment_id) : une révision ne peut alors jamais l'annuler.
           appointment_id:       appointmentId,
@@ -388,23 +497,11 @@ export async function ensurePostCompletionActions(
     }
   }
 
-  // Automation : relance générique J+7 après tout RDV complété — jamais si le praticien a
-  // explicitement choisi "aucune suite nécessaire" pour ce RDV (Lot 1.2.1 §12).
-  try {
-    const { data: clientData, error: clientError } = await supabase
-      .from('clients')
-      .select('first_name, full_name')
-      .eq('id', clientId)
-      .single()
-    if (clientError) throw clientError
-    if (clientData) {
-      const prénom = clientData.first_name || clientData.full_name.split(' ')[0]
-      await triggerAppointmentCompleted(userId, clientId, prénom, appointmentId, biz?.no_followup_required ?? false)
-    }
-  } catch (e) {
-    console.error('[ensurePostCompletionActions.automation]', e)
-    warnings.push('automation_failed')
-  }
+  // RDV-FOLLOWUP-1/P0 — la relance générique "RDV complété" (règle appt_j7) n'est plus créée
+  // ici : elle passe désormais uniquement par le plan "Relance après ce RDV"
+  // (personalFollowup/applyOutcomePlanActions), préremplie par défaut à partir de cette même
+  // règle mais protégée par closure_action_key (idempotence robuste), contrairement à l'ancien
+  // chemin automatique. Les automatismes de commande (applyOrderAutomation) restent inchangés.
 
   return { success: warnings.length === 0, warnings }
 }
@@ -522,18 +619,71 @@ export async function createTask(payload: CreateTaskPayload): Promise<Appointmen
   return data
 }
 
-export async function completeTask(id: string): Promise<void> {
+// TASK-RDV-1 (fix) — une tâche liée à ce RDV peut désormais être terminée/rouverte depuis un
+// AUTRE écran (fiche Contact). La fiche RDV n'a pas de canal de synchronisation en temps réel
+// avec cet autre écran : un refetch ciblé au retour sur focus (voir useFocusEffect côté RDV)
+// est le mécanisme retenu, même filtre/tri que la lecture initiale (fetchAppointmentById) pour
+// ne jamais faire régresser l'ordre/le contenu affiché.
+export async function fetchTasksForAppointment(appointmentId: string): Promise<AppointmentTask[]> {
+  const { data, error } = await supabase
+    .from('appointment_tasks')
+    .select('id, appointment_id, user_id, client_id, title, task_type, priority, status, due_at, completed_at, created_at, updated_at')
+    .eq('appointment_id', appointmentId)
+    .order('due_at', { ascending: true })
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+// TASK-RDV-1 §7 — fonction unique et réversible : marquer terminée ET rouvrir passent par la
+// même implémentation (jamais deux fonctions qui pourraient diverger), même modèle déjà utilisé
+// par toggleFollowupDone. Ne supprime jamais la tâche (§5) — uniquement status/completed_at.
+// Réouverture -> 'pending' (pas de suivi de l'état antérieur exact, cohérent avec le modèle
+// actuel où pending/in_progress sont déjà traités de façon équivalente comme "actif" partout —
+// voir useClientTasks/fetchTasksByUser, filtrés IN (pending, in_progress) / != cancelled).
+export async function setAppointmentTaskDone(id: string, done: boolean): Promise<void> {
   const { error } = await supabase
     .from('appointment_tasks')
-    .update({ status: 'done', completed_at: new Date().toISOString() })
+    .update({ status: done ? 'done' : 'pending', completed_at: done ? new Date().toISOString() : null })
     .eq('id', id)
 
   if (error) throw new Error(error.message)
 }
 
+// Conservée telle quelle pour les appelants qui ne gèrent pas la réouverture (useAppointmentTasks,
+// hook non consommé par aucun écran à ce jour — vérifié) : simple délégation, aucun second calcul.
+export async function completeTask(id: string): Promise<void> {
+  return setAppointmentTaskDone(id, true)
+}
+
 export async function deleteTask(id: string): Promise<void> {
   const { error } = await supabase.from('appointment_tasks').delete().eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+// TASK-RDV-1 §10 — traçabilité : tâches terminées d'un contact, pour l'affichage compact et
+// replié par défaut de la fiche Contact. Triées par date de complétion la plus récente d'abord.
+export async function fetchDoneTasksByClient(clientId: string): Promise<AppointmentTask[]> {
+  const { data, error } = await supabase
+    .from('appointment_tasks')
+    .select('id, appointment_id, user_id, client_id, title, task_type, priority, status, due_at, completed_at, created_at, updated_at')
+    .eq('client_id', clientId)
+    .eq('status', 'done')
+    .order('completed_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+// TASK-RDV-1 §12 — compteur léger (head:true, pas de lignes transférées) pour n'afficher
+// l'affordance "Terminées (N)" que si elle a réellement du contenu, sans charger les lignes tant
+// que la section n'est pas dépliée.
+export async function countDoneTasksByClient(clientId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('appointment_tasks')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .eq('status', 'done')
+  if (error) throw new Error(error.message)
+  return count ?? 0
 }
 
 // Distinct de completeTask/deleteTask (Lot 1.2 §16) : une tâche annulée n'a jamais été

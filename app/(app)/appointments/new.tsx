@@ -7,9 +7,9 @@ import {
 import { router, Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { supabase } from '@/shared/lib/supabase'
 import { createAppointment, updateAppointment, fetchAppointmentById } from '@/features/appointments/appointmentService'
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
+import { getClient, searchClientsForPicker, type ClientPickerItem } from '@/features/clients/clientService'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
 import { CalendarPickerModal } from '@/shared/components/ui/CalendarPickerModal'
@@ -17,7 +17,7 @@ import { TimePickerModal } from '@/shared/components/ui/TimePickerModal'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { Client } from '@/shared/lib/types'
+import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function initials(name: string | null | undefined) {
@@ -104,9 +104,10 @@ function SectionCard({ icon, title, children, colors, styles }: {
 
 // ── Field ─────────────────────────────────────────────────────────────────────
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  const { colors } = useTheme()
   return (
     <View style={{ gap: 6 }}>
-      <Text style={{ fontSize: 11, fontFamily: fonts.semibold, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+      <Text style={{ fontSize: 11, fontFamily: fonts.semibold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
         {label}
       </Text>
       {children}
@@ -116,34 +117,28 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ── Client Picker Modal ───────────────────────────────────────────────────────
 function ClientPickerModal({ visible, onClose, onSelect, userId, colors, styles }: {
-  visible: boolean; onClose: () => void; onSelect: (c: Client) => void
+  visible: boolean; onClose: () => void; onSelect: (c: ClientPickerItem) => void
   userId: string; colors: ThemeColors; styles: ReturnType<typeof makeStyles>
 }) {
   const { t } = useTranslation()
-  const { statusColors } = useTheme()
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<Client[]>([])
+  const [results, setResults] = useState<ClientPickerItem[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!visible || !userId) return
     setLoading(true)
-    supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('user_id', userId).is('archived_at', null).order('full_name').limit(60)
-      .then(({ data }) => { setResults((data ?? []) as Client[]); setLoading(false) })
+    searchClientsForPicker(userId).then(data => { setResults(data); setLoading(false) })
   }, [visible, userId])
 
   useEffect(() => {
     if (!visible || !userId || query.length === 0) {
-      if (visible && userId) {
-        supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('user_id', userId).is('archived_at', null).order('full_name').limit(60)
-          .then(({ data }) => setResults((data ?? []) as Client[]))
-      }
+      if (visible && userId) searchClientsForPicker(userId).then(setResults)
       return
     }
     if (query.length < 2) return
     const timer = setTimeout(() => {
-      supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('user_id', userId).is('archived_at', null).ilike('full_name', `%${query}%`).limit(20)
-        .then(({ data }) => setResults((data ?? []) as Client[]))
+      searchClientsForPicker(userId, query).then(setResults)
     }, 200)
     return () => clearTimeout(timer)
   }, [query, visible, userId])
@@ -169,7 +164,7 @@ function ClientPickerModal({ visible, onClose, onSelect, userId, colors, styles 
               keyExtractor={c => c.id}
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
-                const sc = statusColors[item.status] ?? null
+                const sc = getRoleColors(getPrimaryRole(item.contact_role), colors)
                 return (
                   <TouchableOpacity style={styles.clientRow} onPress={() => { onSelect(item); onClose() }} activeOpacity={0.7}>
                     <View style={[styles.clientAvatar, { backgroundColor: sc?.bg ?? colors.primaryLight }]}>
@@ -196,11 +191,11 @@ function ClientPickerModal({ visible, onClose, onSelect, userId, colors, styles 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export default function NewAppointmentScreen() {
   const { t, i18n } = useTranslation()
-  const { colors, statusColors } = useTheme()
+  const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
-  const { date: paramDate, time: paramTime, clientId: paramClientId, id: editId, returnTo } =
-    useLocalSearchParams<{ date?: string; time?: string; clientId?: string; id?: string; returnTo?: string }>()
+  const { date: paramDate, time: paramTime, clientId: paramClientId, id: editId, returnTo, prefillTitle } =
+    useLocalSearchParams<{ date?: string; time?: string; clientId?: string; id?: string; returnTo?: string; prefillTitle?: string }>()
   const { width } = useWindowDimensions()
   const isWide = width >= 768
   const isEdit = !!editId
@@ -218,9 +213,13 @@ export default function NewAppointmentScreen() {
   const defaultDate = paramDate ?? new Date().toISOString().split('T')[0]
   const defaultTime = paramTime ?? '09:00'
 
-  const [title,         setTitle]         = useState('')
+  // ACTION-FLOW-1 / P1 §19/§20 — préremplissage initial uniquement (lazy initializer, exécuté
+  // une seule fois au montage) : un rerender/changement de client/effet ultérieur ne peut jamais
+  // réécraser une saisie déjà faite par l'utilisateur, contrairement à un useEffect qui pourrait
+  // se redéclencher. Jamais utilisé en mode édition (editId charge son propre titre, §19).
+  const [title,         setTitle]         = useState(() => (prefillTitle ? decodeURIComponent(prefillTitle) : ''))
   const [apptType,      setApptType]      = useState<AppointmentType>('discovery_call')
-  const [selectedClient,setSelectedClient]= useState<Client | null>(null)
+  const [selectedClient,setSelectedClient]= useState<ClientPickerItem | null>(null)
   const [startDate,     setStartDate]     = useState(defaultDate)
   const [startTime,     setStartTime]     = useState(defaultTime)
   const [endDate,       setEndDate]       = useState(defaultDate)
@@ -243,10 +242,7 @@ export default function NewAppointmentScreen() {
 
   useEffect(() => {
     if (!paramClientId || !session) return
-    supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('id', paramClientId).single()
-      .then(({ data }) => {
-        if (data) setSelectedClient(data as Client)
-      })
+    getClient(paramClientId).then(setSelectedClient).catch(() => {})
   }, [paramClientId, session])
 
   useEffect(() => {
@@ -263,8 +259,7 @@ export default function NewAppointmentScreen() {
       setLocation(appt.location ?? '')
       setMeetingUrl(appt.meeting_url ?? '')
       if (appt.client_id) {
-        const { data } = await supabase.from('clients').select('id, full_name, first_name, email, status, pipeline_stage').eq('id', appt.client_id).single()
-        if (data) setSelectedClient(data as Client)
+        await getClient(appt.client_id).then(setSelectedClient).catch(() => {})
       }
       setLoadingAppt(false)
     }).catch(() => setLoadingAppt(false))
@@ -279,7 +274,7 @@ export default function NewAppointmentScreen() {
     if (d > endDate) setEndDate(d)
   }
 
-  function handleSelectClient(client: Client) {
+  function handleSelectClient(client: ClientPickerItem) {
     setSelectedClient(client)
   }
 
@@ -337,7 +332,7 @@ export default function NewAppointmentScreen() {
     }
   }
 
-  const sc = selectedClient ? (statusColors[selectedClient.status] ?? null) : null
+  const sc = selectedClient ? getRoleColors(getPrimaryRole(selectedClient.contact_role), colors) : null
 
   const typeOptions: { value: AppointmentType; label: string }[] = [
     { value: 'discovery_call',       label: t('appointment_types.discovery_call') },

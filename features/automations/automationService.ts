@@ -238,30 +238,13 @@ export async function applyOrderAutomation(
   }
 }
 
-// `noFollowupRequired` (Lot 1.2.1 §12) : quand le praticien a explicitement choisi qu'aucune
-// suite n'est nécessaire pour CE rendez-vous (refus définitif ou décision explicite), la
-// relance automatique générique "RDV complété" ne doit pas être créée. Reste indépendant des
-// automatismes de commande (applyOrderAutomation), qui ne sont jamais gatés par ce flag.
-export async function triggerAppointmentCompleted(
-  userId: string,
-  clientId: string,
-  firstName: string,
-  appointmentId?: string | null,
-  noFollowupRequired?: boolean,
-): Promise<void> {
-  try {
-    if (noFollowupRequired) return
-    const { modules, delays } = await getAutomationConfig(userId)
-    if (!modules.includes('auto_appointment')) return
-    const rules = AUTOMATION_RULES.filter(r => r.trigger === 'appointment')
-    for (const rule of rules) {
-      const delay = effectiveDelay(rule, delays)
-      await insertFollowup(userId, clientId, renderRuleTitle(rule, firstName, delay), dueDateStr(delay), rule.actionType, rule.id, appointmentId)
-    }
-  } catch (e) {
-    console.error('[automation.appointment]', e)
-  }
-}
+// RDV-FOLLOWUP-1/P0 — le trigger 'appointment' (règle appt_j7) n'est plus déclenché depuis
+// ensurePostCompletionActions : la relance après RDV passe désormais uniquement par le
+// mécanisme "Relance après ce RDV" (AppointmentOutcomeActionPlan.personalFollowup,
+// closure_action_key), préremplie par défaut à partir de cette même règle appt_j7 (voir
+// app/(app)/appointments/[id]/index.tsx). La règle reste dans AUTOMATION_RULES (source des
+// valeurs par défaut + délai global personnalisable via settings-automations.tsx), mais plus
+// aucune fonction de ce fichier ne l'utilise pour créer une relance elle-même.
 
 export async function checkNoContact(userId: string): Promise<void> {
   try {
