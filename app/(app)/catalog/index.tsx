@@ -15,6 +15,7 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { Input } from '@/shared/components/ui/Input'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
+import { ScreenHeader } from '@/shared/components/ui/ScreenHeader'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
@@ -545,6 +546,7 @@ export default function CatalogScreen() {
 
       {/* ── Fixed header ─────────────────────────────────────────────────── */}
       <View style={[styles.headerOuter, isWide && styles.headerOuterWide]}>
+        <ScreenHeader flush eyebrow={t('catalog.header_eyebrow')} title={t('catalog.title')} subtitle={t('catalog.header_subtitle')} />
         {catalogs.length > 1 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catalogTabsContent}>
             {catalogs.map(cat => {
@@ -809,7 +811,7 @@ export default function CatalogScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container:  { flex: 1, backgroundColor: colors.bgDim },
+  container:  { flex: 1, backgroundColor: colors.bg },
   loader:     { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listLoader: { marginTop: 48 },
   list:       { paddingBottom: 80 },
@@ -862,9 +864,9 @@ function makeStyles(colors: ThemeColors) {
 
   card: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.card, borderRadius: 12,
-    borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
-    boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 4, color: 'rgba(0, 0, 0, 0.04)' }], elevation: 1,
+    backgroundColor: colors.card, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.cardBorder, overflow: 'hidden',
+    boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }], elevation: 2,
   },
   cardAccent:  { width: 4, alignSelf: 'stretch' },
   cardBody:    { flex: 1, padding: 12, gap: 5 },

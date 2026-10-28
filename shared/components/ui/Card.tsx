@@ -21,13 +21,17 @@ export function Card({ children, style, padding = 16 }: Props) {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    // DESIGN-A — carte blanche sans contour sur fond crème, ombre douce en deux couches.
     card: {
       backgroundColor: colors.card,
-      borderRadius: 16,
+      borderRadius: 18,
       borderWidth: 1,
-      borderColor: colors.border,
-      boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 3, color: 'rgba(0, 0, 0, 0.04)' }],
-      elevation: 1,
+      borderColor: colors.cardBorder,
+      boxShadow: [
+        { offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' },
+        { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' },
+      ],
+      elevation: 2,
     },
   })
 }

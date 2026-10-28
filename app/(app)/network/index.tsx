@@ -194,6 +194,7 @@ export default function NetworkScreen() {
 
         {/* ── Header ──────────────────────────────────────── */}
         <View style={styles.header}>
+          <Text style={styles.eyebrow}>{t('network.header_eyebrow')}</Text>
           <Text style={styles.title}>{t('network.title')}</Text>
           <Text style={styles.subtitle}>{t('network.subtitle')}</Text>
 
@@ -336,11 +337,12 @@ export default function NetworkScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgDim },
+  container: { flex: 1, backgroundColor: colors.bg },
 
-  header:    { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, gap: 3 },
-  title:     { fontSize: 28, fontFamily: fonts.display, color: colors.text },
-  subtitle:  { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, marginBottom: 4 },
+  header:    { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 8, gap: 4 },
+  eyebrow:   { fontSize: 11, fontFamily: fonts.bold, color: colors.primary, textTransform: 'uppercase', letterSpacing: 1.2 },
+  title:     { fontSize: 30, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.6, lineHeight: 36 },
+  subtitle:  { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary, marginBottom: 6 },
 
   statsRow:  { flexDirection: 'row', gap: 10, marginTop: 4, marginBottom: 10 },
   statChip:  { flex: 1, backgroundColor: colors.card, borderRadius: 10, padding: 10, alignItems: 'center', borderWidth: 1, borderColor: colors.border },

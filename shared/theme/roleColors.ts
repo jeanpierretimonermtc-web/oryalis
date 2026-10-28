@@ -3,7 +3,9 @@ import type { ThemeColors } from './colors'
 
 export function getRoleColors(role: ContactRole, colors: ThemeColors) {
   switch (role) {
-    case 'distributor': return { bg: colors.secondaryLight, text: colors.secondary }
+    // Cyan foncé (onSecondaryContainer) plutôt que le cyan vif #22D3EE, illisible en texte sur
+    // fond clair — même teinte, contraste suffisant pour un badge ou un onglet.
+    case 'distributor': return { bg: colors.secondaryLight, text: colors.onSecondaryContainer }
     case 'leader':      return { bg: colors.tertiaryLight,  text: colors.tertiary  }
     case 'customer':    return { bg: colors.successLight,   text: colors.success   }
     case 'team_member': return { bg: colors.bgDim,          text: colors.textSecondary }

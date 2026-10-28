@@ -42,9 +42,9 @@ function inSegment(c: ClientListItem, s: Segment): boolean {
 
 // Filtres rapides, choix unique : chacun pilote les états existants (actionFilter/horizon) ou
 // un filtre ponctuel (prospects chauds, VIP) — jamais un second moteur de filtrage.
-type QuickFilter = 'all' | 'overdue' | 'todo' | 'none' | 'hot' | 'vip' | 'duplicates'
-const QUICK_FILTERS: QuickFilter[] = ['all', 'overdue', 'todo', 'none', 'hot', 'vip', 'duplicates']
-type ExtraFilter = 'hot' | 'vip' | 'duplicates' | null
+type QuickFilter = 'all' | 'overdue' | 'todo' | 'none' | 'hot' | 'vip' | 'inactive' | 'duplicates'
+const QUICK_FILTERS: QuickFilter[] = ['all', 'overdue', 'todo', 'none', 'hot', 'vip', 'inactive', 'duplicates']
+type ExtraFilter = 'hot' | 'vip' | 'inactive' | 'duplicates' | null
 
 // ACTION-3.2 — filtre "ce qui nécessite mon attention", dérivé uniquement de next_action_at
 // (déjà calculé côté DB, voir clients.next_action_* / migration 20260712_contact_activity_
@@ -211,6 +211,10 @@ function HealthPill({ health }: { health: RelationshipHealthInput }) {
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { tier } = computeRelationshipHealth(health)
+  // DESIGN-A — l'état du suivi ne s'affiche que s'il appelle une attention (en retard, à
+  // relancer, dormant) : "À jour" n'a pas besoin de badge, et son vert se confondait avec la
+  // couleur du rôle Client juste à côté.
+  if (tier === 'up_to_date') return null
   const sc = statusColors[tier] ?? { bg: colors.surfaceContainerHighest, text: colors.textTertiary }
   return (
     <View style={[styles.pill, { backgroundColor: sc.bg }]}>
@@ -586,6 +590,9 @@ export default function ClientsScreen() {
   const noActionContacts = useMemo(() => displayed.filter(c => !c.next_action_at), [displayed])
   const hotContacts = useMemo(() => displayed.filter(c => hotClientIds.has(c.id)), [displayed, hotClientIds])
   const vipContacts = useMemo(() => displayed.filter(c => c.is_vip), [displayed])
+  // Inactifs = rôle Inactif OU marqué inactif à la main dans la fiche (manually_inactive) —
+  // jamais "Dormant", qui décrit seulement l'absence de contact récent avec un contact actif.
+  const inactiveContacts = useMemo(() => displayed.filter(c => c.manually_inactive || c.contact_role.includes('inactive')), [displayed])
   // CONTACTS-DUPLICATES-1 — détection sur TOUS les contacts actifs (un doublon peut être rangé
   // dans un autre segment), puis restreinte aux contacts affichés ; groupes côte à côte.
   const duplicateInfo = useMemo(() => findDuplicates(clients), [clients])
@@ -675,6 +682,7 @@ export default function ClientsScreen() {
     : actionFilter === 'none' ? noActionContacts
     : extraFilter === 'hot' ? hotContacts
     : extraFilter === 'vip' ? vipContacts
+    : extraFilter === 'inactive' ? inactiveContacts
     : extraFilter === 'duplicates' ? duplicateContacts
     : displayed
 
@@ -684,7 +692,7 @@ export default function ClientsScreen() {
     : extraFilter ?? 'all'
 
   function applyQuick(q: QuickFilter) {
-    setExtraFilter(q === 'hot' || q === 'vip' || q === 'duplicates' ? q : null)
+    setExtraFilter(q === 'hot' || q === 'vip' || q === 'inactive' || q === 'duplicates' ? q : null)
     if (q === 'overdue') { setActionFilter('todo'); setHorizonFilter('overdue'); setSourceFilter('all') }
     else if (q === 'todo') { setActionFilter('todo'); if (isUrgencyWindow(horizonFilter)) setHorizonFilter('7d') }
     else if (q === 'none') setActionFilter('none')
@@ -698,6 +706,7 @@ export default function ClientsScreen() {
     none: noActionContacts.length,
     hot: hotContacts.length,
     vip: vipContacts.length,
+    inactive: inactiveContacts.length,
     duplicates: duplicateContacts.length,
   }
 
@@ -709,12 +718,17 @@ export default function ClientsScreen() {
 
         {/* Page header */}
         <View style={styles.pageHeader}>
-          <Text style={styles.pageTitle}>{t('clients.title')}</Text>
-          {clients.length > 0 && (
-            <View style={styles.countPill}>
-              <Text style={styles.countText}>{clients.length}</Text>
-            </View>
-          )}
+          {/* DESIGN-A — en-tête d'écran : étiquette + grand titre + synthèse en une ligne. */}
+          <View style={styles.pageHeading}>
+            <Text style={styles.pageEyebrow}>{t('clients.header_eyebrow')}</Text>
+            <Text style={styles.pageTitle}>{t('clients.title')}</Text>
+            {clients.length > 0 && (
+              <Text style={styles.pageSub}>
+                {t('clients.header_count', { count: clients.length })}
+                {segmentCounts.all.overdue > 0 ? ` · ${t('clients.segment_overdue', { count: segmentCounts.all.overdue })}` : ''}
+              </Text>
+            )}
+          </View>
           <TouchableOpacity style={styles.archiveLink} onPress={() => router.push('/(app)/clients/archived' as any)}>
             <Text style={styles.archiveLinkText}>{t('clients.archived_title')}</Text>
           </TouchableOpacity>
@@ -742,16 +756,29 @@ export default function ClientsScreen() {
           {SEGMENTS.map(s => {
             const active = segment === s
             const { total, overdue } = segmentCounts[s]
+            // Couleur d'identité de la population = celle de son badge de rôle sur les cartes
+            // (Partenaires = Conseillère, son rôle principal) ; "Tous" reste neutre (bleu nuit).
+            const segmentColor = s === 'all' ? null : getRoleColors(s === 'partner' ? 'distributor' : s, colors)
             return (
               <TouchableOpacity
                 key={s}
-                style={[styles.segmentTab, active && styles.segmentTabActive]}
+                style={[
+                  styles.segmentTab,
+                  active && (segmentColor ? { backgroundColor: segmentColor.bg, borderColor: segmentColor.text } : styles.segmentTabActive),
+                ]}
                 onPress={() => { setSegment(s); setPartnerRole(null); setPipelineFilter(null) }}
                 activeOpacity={0.75}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
               >
-                <Text style={[styles.segmentTabText, active && styles.segmentTabTextActive]} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.segmentTabText,
+                    segmentColor ? { color: segmentColor.text } : active && styles.segmentTabTextActive,
+                    active && { fontFamily: fonts.bold },
+                  ]}
+                  numberOfLines={1}
+                >
                   {t(SEGMENT_LABEL_KEY[s])} · {total}
                 </Text>
                 {overdue > 0 ? (
@@ -766,14 +793,25 @@ export default function ClientsScreen() {
           <View style={styles.miniFilterRow}>
             {[null, ...PARTNER_ROLES].map(r => {
               const active = partnerRole === r
+              // Même code couleur que les badges de rôle des cartes (getRoleColors) : chaque
+              // sous-filtre se reconnaît à sa couleur, actif = contour plein de cette couleur.
+              const rc = r ? getRoleColors(r, colors) : null
               return (
                 <TouchableOpacity
                   key={r ?? 'all'}
-                  style={[styles.miniFilterBtn, active && styles.miniFilterBtnActive]}
+                  style={[
+                    styles.miniFilterBtn,
+                    rc
+                      ? { backgroundColor: rc.bg, borderColor: active ? rc.text : rc.bg }
+                      : active && styles.miniFilterBtnActive,
+                  ]}
                   onPress={() => setPartnerRole(r)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.miniFilterText, active && styles.miniFilterTextActive]}>
+                  <Text style={[
+                    styles.miniFilterText,
+                    rc ? { color: rc.text, fontFamily: active ? fonts.bold : fonts.semibold } : active && styles.miniFilterTextActive,
+                  ]}>
                     {r ? getRoleLabel(r) : t('clients.segment_partners_all')}
                   </Text>
                 </TouchableOpacity>
@@ -786,21 +824,18 @@ export default function ClientsScreen() {
         <View style={styles.actionFilterRow}>
           {QUICK_FILTERS.map(q => {
             const active = activeQuick === q
-            const tint = q === 'overdue' ? colors.danger
-              : q === 'todo' ? colors.warning
-              : q === 'hot' ? colors.danger
-              : q === 'vip' ? statusColors.vip.text
-              : q === 'duplicates' ? colors.tertiary
-              : q === 'none' ? colors.textSecondary
-              : colors.primary
+            // DESIGN-A — filtres neutres, actif en bleu adouci (fond teinté + contour, jamais un
+            // aplat sombre) ; seul "En retard" garde sa couleur
+            // d'alerte quand il existe réellement des retards.
+            const idleColor = q === 'overdue' && quickCount.overdue > 0 ? colors.danger : colors.textSecondary
             return (
               <TouchableOpacity
                 key={q}
-                style={[styles.chip, { backgroundColor: active ? tint : colors.card, borderColor: active ? tint : colors.border }]}
+                style={[styles.chip, { backgroundColor: active ? colors.primaryLight : colors.card, borderColor: active ? colors.primary : colors.border }]}
                 onPress={() => applyQuick(q)}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.chipText, { color: active ? '#fff' : tint, fontFamily: active ? fonts.bold : fonts.medium }]}>
+                <Text style={[styles.chipText, { color: active ? colors.primary : idleColor, fontFamily: active ? fonts.bold : fonts.semibold }]}>
                   {t(`clients.quick_filter_${q}`)} · {quickCount[q]}
                 </Text>
               </TouchableOpacity>
@@ -1063,10 +1098,11 @@ function makeStyles(colors: ThemeColors) {
   innerWide:  { maxWidth: 1100, alignSelf: 'center' },
 
   // ── Page header ────────────────────────────────────────────────────────────
-  pageHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
-  pageTitle:  { fontSize: 28, fontFamily: fonts.display, color: colors.text },
-  countPill:  { backgroundColor: colors.primaryLight, borderRadius: 9999, paddingHorizontal: 10, paddingVertical: 3 },
-  countText:  { fontSize: 13, fontFamily: fonts.bold, color: colors.primaryAction },
+  pageHeader: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 14 },
+  pageHeading: { flex: 1, minWidth: 0 },
+  pageEyebrow: { fontSize: 11, fontFamily: fonts.bold, color: colors.primary, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 },
+  pageTitle:  { fontSize: 30, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.6, lineHeight: 36 },
+  pageSub:    { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 4 },
   archiveLink: { marginLeft: 'auto', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 7 },
   archiveLinkText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.textSecondary },
   newClientBtn: {
@@ -1085,8 +1121,8 @@ function makeStyles(colors: ThemeColors) {
   pipelineFilterClear: { fontSize: 18, color: colors.tertiary },
 
   // ── Search ─────────────────────────────────────────────────────────────────
-  searchWrap:  { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 12, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12 },
   searchEmoji: { fontSize: 14, marginRight: 8, opacity: 0.6 },
+  searchWrap:  { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 12, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12 },
   searchInput: { flex: 1, fontSize: 15, fontFamily: fonts.body, color: colors.text, paddingVertical: 11 },
 
   // ── Filter chips ───────────────────────────────────────────────────────────
@@ -1110,10 +1146,10 @@ function makeStyles(colors: ThemeColors) {
   examplesWrap: { width: '100%', alignSelf: 'stretch', paddingTop: 8 },
   duplicatesHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, paddingHorizontal: 16, marginTop: -2, marginBottom: 10, lineHeight: 17 },
   segmentRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 16, marginBottom: 10 },
-  segmentTab: { flex: 1, paddingVertical: 9, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: 'center', gap: 2 },
-  segmentTabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  segmentTab: { flex: 1, paddingVertical: 9, paddingHorizontal: 6, borderRadius: 14, borderWidth: 1, borderColor: colors.cardBorder, backgroundColor: colors.card, alignItems: 'center', gap: 2, boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 3, color: 'rgba(27, 36, 51, 0.06)' }] },
+  segmentTabActive: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
   segmentTabText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
-  segmentTabTextActive: { color: '#fff' },
+  segmentTabTextActive: { color: colors.primary },
   segmentOverdue: { fontSize: 10, fontFamily: fonts.semibold, color: colors.danger, backgroundColor: colors.dangerLight, borderRadius: 6, paddingHorizontal: 5, overflow: 'hidden' },
 
   // Menu horizon/type — conteneur devenu AnchoredMenu (UI-POPOVER-2.1).
@@ -1130,13 +1166,16 @@ function makeStyles(colors: ThemeColors) {
   card: {
     flex: 1,
     backgroundColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 16,
     gap: 14,
     justifyContent: 'space-between',
     borderWidth: 1,
-    borderColor: colors.border,
-    boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 16, color: 'rgba(28, 26, 23, 0.06)' }],
+    borderColor: colors.cardBorder,
+    boxShadow: [
+      { offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' },
+      { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' },
+    ],
     elevation: 2,
   },
   cardBody:  { gap: 10 },

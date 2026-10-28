@@ -78,26 +78,29 @@ function QuickCard({
     )
   }
 
+  // DESIGN-A — action secondaire discrète : le dégradé reste réservé à l'action principale.
   return (
     <TouchableOpacity
       style={[styles.quickCard, styles.quickCardTint]}
       onPress={onPress}
       activeOpacity={0.85}
     >
-      <LineIcon name={icon} size={18} color={colors.onSecondary} strokeWidth={2.2} />
-      <Text style={[styles.quickCardLabel, { color: colors.onSecondary }]}>{label}</Text>
+      <LineIcon name={icon} size={18} color={colors.primary} strokeWidth={2.2} />
+      <Text style={[styles.quickCardLabel, { color: colors.primary }]}>{label}</Text>
     </TouchableOpacity>
   )
 }
 
 // ── KPI card ─────────────────────────────────────────────────────────────────
+// DESIGN-A — compteurs neutres : plus de couleur propre à chaque carte ni de bande latérale.
+// Seule une vraie alerte (ex. contacts en retard > 0) passe en rouge, pour que l'œil aille
+// directement à ce qui demande une action.
 function KpiCard({
   icon,
   value,
   label,
   delta,
-  accent,
-  bg,
+  alert = false,
   onPress,
   wide,
 }: {
@@ -105,8 +108,7 @@ function KpiCard({
   value: number
   label: string
   delta?: string
-  accent: string
-  bg: string
+  alert?: boolean
   onPress?: () => void
   wide?: boolean
 }) {
@@ -118,19 +120,19 @@ function KpiCard({
       style={[
         styles.kpiCard,
         wide ? styles.kpiCardWide : styles.kpiCardMobile,
-        { borderLeftWidth: 3, borderLeftColor: accent },
+        alert && { borderColor: colors.dangerLight },
       ]}
       onPress={onPress}
       activeOpacity={onPress ? 0.8 : 1}
     >
       <View style={styles.kpiTop}>
         <Text style={styles.kpiLabel}>{label}</Text>
-        <View style={[styles.kpiIconBox, { backgroundColor: bg }]}>
+        <View style={[styles.kpiIconBox, { backgroundColor: alert ? colors.dangerLight : colors.bgDim }]}>
           <Text style={styles.kpiIconText}>{icon}</Text>
         </View>
       </View>
 
-      <Text style={[styles.kpiValue, { color: accent }]}>{value}</Text>
+      <Text style={[styles.kpiValue, { color: alert ? colors.danger : colors.text }]}>{value}</Text>
 
       {delta ? <Text style={styles.kpiDelta}>{delta}</Text> : null}
     </TouchableOpacity>
@@ -572,6 +574,9 @@ export default function DashboardScreen() {
         {/* ── Greeting ──────────────────────────────────── */}
         <View style={styles.greetingRow}>
           <View style={styles.greetingLeft}>
+            <Text style={styles.eyebrow}>
+              {new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
+            </Text>
             <Text style={styles.greeting} numberOfLines={2}>
               {greeting}
               {firstName ? `, ${firstName}` : ''}
@@ -610,8 +615,7 @@ export default function DashboardScreen() {
             value={urgency.overdue}
             label={t('dashboard.urgency.overdue')}
             delta={t('dashboard.urgency.overdue_hint')}
-            accent={urgency.overdue > 0 ? colors.danger : colors.textTertiary}
-            bg={urgency.overdue > 0 ? colors.dangerLight : colors.bgDim}
+            alert={urgency.overdue > 0}
             onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'todo', horizon: 'overdue' } } as any)}
           />
           <KpiCard
@@ -620,8 +624,6 @@ export default function DashboardScreen() {
             value={urgency.due_today}
             label={t('dashboard.urgency.due_today')}
             delta={t('dashboard.urgency.due_today_hint')}
-            accent={urgency.due_today > 0 ? colors.warning : colors.textTertiary}
-            bg={urgency.due_today > 0 ? colors.warningLight : colors.bgDim}
             onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'todo', horizon: 'due_today' } } as any)}
           />
           <KpiCard
@@ -630,8 +632,6 @@ export default function DashboardScreen() {
             value={urgency.next_7d}
             label={t('dashboard.urgency.next_7d')}
             delta={t('dashboard.urgency.next_7d_hint')}
-            accent={colors.primary}
-            bg={colors.primaryLight}
             onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'todo', horizon: 'next_7d' } } as any)}
           />
           <KpiCard
@@ -640,8 +640,6 @@ export default function DashboardScreen() {
             value={urgency.no_action}
             label={t('dashboard.urgency.no_action')}
             delta={t('dashboard.urgency.no_action_hint')}
-            accent={urgency.no_action > 0 ? colors.textSecondary : colors.textTertiary}
-            bg={colors.bgDim}
             onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all', action: 'none' } } as any)}
           />
         </View>
@@ -664,8 +662,6 @@ export default function DashboardScreen() {
             value={stats.totalClients}
             label={t('dashboard.stats.total_clients')}
             delta={t('dashboard.kpi.new_month', { count: stats.newThisMonth })}
-            accent={colors.secondary}
-            bg={colors.secondaryLight}
             onPress={() =>
               router.push({ pathname: '/(app)/clients', params: { status: 'all' } } as any)
             }
@@ -677,8 +673,6 @@ export default function DashboardScreen() {
             value={stats.prospects}
             label={t('dashboard.stats.prospects')}
             delta={t('dashboard.kpi.prospects_delta')}
-            accent={colors.primary}
-            bg={colors.primaryLight}
             onPress={() =>
               router.push({ pathname: '/(app)/clients', params: { status: 'prospect' } } as any)
             }
@@ -694,8 +688,6 @@ export default function DashboardScreen() {
                 ? `${overdueFollowupCount} ${t('dashboard.kpi.overdue')}`
                 : t('dashboard.kpi.active_pct', { pct: activePct })
             }
-            accent={overdueFollowupCount > 0 ? colors.danger : colors.warning}
-            bg={overdueFollowupCount > 0 ? colors.dangerLight : colors.warningLight}
             onPress={() => router.push('/(app)/followups')}
           />
 
@@ -705,8 +697,6 @@ export default function DashboardScreen() {
             value={actionsTodayCount}
             label={t('dashboard.stats.interactions_today')}
             delta={t('dashboard.kpi.today_delta')}
-            accent={colors.tertiary}
-            bg={colors.tertiaryLight}
           />
         </View>
 
@@ -721,8 +711,6 @@ export default function DashboardScreen() {
               icon="🌐"
               value={stats.networkSize}
               label={t('dashboard.kpi_network_size')}
-              accent={colors.tertiary}
-              bg={colors.tertiaryLight}
               onPress={() => router.push('/(app)/network' as any)}
             />
 
@@ -731,8 +719,6 @@ export default function DashboardScreen() {
               icon="🆕"
               value={stats.newRecruits}
               label={t('dashboard.kpi_new_recruits')}
-              accent={colors.secondary}
-              bg={colors.secondaryLight}
               onPress={() => router.push('/(app)/network' as any)}
             />
           </View>
@@ -745,8 +731,6 @@ export default function DashboardScreen() {
             icon="💶"
             value={Math.round(monthRevenue)}
             label={t('dashboard.kpi_revenue')}
-            accent={colors.success}
-            bg={colors.successLight}
             onPress={() => router.push('/(app)/orders' as any)}
           />
 
@@ -755,8 +739,6 @@ export default function DashboardScreen() {
             icon="✅"
             value={stats.completedThisMonth}
             label={t('dashboard.kpi_completed_rdv')}
-            accent={colors.primary}
-            bg={colors.primaryLight}
             onPress={() => router.push('/(app)/appointments')}
           />
 
@@ -765,8 +747,6 @@ export default function DashboardScreen() {
             icon="🌱"
             value={stats.newThisMonth}
             label={t('dashboard.kpi_new_contacts')}
-            accent={colors.secondary}
-            bg={colors.secondaryLight}
             onPress={() =>
               router.push({ pathname: '/(app)/clients', params: { status: 'all' } } as any)
             }
@@ -891,18 +871,29 @@ function makeStyles(colors: ThemeColors) {
       flex: 1,
     },
 
-    greeting: {
-      fontSize: 24,
-      fontFamily: fonts.display,
+    // DESIGN-A — en-tête d'écran : étiquette (date) + grand titre bleu nuit + phrase d'appui.
+    eyebrow: {
+      fontSize: 11,
+      fontFamily: fonts.bold,
       color: colors.primary,
-      lineHeight: 30,
+      textTransform: 'uppercase',
+      letterSpacing: 1.2,
+      marginBottom: 4,
+    },
+
+    greeting: {
+      fontSize: 30,
+      fontFamily: fonts.display,
+      color: colors.text,
+      lineHeight: 36,
+      letterSpacing: -0.6,
     },
 
     greetingSub: {
-      fontSize: 13,
-      fontFamily: fonts.medium,
+      fontSize: 14,
+      fontFamily: fonts.body,
       color: colors.textSecondary,
-      marginTop: 2,
+      marginTop: 4,
     },
 
     quickRow: {
@@ -923,8 +914,10 @@ function makeStyles(colors: ThemeColors) {
     },
 
     quickCardTint: {
-      backgroundColor: colors.secondary,
-      boxShadow: [{ offsetX: 0, offsetY: 3, blurRadius: 10, color: 'rgba(34, 211, 238, 0.35)' }],
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }],
     },
 
     quickCardLabel: {
@@ -949,9 +942,12 @@ function makeStyles(colors: ThemeColors) {
       padding: 18,
       gap: 8,
       borderWidth: 1,
-      borderColor: colors.border,
-      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.045)' }],
-      elevation: 1,
+      borderColor: colors.cardBorder,
+      boxShadow: [
+        { offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' },
+        { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' },
+      ],
+      elevation: 2,
     },
 
     kpiCardMobile: {
@@ -1061,9 +1057,12 @@ function makeStyles(colors: ThemeColors) {
       borderRadius: 18,
       overflow: 'hidden',
       borderWidth: 1,
-      borderColor: colors.border,
-      boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.045)' }],
-      elevation: 1,
+      borderColor: colors.cardBorder,
+      boxShadow: [
+        { offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' },
+        { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' },
+      ],
+      elevation: 2,
     },
 
     divider: {
@@ -1186,7 +1185,7 @@ function makeStyles(colors: ThemeColors) {
       marginTop: 4,
     },
 
-    actionCenter: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 18, gap: 16 },
+    actionCenter: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.cardBorder, boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }], elevation: 2, padding: 18, gap: 16 },
     actionCenterHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     actionCenterTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text },
     actionCenterSub: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 3 },
@@ -1204,7 +1203,7 @@ function makeStyles(colors: ThemeColors) {
     // ── DASH/CAL-2 / DASH/CAL-2.1 — Agenda personnel : bloc secondaire, repliable, jamais
     // danger/warning/primary (aucune notion d'urgence CRM ici). Header seul cliquable (zone
     // tactile suffisante via paddingVertical), contenu masqué tant que isOpen est false.
-    personalAgenda: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 4 },
+    personalAgenda: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.cardBorder, boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }], elevation: 2, padding: 16, gap: 4 },
     personalAgendaHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
     personalAgendaIconBox: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgDim },
     personalAgendaTitle: { flex: 1, fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
@@ -1219,7 +1218,7 @@ function makeStyles(colors: ThemeColors) {
     personalAgendaEventTitle: { flex: 1, fontSize: 13.5, fontFamily: fonts.body, color: colors.textSecondary },
     personalAgendaLink: { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.textSecondary, marginTop: 8, textAlign: 'center' },
 
-    topPriorities: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 18, gap: 12 },
+    topPriorities: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.cardBorder, boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }], elevation: 2, padding: 18, gap: 12 },
     topPrioritiesTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text, marginBottom: 2 },
     topPriorityCard: { borderRadius: 12, borderLeftWidth: 3, backgroundColor: colors.bgDim, padding: 10, gap: 6 },
     topPriorityRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10 },

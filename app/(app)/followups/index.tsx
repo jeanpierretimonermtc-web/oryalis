@@ -10,6 +10,7 @@ import { OpenActionLink } from '@/shared/components/ui/OpenActionLink'
 import { CompleteToggle } from '@/shared/components/ui/CompleteToggle'
 import { useFollowupBadge } from '@/features/notifications/useNotifications'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
+import { ScreenHeader } from '@/shared/components/ui/ScreenHeader'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
@@ -224,10 +225,7 @@ export default function FollowupsScreen() {
         <View style={[styles.inner, isWide && styles.innerWide]}>
 
           {/* ── Header ─────────────────────────────────────── */}
-          <View style={styles.pageHeader}>
-            <Text style={styles.pageTitle}>{t('followups.title')}</Text>
-            <Text style={styles.pageSub}>{t('followups.center_subtitle')}</Text>
-          </View>
+          <ScreenHeader eyebrow={t('followups.header_eyebrow')} title={t('followups.title')} subtitle={t('followups.center_subtitle')} />
 
           {/* ── Tab bar ────────────────────────────────────── */}
           <View style={styles.tabBar}>
@@ -299,13 +297,10 @@ export default function FollowupsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgDim },
+  container: { flex: 1, backgroundColor: colors.bg },
   inner:     { flex: 1, width: '100%' },
   innerWide: { maxWidth: 900, alignSelf: 'center' },
 
-  pageHeader: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 4, gap: 3 },
-  pageTitle:  { fontSize: 28, fontFamily: fonts.display, color: colors.text },
-  pageSub:    { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary },
 
   tabBar:     { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border, marginHorizontal: 16, marginBottom: 12 },
   tabItem:    { flex: 1, alignItems: 'center', paddingBottom: 0 },
@@ -322,15 +317,19 @@ function makeStyles(colors: ThemeColors) {
 
   card: {
     backgroundColor: colors.card,
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: 18,
+    padding: 16,
     gap: 8,
-    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 6, color: 'rgba(0, 0, 0, 0.05)' }],
+    boxShadow: [
+      { offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' },
+      { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' },
+    ],
     elevation: 2,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
   },
-  cardOverdue: { borderLeftWidth: 3, borderLeftColor: colors.danger },
+  // DESIGN-A — retard signalé par un contour rouge doux plutôt qu'une bande latérale.
+  cardOverdue: { borderColor: colors.dangerLight },
 
   row1:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
   row1Content: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -340,9 +339,9 @@ function makeStyles(colors: ThemeColors) {
   clientName:{ fontSize: 14, fontFamily: fonts.bold, color: colors.text },
 
   badgesRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
+  tempEmoji: { fontSize: 15 },
   badge:     { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
   badgeText: { fontSize: 10, fontFamily: fonts.bold },
-  tempEmoji: { fontSize: 15 },
 
 
   taskTitle:  { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18, paddingLeft: 50 },

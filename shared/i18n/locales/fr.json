@@ -17,6 +17,9 @@
     "filter_all": "Tous",
     "action_filter_todo": "À traiter",
     "action_filter_none": "Sans action",
+    "header_eyebrow": "Mon réseau",
+    "header_count_one": "{{count}} contact",
+    "header_count_other": "{{count}} contacts",
     "segment_prospects": "Prospects",
     "segment_customers": "Clients",
     "segment_partners": "Partenaires",
@@ -245,7 +248,8 @@
       "leader": "Leader",
       "team_member": "Membre équipe",
       "inactive": "Inactif"
-    }
+    },
+    "quick_filter_inactive": "Inactifs"
   },
   "appointments": {
     "title": "Rendez-vous",
@@ -636,7 +640,8 @@
     "outcome_sale_price_warning_one": "{{count}} produit vendu sans prix — le total est incomplet.",
     "outcome_sale_price_warning_other": "{{count}} produits vendus sans prix — le total est incomplet.",
     "return_to_current": "Revenir au RDV actuel",
-    "current_appointment": "RDV actuel"
+    "current_appointment": "RDV actuel",
+    "header_eyebrow": "Mon agenda"
   },
   "appointment_types": {
     "discovery_call": "Appel découverte",
@@ -811,7 +816,9 @@
     "all_returned_confirm": "Marquer comme retournée",
     "followups_title": "Relances à créer",
     "followup_days_label": "J+",
-    "followups_confirm": "Confirmer"
+    "followups_confirm": "Confirmer",
+    "header_eyebrow": "Mes ventes",
+    "header_subtitle": "Toutes tes commandes du mois, retours déduits."
   },
   "followups": {
     "title": "Relances",
@@ -871,7 +878,8 @@
     "preset_custom": "Date personnalisée",
     "closed_simple_label": "Clôturée simplement",
     "exchange_recorded": "Échange enregistré",
-    "view_exchange": "Voir l'échange"
+    "view_exchange": "Voir l'échange",
+    "header_eyebrow": "Mon suivi"
   },
   "notes": {
     "add": "Ajouter une note...",
@@ -918,7 +926,8 @@
     "upline_level": "Niveau {{n}}",
     "upline_save": "Enregistrer",
     "upline_delete": "Supprimer",
-    "upline_edit": "Modifier"
+    "upline_edit": "Modifier",
+    "header_eyebrow": "Mon équipe"
   },
   "catalog": {
     "title": "Catalogue",
@@ -970,7 +979,9 @@
     "close": "Fermer",
     "cancel": "Annuler",
     "select_products_for": "Sélectionner les produits pour",
-    "create_recommendations_button": "Créer {{count}} recommandation{{plural}}"
+    "create_recommendations_button": "Créer {{count}} recommandation{{plural}}",
+    "header_eyebrow": "Mes produits",
+    "header_subtitle": "Tes catalogues de marques et tes produits personnels."
   },
   "mlm_values": {
     "title": "Mes valeurs MLM",

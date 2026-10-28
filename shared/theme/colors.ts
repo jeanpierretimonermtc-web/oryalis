@@ -11,35 +11,41 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Light mode ───────────────────────────────────────────────────────────────
+// DESIGN-A — fond crème chaud + cartes blanches (qui se détachent sans bordure), neutres
+// légèrement chauds, bleu plus profond et moins saturé. Le dégradé cyan→bleu→violet reste
+// réservé au logo et à un seul bouton principal par écran.
 const light = {
   // ── Backgrounds & surfaces ────────────────────────────────────────────────
-  bg:                      '#FFFFFF',
-  surface:                 '#F8FAFC',
-  bgDim:                   '#F1F5F9',    // surfaceAlt — secondary bg, sheet fills
+  bg:                      '#F6F4EF',
+  surface:                 '#FAF8F4',
+  bgDim:                   '#EFECE5',    // surfaceAlt — secondary bg, sheet fills
   card:                    '#FFFFFF',
-  surfaceContainerLow:     '#F8FAFC',
-  surfaceContainer:        '#F1F5F9',
-  surfaceContainerHigh:    '#E2E8F0',
-  surfaceContainerHighest: '#CBD5E1',
+  surfaceContainerLow:     '#FAF8F4',
+  surfaceContainer:        '#EFECE5',
+  surfaceContainerHigh:    '#E6E1D7',
+  surfaceContainerHighest: '#D3CDC1',
 
   // ── Text ─────────────────────────────────────────────────────────────────
-  text:           '#0F172A',   // textPrimary  — headings, body
-  textSecondary:  '#475569',   // labels, secondary info
-  textTertiary:   '#94A3B8',   // textMuted — placeholders, meta, hints
+  text:           '#1B2433',   // textPrimary  — headings, body (bleu nuit)
+  textSecondary:  '#5B6372',   // labels, secondary info
+  textTertiary:   '#9A9FA9',   // textMuted — placeholders, meta, hints
   textInverse:    '#FFFFFF',
   inverseText:    '#F8FAFC',
 
   // ── Borders ───────────────────────────────────────────────────────────────
-  border:         '#E2E8F0',
-  borderStrong:   '#CBD5E1',
+  border:         '#E8E3D9',
+  borderStrong:   '#D3CDC1',
+  // Contour des cartes : invisible sur le fond crème (l'ombre douce suffit), conservé en
+  // mode sombre où une carte sans contour se confondrait avec le fond.
+  cardBorder:     'transparent',
 
   // ── Primary action (blue) ─────────────────────────────────────────────────
-  primary:              '#2563EB',
-  primaryAction:        '#1D4ED8',   // hover / pressed
-  primaryLight:         '#DBEAFE',   // tinted surface
-  primaryLighter:       '#EFF6FF',
+  primary:              '#2F4FB5',
+  primaryAction:        '#24409A',   // hover / pressed
+  primaryLight:         '#E7ECF8',   // tinted surface
+  primaryLighter:       '#F2F5FC',
   onPrimary:            '#FFFFFF',
-  onPrimaryContainer:   '#1E40AF',
+  onPrimaryContainer:   '#1F3687',
 
   // ── Cyan brand accent ────────────────────────────────────────────────────
   secondary:            '#22D3EE',
@@ -91,10 +97,12 @@ const dark: typeof light = {
   // ── Borders ───────────────────────────────────────────────────────────────
   border:         '#334155',
   borderStrong:   '#475569',
+  cardBorder:     '#263548',
 
   // ── Primary action (blue — slightly brighter on dark bg) ─────────────────
-  primary:              '#3B82F6',
-  primaryAction:        '#2563EB',
+  // DESIGN-A — même bleu adouci qu'en clair, éclairci juste assez pour rester lisible.
+  primary:              '#5B7FE0',
+  primaryAction:        '#4A6CD0',
   primaryLight:         '#1E3A5F',
   primaryLighter:       '#172844',
   onPrimary:            '#FFFFFF',

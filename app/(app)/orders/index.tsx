@@ -8,6 +8,7 @@ import { fetchOrderItemsForOrders, getOrderReturnStatus } from '@/features/order
 import { OrderEditModal } from '@/features/orders/OrderEditModal'
 import { getOrderProgramBadge } from '@/features/clients/lrpProgramService'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
+import { ScreenHeader } from '@/shared/components/ui/ScreenHeader'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
@@ -91,6 +92,8 @@ export default function OrdersScreen() {
       <Stack.Screen options={{ title: t('orders.title'), headerBackTitle: '' }} />
       <AdvisorGate feature={t('subscription.features.orders')}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+
+        <ScreenHeader flush eyebrow={t('orders.header_eyebrow')} title={t('orders.title')} subtitle={t('orders.header_subtitle')} />
 
         {/* ── Filtre mois ────────────────────────────────────────── */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthRow}>
@@ -262,7 +265,7 @@ export default function OrdersScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgDim },
+  container: { flex: 1, backgroundColor: colors.bg },
   content:   { padding: 16, gap: 12, maxWidth: 800, alignSelf: 'center', width: '100%' },
 
   monthRow: { gap: 8, paddingBottom: 4 },
@@ -280,27 +283,29 @@ function makeStyles(colors: ThemeColors) {
 
   kpiCard: {
     backgroundColor: colors.card,
-    borderRadius: 14,
+    borderRadius: 18,
     padding: 18,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
+    boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }],
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   kpiLeft:     { gap: 2 },
   kpiLabel:    { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
-  kpiValue:    { fontSize: 28, fontFamily: fonts.bold, color: colors.primary },
+  kpiValue:    { fontSize: 28, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.5 },
   kpiRight:    { alignItems: 'flex-end', gap: 2 },
   kpiSubLabel: { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
   kpiSubValue: { fontSize: 20, fontFamily: fonts.bold, color: colors.text },
 
   card: {
     backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
+    boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }],
     gap: 6,
   },
   cardCancelled: { opacity: 0.55 },
@@ -308,7 +313,7 @@ function makeStyles(colors: ThemeColors) {
   cardLeft:   { flex: 1, gap: 2 },
   // LRP-4.5 §4/§17 — le contact prime visuellement sur la date (taille/graisse), sans surcharger
   // la carte : même hiérarchie de champs qu'avant, ordre et poids inversés.
-  cardClient: { fontSize: 15, fontFamily: fonts.bold, color: colors.primary },
+  cardClient: { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
   cardDate:   { fontSize: 12, fontFamily: fonts.medium, color: colors.textTertiary, marginTop: 1, flexShrink: 0 },
   cardProduct:{ fontSize: 14, fontFamily: fonts.semibold, color: colors.text, marginTop: 2 },
   cardTextCancelled: { textDecorationLine: 'line-through' },

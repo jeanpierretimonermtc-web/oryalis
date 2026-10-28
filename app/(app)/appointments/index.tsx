@@ -868,7 +868,10 @@ export default function AgendaScreen() {
       <View style={styles.container}>
 
         <View style={styles.pageHeader}>
-          <Text style={styles.pageTitle}>{t('appointments.nav_title')}</Text>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.pageEyebrow}>{t('appointments.header_eyebrow')}</Text>
+            <Text style={styles.pageTitle}>{t('appointments.nav_title')}</Text>
+          </View>
           <View style={styles.headerRight}>
             {gcConfigured && (
               <TouchableOpacity
@@ -1075,7 +1078,7 @@ export default function AgendaScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgDim },
+  container: { flex: 1, backgroundColor: colors.bg },
 
   // Menu d'action rapide sur un RDV du calendrier — conteneur devenu AnchoredMenu
   // (UI-POPOVER-2), seul le contenu interne (header aperçu + lignes) reste ici.
@@ -1111,8 +1114,9 @@ function makeStyles(colors: ThemeColors) {
   previewStatus:  { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary, marginTop: 2 },
   previewTitle:   { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, marginTop: 6 },
 
-  pageHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
-  pageTitle:    { fontSize: 28, fontFamily: fonts.display, color: colors.text },
+  pageHeader:   { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 12 },
+  pageEyebrow:  { fontSize: 11, fontFamily: fonts.bold, color: colors.primary, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 },
+  pageTitle:    { fontSize: 30, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.6, lineHeight: 36 },
   headerRight:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
   todayBtn:     { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: colors.primaryLight },
   todayBtnText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
