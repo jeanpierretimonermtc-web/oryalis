@@ -2339,7 +2339,19 @@
     "brand_note_single": "🏷 Les inscrits arrivent avec ta marque {{brand}} sur leur fiche (choisie dans Paramètres → Ma marque).",
     "brand_note_none": "Les inscrits arrivent sans marque (Paramètres → Ma marque : Générique).",
     "not_created_yet": "Cette page n’existe pas encore : complète les champs ci-dessous puis crée-la pour obtenir ton lien.",
-    "create_page": "Créer la page"
+    "create_page": "Créer la page",
+    "reset": "Réinitialiser les textes et l’adresse",
+    "reset_done": "Valeurs par défaut remises : appuie sur Enregistrer pour les appliquer.",
+    "delete_page": "Supprimer cette page",
+    "delete_confirm": "Supprimer la page {{url}} ?",
+    "delete_hint": "Le lien ne fonctionnera plus. Les contacts déjà créés restent dans tes Contacts. Tu pourras recréer une page à tout moment.",
+    "delete_submissions_one": "{{count}} inscription de cette page disparaîtra de la liste.",
+    "delete_submissions_other": "{{count}} inscriptions de cette page disparaîtront de la liste.",
+    "delete_pending_one": "Attention : {{count}} est en attente, sans contact créé.",
+    "delete_pending_other": "Attention : {{count}} sont en attente, sans contact créé.",
+    "delete_confirm_btn": "Supprimer la page",
+    "deleted": "Page supprimée.",
+    "slug_change_warning": "En enregistrant, l’ancien lien ne fonctionnera plus : pense à le remplacer là où tu l’as partagé."
   },
   "public_lead": {
     "with": "avec {{name}}",

@@ -2622,8 +2622,8 @@ export default function ClientDetailScreen() {
                 <View style={[styles.card, { width: '100%' }]}>
                   <View style={styles.cardHeader}>
                     <Text style={styles.cardTitle}>{t('clients.sections.personal')}</Text>
-                    <TouchableOpacity onPress={() => router.push(`/(app)/clients/${id}/edit`)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Text style={styles.cardMenu}>⋮</Text>
+                    <TouchableOpacity style={styles.heroMoreBtn} onPress={() => router.push(`/(app)/clients/${id}/edit`)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                      <Text style={styles.heroMoreIcon}>⋮</Text>
                     </TouchableOpacity>
                   </View>
                   <View style={styles.fieldGrid}>
@@ -3155,7 +3155,6 @@ function makeStyles(colors: ThemeColors) {
   // minWidth non nul : le titre refuse de rétrécir sous une largeur lisible — c'est ce qui
   // déclenche le flexWrap ci-dessus au lieu d'un rétrécissement infini du texte.
   cardTitle:  { fontSize: 16, fontFamily: fonts.semibold, color: colors.text, flex: 1, minWidth: 90 },
-  cardMenu:   { fontSize: 20, color: colors.textTertiary, lineHeight: 24 },
   iconBox:    { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.surfaceContainer, alignItems: 'center', justifyContent: 'center' },
 
   // Field rows

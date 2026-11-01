@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Switch, Platform, Linking } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Switch, Linking } from 'react-native'
 import { Stack, router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import * as Clipboard from 'expo-clipboard'
@@ -13,18 +13,12 @@ import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 import { useBrands } from '@/features/brands/useBrands'
 import { BrandAvatar } from '@/features/brands/BrandPill'
 import { useLeadForm } from '@/features/leads/useLeadForm'
-import { LEAD_SLUG_PATTERN, LeadSlugTakenError, slugify } from '@/features/leads/leadService'
+import { LEAD_SLUG_PATTERN, LeadSlugTakenError, slugify, leadPublicUrl } from '@/features/leads/leadService'
 
-const PUBLIC_ORIGIN = 'https://oryalis.vercel.app'
 const GENERAL = 'general'
 
 // "Ma marque" (Paramètres) : une marque unique → ses prospects y sont rattachés côté base.
 const SINGLE_BRAND_NAME: Record<string, string> = { doterra: 'doTERRA', zinzino: 'Zinzino', herbalife: 'Herbalife' }
-
-function publicUrl(slug: string): string {
-  const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : PUBLIC_ORIGIN
-  return `${origin}/p/${slug}`
-}
 
 // LEAD-PAGE-1/2 — pages publiques de prospect : une seule page (marque unique ou générique),
 // ou une page générale + une page par marque en mode Multi-marques ("Ma marque").
@@ -36,7 +30,9 @@ export default function LeadPageSettingsScreen() {
   const { session } = useAuth()
   const { profile } = useAppConfig()
   const { brands } = useBrands()
-  const { forms, submissions, loading, save, createContact, remove } = useLeadForm()
+  const { forms, submissions, loading, save, createContact, remove, removeForm } = useLeadForm()
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const isMulti = profile.activity_type === 'multi'
   const singleBrandName = profile.activity_type === 'custom'
@@ -65,7 +61,35 @@ export default function LeadPageSettingsScreen() {
     setIntro(form?.intro ?? t('lead_page.default_intro'))
     setActive(form?.active ?? true)
     setMessage(null)
+    setConfirmDelete(false)
   }, [form, loading, defaultSlug, brand, t])
+
+  // Réinitialiser : textes et adresse proposés par défaut (rien n'est enregistré avant
+  // "Enregistrer").
+  function resetFields() {
+    setSlug(defaultSlug)
+    setTitle(brand ? t('lead_page.default_title_brand', { brand: brand.name }) : t('lead_page.default_title'))
+    setIntro(t('lead_page.default_intro'))
+    setMessage({ kind: 'ok', text: t('lead_page.reset_done') })
+  }
+
+  async function handleDeleteForm() {
+    if (!form) return
+    setDeleting(true)
+    try {
+      await removeForm(form.id)
+      setMessage({ kind: 'ok', text: t('lead_page.deleted') })
+    } catch (e) {
+      console.error('[leadPage.delete]', e)
+      setMessage({ kind: 'error', text: t('lead_page.error') })
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
+
+  const formSubmissions = form ? submissions.filter(s => s.form_id === form.id) : []
+  const formPending = formSubmissions.filter(s => s.status === 'pending').length
 
   const slugValid = LEAD_SLUG_PATTERN.test(slug)
   const brandName = (id: string | null | undefined) => (id ? brands.find(b => b.id === id)?.name : null) ?? null
@@ -89,7 +113,7 @@ export default function LeadPageSettingsScreen() {
 
   async function copyLink() {
     if (!form) return
-    await Clipboard.setStringAsync(publicUrl(form.slug))
+    await Clipboard.setStringAsync(leadPublicUrl(form.slug))
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -133,12 +157,12 @@ export default function LeadPageSettingsScreen() {
             {form ? (
               <View style={[styles.card, styles.linkCard]}>
                 <Text style={styles.label}>{t('lead_page.your_link')}</Text>
-                <Text style={styles.link} selectable>{publicUrl(form.slug)}</Text>
+                <Text style={styles.link} selectable>{leadPublicUrl(form.slug)}</Text>
                 <View style={styles.row}>
                   <TouchableOpacity style={styles.primaryBtn} onPress={copyLink} activeOpacity={0.85}>
                     <Text style={styles.primaryBtnText}>{copied ? `✓ ${t('lead_page.copied')}` : `🔗 ${t('lead_page.copy')}`}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => Linking.openURL(publicUrl(form.slug))} activeOpacity={0.8}>
+                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => Linking.openURL(leadPublicUrl(form.slug))} activeOpacity={0.8}>
                     <Text style={styles.secondaryBtnText}>👁 {t('lead_page.open')}</Text>
                   </TouchableOpacity>
                 </View>
@@ -166,6 +190,7 @@ export default function LeadPageSettingsScreen() {
                 />
               </View>
               <Text style={styles.hint}>{t('lead_page.slug_hint')}</Text>
+              {form && slug !== form.slug ? <Text style={styles.warn}>{t('lead_page.slug_change_warning')}</Text> : null}
 
               <Text style={styles.label}>{t('lead_page.title_label')}</Text>
               <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} />
@@ -177,6 +202,38 @@ export default function LeadPageSettingsScreen() {
               <TouchableOpacity style={[styles.primaryBtn, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving} activeOpacity={0.85}>
                 {saving ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Text style={styles.primaryBtnText}>{form ? t('common.save') : t('lead_page.create_page')}</Text>}
               </TouchableOpacity>
+
+              <View style={styles.footerLinks}>
+                <TouchableOpacity onPress={resetFields} activeOpacity={0.7}>
+                  <Text style={styles.linkText}>↺ {t('lead_page.reset')}</Text>
+                </TouchableOpacity>
+                {form ? (
+                  <TouchableOpacity onPress={() => setConfirmDelete(true)} activeOpacity={0.7}>
+                    <Text style={styles.removeText}>🗑 {t('lead_page.delete_page')}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              {confirmDelete && form ? (
+                <View style={styles.deleteBox}>
+                  <Text style={styles.deleteTitle}>{t('lead_page.delete_confirm', { url: leadPublicUrl(form.slug) })}</Text>
+                  <Text style={styles.hint}>{t('lead_page.delete_hint')}</Text>
+                  {formSubmissions.length > 0 ? (
+                    <Text style={styles.warn}>
+                      {t('lead_page.delete_submissions', { count: formSubmissions.length })}
+                      {formPending > 0 ? ` ${t('lead_page.delete_pending', { count: formPending })}` : ''}
+                    </Text>
+                  ) : null}
+                  <View style={styles.row}>
+                    <TouchableOpacity style={styles.secondaryBtn} onPress={() => setConfirmDelete(false)} disabled={deleting} activeOpacity={0.8}>
+                      <Text style={styles.secondaryBtnText}>{t('common.cancel')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.dangerBtn} onPress={handleDeleteForm} disabled={deleting} activeOpacity={0.85}>
+                      {deleting ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Text style={styles.primaryBtnText}>{t('lead_page.delete_confirm_btn')}</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.card}>
@@ -268,6 +325,10 @@ function makeStyles(colors: ThemeColors) {
     linkText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
     smallBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.primaryLight },
     smallBtnText: { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.primary },
-    removeText: { fontSize: 12, fontFamily: fonts.medium, color: colors.danger },
+    removeText: { fontSize: 12.5, fontFamily: fonts.medium, color: colors.danger },
+    footerLinks: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 2 },
+    deleteBox: { gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.dangerLight },
+    deleteTitle: { fontSize: 13.5, fontFamily: fonts.semibold, color: colors.text },
+    dangerBtn: { paddingHorizontal: 16, paddingVertical: 11, borderRadius: 12, backgroundColor: colors.danger, alignItems: 'center' },
   })
 }

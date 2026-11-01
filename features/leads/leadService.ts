@@ -1,6 +1,14 @@
 import { supabase } from '@/shared/lib/supabase'
 import { createClient, buildMinimalClientInput } from '@/features/clients/clientService'
 
+// Adresse publique des pages : toujours le site en ligne, jamais l'adresse de développement
+// (un lien localhost copié ne fonctionnerait pour personne d'autre).
+export const LEAD_PUBLIC_ORIGIN = 'https://oryalis.vercel.app'
+
+export function leadPublicUrl(slug: string): string {
+  return `${LEAD_PUBLIC_ORIGIN}/p/${slug}`
+}
+
 // LEAD-PAGE-1 — page publique de prospect (migration 20261101_lead_forms.sql).
 
 export interface LeadForm {
@@ -16,6 +24,7 @@ export interface LeadForm {
 
 export interface LeadSubmission {
   id: string
+  form_id: string
   full_name: string
   email: string | null
   phone: string | null
@@ -73,7 +82,7 @@ export async function saveLeadForm(
 export async function fetchLeadSubmissions(userId: string): Promise<LeadSubmission[]> {
   const { data, error } = await supabase
     .from('lead_submissions')
-    .select('id, full_name, email, phone, message, consent, client_id, status, created_at, form:lead_forms(brand_id)')
+    .select('id, form_id, full_name, email, phone, message, consent, client_id, status, created_at, form:lead_forms(brand_id)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -98,6 +107,13 @@ export async function createContactFromSubmission(userId: string, submission: Le
   const { error } = await supabase.from('lead_submissions').update({ client_id: client.id, status: 'created' }).eq('id', submission.id)
   if (error) throw error
   return client.id
+}
+
+// Supprime une page : son lien cesse de fonctionner. Les contacts déjà créés restent ; ses
+// inscriptions (y compris celles en attente) partent avec elle (ON DELETE CASCADE).
+export async function deleteLeadForm(id: string): Promise<void> {
+  const { error } = await supabase.from('lead_forms').delete().eq('id', id)
+  if (error) throw error
 }
 
 export async function deleteLeadSubmission(id: string): Promise<void> {

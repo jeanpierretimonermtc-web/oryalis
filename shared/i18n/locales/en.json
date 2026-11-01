@@ -2339,7 +2339,19 @@
     "brand_note_single": "🏷 Sign-ups get your {{brand}} brand on their contact page (chosen in Settings → My brand).",
     "brand_note_none": "Sign-ups arrive without a brand (Settings → My brand: Generic).",
     "not_created_yet": "This page does not exist yet: fill in the fields below, then create it to get your link.",
-    "create_page": "Create page"
+    "create_page": "Create page",
+    "reset": "Reset texts and address",
+    "reset_done": "Default values restored: tap Save to apply them.",
+    "delete_page": "Delete this page",
+    "delete_confirm": "Delete the page {{url}}?",
+    "delete_hint": "The link will stop working. Contacts already created stay in your Contacts. You can create a page again anytime.",
+    "delete_submissions_one": "{{count}} sign-up from this page will disappear from the list.",
+    "delete_submissions_other": "{{count}} sign-ups from this page will disappear from the list.",
+    "delete_pending_one": "Warning: {{count}} is pending, without a contact created.",
+    "delete_pending_other": "Warning: {{count}} are pending, without a contact created.",
+    "delete_confirm_btn": "Delete page",
+    "deleted": "Page deleted.",
+    "slug_change_warning": "Once saved, the old link will stop working: remember to replace it wherever you shared it."
   },
   "public_lead": {
     "with": "with {{name}}",

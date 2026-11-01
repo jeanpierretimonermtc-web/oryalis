@@ -1450,8 +1450,9 @@ function makeStyles(colors: ThemeColors) {
   pillText: { fontSize: 11, fontFamily: fonts.bold, letterSpacing: 0.3 },
 
   // ── Three-dot menu ─────────────────────────────────────────────────────────
-  menuBtn:  { paddingTop: 2 },
-  menuDots: { fontSize: 20, color: colors.textTertiary, lineHeight: 24 },
+  // Même cercle que les autres boutons « ⋮ » (fiche contact, ligne de liste).
+  menuBtn:  { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  menuDots: { fontSize: 18, color: colors.textSecondary, lineHeight: 20 },
 
   // ── Info rows ──────────────────────────────────────────────────────────────
   infoRow:  { flexDirection: 'row', alignItems: 'center', gap: 8 },

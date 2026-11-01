@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { fetchMyLeadForms, fetchLeadSubmissions, saveLeadForm, createContactFromSubmission, deleteLeadSubmission } from './leadService'
+import { fetchMyLeadForms, fetchLeadSubmissions, saveLeadForm, createContactFromSubmission, deleteLeadSubmission, deleteLeadForm } from './leadService'
 import type { LeadForm, LeadSubmission } from './leadService'
 
 // LEAD-PAGE-1/2 — mes pages prospect (générale + une par marque) et les derniers envois reçus.
@@ -39,10 +39,16 @@ export function useLeadForm() {
     await load()
   }, [userId, load])
 
+  const removeForm = useCallback(async (id: string) => {
+    await deleteLeadForm(id)
+    setForms(prev => prev.filter(f => f.id !== id))
+    setSubmissions(prev => prev.filter(s => s.form_id !== id))
+  }, [])
+
   const remove = useCallback(async (id: string) => {
     await deleteLeadSubmission(id)
     setSubmissions(prev => prev.filter(s => s.id !== id))
   }, [])
 
-  return { forms, submissions, loading, save, createContact, remove, reload: load }
+  return { forms, submissions, loading, save, createContact, remove, removeForm, reload: load }
 }
