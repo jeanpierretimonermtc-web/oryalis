@@ -139,7 +139,8 @@ function appointmentToGcEvent(appt: Appointment): GcEvent {
   return {
     summary:     appt.title,
     description: appt.appointment_type ?? undefined,
-    location:    appt.location ?? undefined,
+    // MEETING-MODE-1 — une visio n'a pas d'adresse : son lien tient lieu de lieu dans l'agenda.
+    location:    (appt.meeting_mode === 'video' ? appt.meeting_url : appt.location) ?? undefined,
     start: { dateTime: appt.start_at, timeZone: appt.timezone ?? 'Europe/Paris' },
     end:   { dateTime: appt.end_at,   timeZone: appt.timezone ?? 'Europe/Paris' },
     status: appt.status === 'cancelled' ? 'cancelled' : 'confirmed',
@@ -224,6 +225,7 @@ export async function pullFromGoogle(
         end_at:           event.end?.dateTime ?? event.start.dateTime,
         timezone:         event.start.timeZone ?? 'Europe/Paris',
         location:         event.location ?? null,
+        meeting_mode:     event.location ? 'in_person' : null,
         provider:         'google',
       })
       .select('id')

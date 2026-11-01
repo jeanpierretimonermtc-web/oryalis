@@ -90,13 +90,38 @@ export function computeProspectScore({
 
 export type ClientInput = Omit<Client,
   'id' | 'user_id' | 'created_at' | 'updated_at' | 'archived_at' | 'pipeline_stage_updated_at' |
-  'next_action_at' | 'next_action_source' | 'next_action_source_id' | 'last_interaction_at' | 'status'
+  'next_action_at' | 'next_action_source' | 'next_action_source_id' | 'last_interaction_at' | 'status' |
+  ClientExpectationField
 >
+
+// CONTACT-EXPECTATIONS-1 — "Ses attentes" : écrites uniquement via updateClientExpectations.
+export const CLIENT_EXPECTATION_FIELDS = [
+  'expectation_goals', 'expectation_habits', 'expectation_motivation', 'contact_preference', 'next_exchange_questions',
+] as const
+export type ClientExpectationField = typeof CLIENT_EXPECTATION_FIELDS[number]
+export type ClientExpectations = Pick<Client, ClientExpectationField>
+
+export async function updateClientExpectations(id: string, input: ClientExpectations) {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return data as Client
+}
+
+export type ClientSensitiveInput = Pick<Client, 'medical_treatment' | 'medical_notes' | 'particularities'>
+
+export async function updateClientSensitive(id: string, input: ClientSensitiveInput) {
+  return updateClient(id, input)
+}
 
 export async function getClients(userId: string) {
   const { data, error } = await supabase
     .from('clients')
-    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, next_action_type, next_action_source, is_vip, manually_inactive, created_at')
+    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, sponsor_id, last_interaction_at, next_action_at, next_action_type, next_action_source, is_vip, manually_inactive, created_at')
     .eq('user_id', userId)
     .is('archived_at', null)
   if (error) throw error
@@ -153,7 +178,7 @@ export async function deleteClient(id: string) {
 export async function searchClients(userId: string, query: string, role?: ContactRole) {
   let q = supabase
     .from('clients')
-    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, last_interaction_at, next_action_at, next_action_type, next_action_source, is_vip, manually_inactive, created_at')
+    .select('id, full_name, first_name, avatar_url, email, phone, status, pipeline_stage, contact_role, sponsor_id, last_interaction_at, next_action_at, next_action_type, next_action_source, is_vip, manually_inactive, created_at')
     .eq('user_id', userId)
     .is('archived_at', null)
     .ilike('full_name', `%${query}%`)
@@ -168,12 +193,13 @@ export async function searchClients(userId: string, query: string, role?: Contac
 
 // Sous-ensemble léger utilisé par les pickers de contact (ex. sélection de contact sur un
 // RDV) — pas besoin des champs complets de Client pour un simple choix dans une liste.
-export type ClientPickerItem = Pick<Client, 'id' | 'full_name' | 'first_name' | 'email' | 'contact_role' | 'pipeline_stage'>
+export type ClientPickerItem = Pick<Client, 'id' | 'full_name' | 'first_name' | 'email' | 'contact_role' | 'pipeline_stage'> &
+  Partial<Pick<Client, 'phone' | 'address' | 'timezone'>>
 
 export async function searchClientsForPicker(userId: string, query?: string): Promise<ClientPickerItem[]> {
   let q = supabase
     .from('clients')
-    .select('id, full_name, first_name, email, contact_role, pipeline_stage')
+    .select('id, full_name, first_name, email, phone, address, timezone, contact_role, pipeline_stage')
     .eq('user_id', userId)
     .is('archived_at', null)
     .order('full_name')

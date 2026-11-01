@@ -9,6 +9,8 @@ import { fonts } from '@/shared/theme/fonts'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import type { ActivityType } from '@/shared/lib/types'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
+import { useAuth } from '@/features/auth/AuthProvider'
+import { BrandsManager } from '@/features/brands/BrandsManager'
 
 const OPTIONS: { value: ActivityType; label: string; emoji: string; desc: string }[] = [
   { value: 'generic',   emoji: '🔵', label: 'Générique',    desc: 'CRM polyvalent pour tout revendeur' },
@@ -24,6 +26,7 @@ export default function ActivitySettingsScreen() {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { profile: bizProfile, saveActivityType, isModuleActive, saveLrpName } = useAppConfig()
+  const { session } = useAuth()
 
   return (
     <>
@@ -46,6 +49,8 @@ export default function ActivitySettingsScreen() {
         {bizProfile.activity_type === 'custom' && (
           <Input label="Nom de votre marque" value={bizProfile.custom_brand_name ?? ''} onChangeText={v => saveActivityType('custom', v)} placeholder="Ex : MonBienÊtre" />
         )}
+        {/* BRANDS-1 — en multi-marques : tes marques (saisie libre assistée, couleur, logo). */}
+        {bizProfile.activity_type === 'multi' && session ? <BrandsManager userId={session.user.id} /> : null}
         {isModuleActive('renewals_lrp') && (
           <Input
             label={t('settings.custom_lrp_name_label')}

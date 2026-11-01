@@ -29,17 +29,17 @@ export function useUpline() {
 
   useEffect(() => { load() }, [load])
 
-  const add = useCallback(async (name: string, memberId: string | null) => {
+  // BRAND-NETWORK-1 — position comptée dans la ligne de la marque (le nouveau est le plus haut).
+  const add = useCallback(async (name: string, memberId: string | null, brandId: string | null = null) => {
     if (!session?.user?.id) return
-    // position = nombre de nœuds existants (le nouveau est le plus haut)
-    const position = nodes.length
-    const node = await createUplineNode(session.user.id, name, memberId, position)
+    const position = nodes.filter(n => n.brand_id === brandId).length
+    const node = await createUplineNode(session.user.id, name, memberId, position, brandId)
     setNodes(prev => [node, ...prev])
-  }, [session?.user?.id, nodes.length])
+  }, [session?.user?.id, nodes])
 
-  const update = useCallback(async (id: string, name: string, memberId: string | null) => {
-    await updateUplineNode(id, name, memberId)
-    setNodes(prev => prev.map(n => n.id === id ? { ...n, name, member_id: memberId } : n))
+  const update = useCallback(async (id: string, name: string, memberId: string | null, brandId: string | null) => {
+    await updateUplineNode(id, name, memberId, brandId)
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, name, member_id: memberId, brand_id: brandId } : n))
   }, [])
 
   const remove = useCallback(async (id: string) => {

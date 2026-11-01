@@ -20,6 +20,11 @@ import { computeRelationshipHealth } from '@/features/clients/relationshipHealth
 import { deriveLastName } from '@/shared/lib/clientName'
 import { formatDate } from '@/shared/lib/dateFormat'
 import { fetchProgramsForClient } from '@/features/clients/recurringProgramService'
+import { useSponsorGraph } from '@/features/network/useNetwork'
+import { useClientBrands } from '@/features/brands/useBrands'
+import { downlineIds, NETWORK_ROLES } from '@/features/network/networkService'
+import { ContactPickerModal } from '@/features/network/ContactPickerModal'
+import { TIMEZONE_OPTIONS, timeZoneCity, timeZoneOffsetMinutes, formatUtcOffset } from '@/features/clients/timezones'
 
 const CONTACT_ROLES: ContactRole[] = ['prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive']
 const NETWORK_POTENTIALS: NetworkPotential[] = ['low', 'medium', 'high']
@@ -77,6 +82,12 @@ export default function EditClientScreen() {
   const [children, setChildren]             = useState('')
   const [source, setSource]                 = useState('')
   const [country, setCountry]               = useState('')
+  const [timezone, setTimezone]             = useState<string | null>(null)
+  const [tzPickerOpen, setTzPickerOpen]     = useState(false)
+  const tzOptions = useMemo(() => TIMEZONE_OPTIONS
+    .map(tz => ({ tz, offset: timeZoneOffsetMinutes(tz) }))
+    .sort((a, b) => a.offset - b.offset || timeZoneCity(a.tz).localeCompare(timeZoneCity(b.tz)))
+    .map(({ tz, offset }) => ({ id: tz, label: timeZoneCity(tz), sub: `${formatUtcOffset(offset)} · ${tz}` })), [])
   const [clientType, setClientType]         = useState('')
   const [interests, setInterests]           = useState('')
   const [particularities, setParticularities] = useState('')
@@ -90,6 +101,22 @@ export default function EditClientScreen() {
   const [address, setAddress]               = useState('')
   const [contactRole, setContactRole]       = useState<ContactRole[]>(['prospect'])
   const [pipelineStage, setPipelineStage]   = useState<PipelineStage>('new_lead')
+  const [sponsorId, setSponsorId]           = useState<string | null>(null)
+  const [sponsorPickerOpen, setSponsorPickerOpen] = useState(false)
+  const showSponsor = isModuleActive('downline')
+  const { links: brandLinks } = useClientBrands(id)
+  const { graph: sponsorGraph } = useSponsorGraph(showSponsor)
+  // SPONSOR-1 — parrains possibles : membres du réseau, jamais le contact ni sa descendance.
+  const sponsorOptions = useMemo(() => {
+    if (!id) return []
+    const excluded = downlineIds(id, sponsorGraph)
+    const sponsorIds = new Set(sponsorGraph.map(n => n.sponsor_id).filter(Boolean))
+    return sponsorGraph
+      .filter(n => !excluded.has(n.id))
+      .filter(n => n.contact_role.some(r => (NETWORK_ROLES as readonly string[]).includes(r)) || sponsorIds.has(n.id) || n.id === sponsorId)
+      .map(n => ({ id: n.id, label: n.full_name, sub: n.contact_role.map(r => getRoleLabel(r)).join(' · ') }))
+  }, [id, sponsorGraph, sponsorId, getRoleLabel])
+  const sponsorName = sponsorId ? sponsorGraph.find(n => n.id === sponsorId)?.full_name ?? '…' : null
 
   const [saving, setSaving]         = useState(false)
   const [errorMsg, setErrorMsg]     = useState<string | null>(null)
@@ -116,6 +143,7 @@ export default function EditClientScreen() {
     setChildren(client.children ?? '')
     setSource(client.source ?? '')
     setCountry(client.country ?? '')
+    setTimezone(client.timezone ?? null)
     setClientType(client.client_type ?? '')
     setInterests((client.interests ?? []).join(', '))
     setParticularities(client.particularities ?? '')
@@ -129,6 +157,7 @@ export default function EditClientScreen() {
     setNetworkPotential(client.network_potential ?? null)
     setContactRole(client.contact_role?.length ? client.contact_role : ['prospect'])
     setPipelineStage(client.pipeline_stage ?? 'new_lead')
+    setSponsorId(client.sponsor_id ?? null)
   }, [client])
 
   useEffect(() => {
@@ -161,6 +190,7 @@ export default function EditClientScreen() {
         children: children.trim() || null,
         source: source.trim() || null,
         country: country.trim() || null,
+        timezone,
         client_type: clientType.trim() || null,
         interests: interestList,
         particularities: particularities.trim() || null,
@@ -177,6 +207,7 @@ export default function EditClientScreen() {
         network_potential: networkPotential,
         contact_role: contactRole,
         pipeline_stage: pipelineStage,
+        ...(showSponsor && brandLinks.length === 0 && !(sponsorId && downlineIds(id, sponsorGraph).has(sponsorId)) ? { sponsor_id: sponsorId } : {}),
       })
 
       // Traçabilité (refonte) — ne doit jamais faire échouer l'enregistrement principal.
@@ -264,6 +295,32 @@ export default function EditClientScreen() {
             onChangeText={setAddress}
             placeholder="12 rue des Lilas, 75001 Paris"
           />
+          {/* CLIENT-TZ-1 — pays et fuseau ensemble, sous l'adresse : le fuseau affiche l'heure du
+              contact à côté de la mienne dans les rendez-vous. */}
+          <View style={isWide ? styles.fieldRow : undefined}>
+            <View style={isWide ? styles.fieldHalf : undefined}>
+              <Input label={`${t('clients.fields.country')} (${t('common.optional')})`} value={country} onChangeText={setCountry} />
+            </View>
+            <View style={[isWide ? styles.fieldHalf : undefined, styles.fieldGroup]}>
+              <Text style={styles.tzLabel}>{t('clients.fields.timezone')}</Text>
+              <TouchableOpacity style={styles.sponsorBtn} onPress={() => setTzPickerOpen(true)} activeOpacity={0.75}>
+                <Text style={styles.sponsorBtnText} numberOfLines={1}>
+                  {timezone ? `🌍 ${timeZoneCity(timezone)} · ${formatUtcOffset(timeZoneOffsetMinutes(timezone))}` : t('clients.tz_same_as_me')}
+                </Text>
+                <Text style={styles.sponsorBtnChevron}>›</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.sponsorHint}>{t('clients.tz_hint')}</Text>
+          <ContactPickerModal
+            visible={tzPickerOpen}
+            title={t('clients.fields.timezone')}
+            options={tzOptions}
+            selectedId={timezone}
+            meLabel={t('clients.tz_same_as_me')}
+            onPick={v => { setTimezone(v); setTzPickerOpen(false) }}
+            onClose={() => setTzPickerOpen(false)}
+          />
           <View style={isWide ? styles.fieldRow : undefined}>
             <View style={isWide ? styles.fieldHalf : undefined}>
               <DateInput label={t('clients.fields.inscription_date')} value={inscriptionDate} onChangeValue={setInscriptionDate} />
@@ -319,15 +376,26 @@ export default function EditClientScreen() {
             <View style={styles.chipRow}>
               {CONTACT_ROLES.map(role => {
                 const active = contactRole.includes(role)
+                // BRAND-ROLES-1 — rôles réseau d'un contact avec marques : déduits de ses rôles
+                // par marque (synchronisation en base), jamais cochés à la main ici.
+                const lockedByBrand = brandLinks.length > 0 && (NETWORK_ROLES as readonly string[]).includes(role)
                 return (
                   <TouchableOpacity
                     key={role}
-                    style={[styles.smallChip, active && styles.smallChipActive]}
-                    onPress={() => setContactRole(prev =>
-                      prev.includes(role)
-                        ? (prev.length > 1 ? prev.filter(r => r !== role) : prev)
-                        : [...prev, role]
-                    )}
+                    style={[styles.smallChip, active && styles.smallChipActive, lockedByBrand && { opacity: 0.5 }]}
+                    disabled={lockedByBrand}
+                    onPress={() => {
+                      const next = contactRole.includes(role)
+                        ? (contactRole.length > 1 ? contactRole.filter(r => r !== role) : contactRole)
+                        : [...contactRole, role]
+                      setContactRole(next)
+                      // Le trigger sync_client_role_from_pipeline remet le rôle "distributor" tant que
+                      // l'étape vaut 'distributor' : sans rôle réseau, l'étape doit redescendre.
+                      const hasNetworkRole = next.some(r => (NETWORK_ROLES as readonly string[]).includes(r))
+                      if (!hasNetworkRole && pipelineStage === 'distributor') {
+                        setPipelineStage(next.includes('customer') ? 'customer' : 'follow_up')
+                      }
+                    }}
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>
@@ -337,8 +405,35 @@ export default function EditClientScreen() {
                 )
               })}
             </View>
+            {brandLinks.length > 0 ? <Text style={styles.sponsorHint}>{t('brands.roles_by_brand_hint')}</Text> : null}
           </View>
+          {/* BRAND-NETWORK-1 — avec des marques, parrain et rôle se règlent marque par marque. */}
+          {showSponsor && brandLinks.length > 0 ? (
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>{t('network.sponsor_label')}</Text>
+              <Text style={styles.sponsorHint}>{t('network.sponsor_per_brand_hint')}</Text>
+            </View>
+          ) : showSponsor ? (
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>{t('network.sponsor_label')}</Text>
+              <TouchableOpacity style={styles.sponsorBtn} onPress={() => setSponsorPickerOpen(true)} activeOpacity={0.75}>
+                <Text style={styles.sponsorBtnText}>{sponsorName ?? t('network.sponsor_me')}</Text>
+                <Text style={styles.sponsorBtnChevron}>›</Text>
+              </TouchableOpacity>
+              <Text style={styles.sponsorHint}>{t('network.sponsor_hint')}</Text>
+            </View>
+          ) : null}
         </SectionCard>
+
+        <ContactPickerModal
+          visible={sponsorPickerOpen}
+          title={t('network.sponsor_pick_title')}
+          options={sponsorOptions}
+          selectedId={sponsorId}
+          meLabel={t('network.sponsor_me')}
+          onPick={v => { setSponsorId(v); setSponsorPickerOpen(false) }}
+          onClose={() => setSponsorPickerOpen(false)}
+        />
 
         {/* ── Profil ─────────────────────────────────────────────── */}
         <SectionCard icon="📋" titleKey="clients.sections.profile">
@@ -352,13 +447,12 @@ export default function EditClientScreen() {
           </View>
           <View style={isWide ? styles.fieldRow : undefined}>
             <View style={isWide ? styles.fieldHalf : undefined}>
-              <Input label={`${t('clients.fields.country')} (${t('common.optional')})`} value={country} onChangeText={setCountry} />
-            </View>
-            <View style={isWide ? styles.fieldHalf : undefined}>
               <Input label={`${t('clients.fields.source')} (${t('common.optional')})`} value={source} onChangeText={setSource} />
             </View>
+            <View style={isWide ? styles.fieldHalf : undefined}>
+              <Input label={`${t('clients.fields.client_type')} (${t('common.optional')})`} value={clientType} onChangeText={setClientType} />
+            </View>
           </View>
-          <Input label={`${t('clients.fields.client_type')} (${t('common.optional')})`} value={clientType} onChangeText={setClientType} />
           <Input label={`${t('clients.fields.interests')} (${t('common.optional')})`} value={interests} onChangeText={setInterests} placeholder="Nutrition, Sommeil, Stress" />
         </SectionCard>
 
@@ -415,7 +509,13 @@ export default function EditClientScreen() {
         {/* ── doTERRA (module renewals_lrp) ──────────────────────── */}
         {isModuleActive('renewals_lrp') && (
           <SectionCard icon="⭐" titleKey="clients.sections.doterra">
-            <Input label={`${t('clients.fields.doterra_id')} (${t('common.optional')})`} value={doterraId} onChangeText={setDoterraId} />
+            {/* PROGRAM-BRAND-1 — numéros de membre, % de fidélité et notes se gèrent désormais par
+                marque et par programme sur la fiche contact (Profil). L'ancien numéro unique reste
+                modifiable ici seulement tant qu'il n'a pas été attribué à une marque. */}
+            <Text style={styles.lrpMovedHint}>{t('clients.loyalty_moved_hint')}</Text>
+            {doterraId ? (
+              <Input label={t('clients.fields.legacy_member_number')} value={doterraId} onChangeText={setDoterraId} />
+            ) : null}
 
             {/* LRP-4 — statut/fréquence/dates du programme récurrent ne se gèrent plus depuis ce
                 formulaire : recurring_programs (créé/géré depuis une commande ou la fiche
@@ -438,15 +538,6 @@ export default function EditClientScreen() {
               </TouchableOpacity>
             ) : null}
 
-            <Input
-              label={`${t('clients.fields.lrp_loyalty_percent')} (${t('common.optional')})`}
-              value={lrpLoyaltyPercent}
-              onChangeText={v => setLrpLoyaltyPercent(v.replace(/\D/g, '').slice(0, 3))}
-              placeholder="0-100"
-              keyboardType="number-pad"
-            />
-
-            <TextArea label={`${t('clients.fields.loyalty_notes')} (${t('common.optional')})`} value={loyaltyNotes} onChangeText={setLoyaltyNotes} />
           </SectionCard>
         )}
 
@@ -537,6 +628,11 @@ function makeStyles(colors: ThemeColors) {
   fieldLabel:  { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6 },
   lrpMovedHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, fontStyle: 'italic' },
   lrpMovedLink: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary, marginTop: 4 },
+  tzLabel:     { fontSize: 14, fontFamily: fonts.medium, color: colors.text },
+  sponsorBtn:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.card },
+  sponsorBtnText: { fontSize: 14, fontFamily: fonts.medium, color: colors.text },
+  sponsorBtnChevron: { fontSize: 18, color: colors.textTertiary },
+  sponsorHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary },
   smallChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
   smallChipActive:      { backgroundColor: colors.primaryLight, borderColor: colors.primary },
   smallChipIcon:        { fontSize: 13 },

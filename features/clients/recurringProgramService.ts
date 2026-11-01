@@ -4,7 +4,7 @@
 // colonnes restent en base, gelées, pour compatibilité et historique (voir migration
 // 20260825_recurring_programs.sql).
 import { supabase } from '@/shared/lib/supabase'
-import type { RecurringProgram, RecurringProgramStatus, RecurringProgramEndMode, LrpFrequencyUnit } from '@/shared/lib/types'
+import type { RecurringProgram, RecurringProgramStatus, RecurringProgramEndMode, LrpFrequencyUnit, RecurringRenewalMode } from '@/shared/lib/types'
 
 export interface RecurringProgramInput {
   client_id: string
@@ -19,6 +19,13 @@ export interface RecurringProgramInput {
   next_occurrence_date?: string | null
   // LRP-4.2 §8 — voir createProgram.
   closure_action_key?: string | null
+  // AUTO-RENEWAL-1 — modifiables via updateProgram (défaut en base : 'manual', false).
+  renewal_mode?: RecurringRenewalMode
+  checkin_before_renewal?: boolean
+  // PROGRAM-BRAND-1 — modifiables via updateProgram (la marque est aussi déduite en base).
+  brand_id?: string | null
+  loyalty_percent?: number | null
+  notes?: string | null
 }
 
 export type RecurringProgramPatch = Partial<Omit<RecurringProgramInput, 'client_id'>>
@@ -186,4 +193,21 @@ export function isProgramEligibleForNextOccurrence(
   if (!program.next_occurrence_date) return false
   if (program.end_mode === 'end_date' && program.end_date != null && todayIso > program.end_date) return false
   return true
+}
+
+// PROGRAM-DELETE-1 — suppression définitive (erreur de saisie, test). Les échéances partent avec
+// le programme (ON DELETE CASCADE) ; ses commandes restent dans l'historique, détachées (SET NULL),
+// sauf demande explicite de les supprimer aussi (leurs lignes, valeurs MLM et relances suivent).
+export async function deleteProgram(id: string, withOrders: boolean): Promise<void> {
+  // Commandes gardées : détachées AVANT la suppression. Sinon le SET NULL automatique ne vide que
+  // recurring_program_id et le contrôle check_order_recurring_occurrence_ownership refuse la ligne
+  // (recurring_occurrence_id pointerait encore vers une échéance d'un autre programme).
+  const { error: ordersError } = withOrders
+    ? await supabase.from('orders').delete().eq('recurring_program_id', id)
+    : await supabase.from('orders')
+        .update({ recurring_program_id: null, recurring_occurrence_id: null, updated_at: new Date().toISOString() })
+        .eq('recurring_program_id', id)
+  if (ordersError) throw ordersError
+  const { error } = await supabase.from('recurring_programs').delete().eq('id', id)
+  if (error) throw error
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ScrollView, View, Text, StyleSheet, useWindowDimensions } from 'react-native'
 import { router, Stack, useLocalSearchParams } from 'expo-router'
+import { attachToBrandSponsor } from '@/features/brands/brandService'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { createClient } from '@/features/clients/clientService'
@@ -23,7 +24,7 @@ export default function NewClientScreen() {
   const isWide = width >= 768
   // Lot 1.1 — arrivée depuis la clôture d'un RDV créé sans contact : une fois le contact
   // créé, on le rattache à ce RDV plutôt que d'aller vers la fiche du nouveau contact.
-  const { returnToAppointmentId } = useLocalSearchParams<{ returnToAppointmentId?: string }>()
+  const { returnToAppointmentId, sponsorId, sponsorName, brandId } = useLocalSearchParams<{ returnToAppointmentId?: string; sponsorId?: string; sponsorName?: string; brandId?: string }>()
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName]   = useState('')
@@ -57,6 +58,7 @@ export default function NewClientScreen() {
         children: null,
         source: null,
         country: null,
+        timezone: null,
         client_type: null,
         interests: [],
         particularities: null,
@@ -84,10 +86,20 @@ export default function NewClientScreen() {
         network_potential: null,
         // Un contact tout juste ajouté est un prospect, pas déjà un client — cohérent avec
         // pipeline_stage='new_lead' (le rôle se précise ensuite depuis "Modifier").
-        contact_role: ['prospect'],
+        // SPONSOR-1 — créé depuis "Ajouter un filleul" : déjà rattaché à son parrain (hors
+        // marque). Avec une marque, le rattachement se fait dans client_brands juste après.
+        contact_role: sponsorId ? (brandId ? ['customer'] : ['team_member']) : ['prospect'],
         pipeline_stage: 'new_lead',
-        sponsor_id: null,
+        sponsor_id: sponsorId && !brandId ? sponsorId : null,
       })
+      if (sponsorId && brandId) {
+        try {
+          await attachToBrandSponsor(session.user.id, client.id, brandId, sponsorId)
+        } catch (attachError) {
+          // Le contact existe déjà : on ne bloque pas, le rattachement reste faisable depuis la fiche.
+          console.error('[clients.new.attachBrandSponsor]', attachError)
+        }
+      }
       if (returnToAppointmentId) {
         try {
           await updateAppointment(returnToAppointmentId, { client_id: client.id })
@@ -121,6 +133,12 @@ export default function NewClientScreen() {
             <Text style={styles.quotaText}>{t('clients.quota_count', { count: quota.activeCount, limit: quota.limit })}</Text>
           </View>
         )}
+
+        {sponsorId ? (
+          <View style={styles.quotaCard}>
+            <Text style={styles.quotaText}>🌐 {t('network.new_contact_sponsor_hint', { name: sponsorName ?? '' })}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.card}>
           <View style={isWide ? styles.fieldRow : undefined}>

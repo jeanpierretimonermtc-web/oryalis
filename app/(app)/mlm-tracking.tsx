@@ -17,6 +17,9 @@ import { MlmTrackingMetricDetailModal } from '@/features/catalogs/MlmTrackingMet
 import { DateInput } from '@/shared/components/ui/DateInput'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import type { MlmTrackingMetric } from '@/features/catalogs/mlmTrackingService'
+import { useBrands } from '@/features/brands/useBrands'
+import { BrandAvatar } from '@/features/brands/BrandPill'
+import type { Brand } from '@/shared/lib/types'
 
 const PRESETS: MlmTrackingPeriodPreset[] = ['this_month', 'last_month', 'last_3_months', 'this_year', 'custom']
 
@@ -42,9 +45,10 @@ function usePeriodLabel(preset: MlmTrackingPeriodPreset, range: { startDate: str
   }, [preset, range.startDate, range.endDate, locale])
 }
 
-function MetricCard({ metric, onPress, styles, t, locale }: {
+function MetricCard({ metric, onPress, styles, t, locale, brandByCatalog }: {
   metric: MlmTrackingMetric
   onPress: () => void
+  brandByCatalog: Map<string, Brand>
   styles: ReturnType<typeof makeStyles>
   t: (key: string, opts?: Record<string, unknown>) => string
   locale: string
@@ -65,6 +69,21 @@ function MetricCard({ metric, onPress, styles, t, locale }: {
       {hasReturns ? (
         <Text style={styles.metricSub}>{t('mlm_tracking.gross_returned_summary', { gross: fmt(metric.gross), returned: fmt(metric.returned) })}</Text>
       ) : null}
+      {/* BRAND-MLM-1 — plusieurs marques : le détail par marque, jamais un total mélangé seul. */}
+      {metric.catalogBreakdown.length > 1 ? (
+        <View style={styles.brandBreakdown}>
+          {metric.catalogBreakdown.filter(b => b.net !== 0).map(b => {
+            const brand = b.catalogId ? brandByCatalog.get(b.catalogId) : undefined
+            return (
+              <View key={b.catalogId ?? 'none'} style={styles.brandBreakdownRow}>
+                {brand ? <BrandAvatar brand={brand} size={18} /> : null}
+                <Text style={styles.brandBreakdownName} numberOfLines={1}>{brand?.name ?? b.catalogName ?? t('dashboard.mlm_no_brand')}</Text>
+                <Text style={styles.brandBreakdownValue}>{fmt(b.net)}</Text>
+              </View>
+            )
+          })}
+        </View>
+      ) : null}
     </TouchableOpacity>
   )
 }
@@ -82,6 +101,8 @@ export default function MlmTrackingScreen() {
     catalogId, setCatalogId,
   } = useMlmTracking(userId)
   const { catalogs } = useCatalogs()
+  const { brands } = useBrands()
+  const brandByCatalog = useMemo(() => new Map(brands.filter(b => b.catalog_id).map(b => [b.catalog_id as string, b as Brand])), [brands])
   const periodLabel = usePeriodLabel(preset, range)
   const [detailMetric, setDetailMetric] = useState<MlmTrackingMetric | null>(null)
 
@@ -142,7 +163,7 @@ export default function MlmTrackingScreen() {
           <>
             <View style={styles.cardsGrid}>
               {metrics.map(m => (
-                <MetricCard key={m.key} metric={m} onPress={() => setDetailMetric(m)} styles={styles} t={t} locale={locale} />
+                <MetricCard key={m.key} metric={m} onPress={() => setDetailMetric(m)} styles={styles} t={t} locale={locale} brandByCatalog={brandByCatalog} />
               ))}
             </View>
             <TouchableOpacity onPress={() => router.push('/(app)/settings-mlm-values' as any)} activeOpacity={0.7} style={styles.configLinkRow}>
@@ -165,6 +186,10 @@ function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.bg },
     content: { padding: 16, gap: 14, maxWidth: 720, alignSelf: 'center', width: '100%' },
+    brandBreakdown: { marginTop: 8, gap: 4, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8 },
+    brandBreakdownRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    brandBreakdownName: { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+    brandBreakdownValue: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
     hint: { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 19 },
 
     filterRow: { gap: 8, paddingVertical: 2 },

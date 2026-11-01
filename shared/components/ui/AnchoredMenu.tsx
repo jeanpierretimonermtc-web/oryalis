@@ -38,6 +38,9 @@ interface AnchoredMenuProps {
   // Hauteur estimée du contenu, utilisée uniquement pour décider d'ouvrir au-dessus ou en
   // dessous (jamais pour un layout réel) — voir QUICK_MENU_EST_H, référence d'origine.
   estimatedHeight?: number
+  // Bord gauche à ne jamais franchir (ex. largeur de la barre latérale web) : si le menu
+  // dépasserait à gauche, il s'ouvre à droite du déclencheur.
+  minLeft?: number
 }
 
 const DEFAULT_WIDTH = 260
@@ -46,6 +49,7 @@ const SCREEN_MARGIN = 8
 
 export function AnchoredMenu({
   visible, onClose, anchor, items, children, title, width = DEFAULT_WIDTH, estimatedHeight = DEFAULT_EST_H,
+  minLeft = SCREEN_MARGIN,
 }: AnchoredMenuProps) {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -58,8 +62,10 @@ export function AnchoredMenu({
   // ancré sous le déclencheur par défaut, bascule au-dessus si ça dépasserait le bas de
   // l'écran, toujours clampé à SCREEN_MARGIN des bords — désormais appliquée partout, jamais
   // seulement sur desktop web.
+  const leftward = anchor ? anchor.x - effectiveWidth + 24 : 0
+  const preferredLeft = anchor && leftward < minLeft ? anchor.x - 24 : leftward
   const pos = anchor ? {
-    left: Math.max(SCREEN_MARGIN, Math.min(anchor.x - effectiveWidth + 24, screenW - effectiveWidth - SCREEN_MARGIN)),
+    left: Math.max(Math.min(minLeft, screenW - effectiveWidth - SCREEN_MARGIN), Math.min(preferredLeft, screenW - effectiveWidth - SCREEN_MARGIN)),
     top: anchor.y + SCREEN_MARGIN + estimatedHeight > screenH
       ? Math.max(SCREEN_MARGIN, anchor.y - estimatedHeight - SCREEN_MARGIN)
       : anchor.y + SCREEN_MARGIN,

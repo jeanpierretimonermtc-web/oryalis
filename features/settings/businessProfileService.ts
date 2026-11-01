@@ -22,6 +22,8 @@ export async function upsertBusinessProfile(
     custom_lrp_name?: string | null
     active_modules?: ModuleKey[]
     automation_delays?: Record<string, number>
+    office_address?: string | null
+    default_meeting_url?: string | null
   }
 ): Promise<UserBusinessProfile> {
   const { data, error } = await supabase
@@ -34,6 +36,8 @@ export async function upsertBusinessProfile(
         custom_lrp_name: patch.custom_lrp_name ?? null,
         active_modules: patch.active_modules ?? DEFAULT_MODULES,
         automation_delays: patch.automation_delays ?? {},
+        office_address: patch.office_address ?? null,
+        default_meeting_url: patch.default_meeting_url ?? null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' }

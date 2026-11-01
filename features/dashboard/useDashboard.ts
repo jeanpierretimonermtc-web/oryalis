@@ -8,6 +8,7 @@ import { supabase } from '@/shared/lib/supabase'
 import type { Alert } from '@/shared/lib/types'
 import { fetchUnreadAlerts, markAlertRead, markAllAlertsRead } from '@/features/alerts/alertService'
 import { checkNoContact } from '@/features/automations/automationService'
+import { processAutoRenewals } from '@/features/clients/autoRenewalService'
 import { computeRelationshipHealth } from '@/features/clients/relationshipHealth'
 import { isProgramEligibleForNextOccurrence } from '@/features/clients/recurringProgramService'
 import { isOrderNetRevenue } from '@/features/orders/orderService'
@@ -64,6 +65,8 @@ export interface DailyActionItem {
   // traduction reste à la charge du composant, comme pour `dashboard.daily.${kind}`).
   reasonKey: string
   reasonParams?: Record<string, string | number>
+  // CLIENT-TZ-1 — fuseau du contact (RDV du jour : son heure à côté de la mienne).
+  clientTimezone?: string | null
 }
 
 function localDayBounds(date = new Date()) {
@@ -142,7 +145,7 @@ export function useDailyActions() {
         supabase.from('appointments').select('id, client_id, title, start_at, client:clients(full_name, archived_at)').eq('user_id', uid).eq('provider', 'oryalis').in('status', ['scheduled', 'rescheduled']).lt('start_at', day.start).order('start_at').order('id').limit(20),
         supabase.from('interactions').select('id, client_id, subject, interaction_type, scheduled_at, client:clients(full_name, archived_at)').eq('user_id', uid).is('completed_at', null).not('scheduled_at', 'is', null).lt('scheduled_at', day.start).order('scheduled_at').order('id').limit(20),
         supabase.from('appointment_tasks').select('id, client_id, appointment_id, title, due_at, client:clients(full_name, archived_at)').eq('user_id', uid).not('status', 'in', '(done,cancelled)').lt('due_at', nowIso).order('due_at').order('id').limit(20),
-        supabase.from('appointments').select('id, client_id, title, start_at, client:clients(full_name, archived_at)').eq('user_id', uid).eq('provider', 'oryalis').in('status', ['scheduled', 'rescheduled']).gte('start_at', day.start).lte('start_at', day.end).order('start_at').order('id').limit(20),
+        supabase.from('appointments').select('id, client_id, title, start_at, client:clients(full_name, archived_at, timezone)').eq('user_id', uid).eq('provider', 'oryalis').in('status', ['scheduled', 'rescheduled']).gte('start_at', day.start).lte('start_at', day.end).order('start_at').order('id').limit(20),
         supabase.from('followups').select('id, client_id, title, content, due_date, client:clients(full_name, archived_at)').eq('user_id', uid).eq('done', false).is('cancelled_at', null).eq('due_date', day.date).order('id').limit(20),
         supabase.from('interactions').select('id, client_id, subject, interaction_type, scheduled_at, client:clients(full_name, archived_at)').eq('user_id', uid).is('completed_at', null).not('scheduled_at', 'is', null).gte('scheduled_at', day.start).lte('scheduled_at', day.end).order('scheduled_at').order('id').limit(20),
         // DASH/CAL-2 §5 / DASH/CAL-2.2 — "Agenda personnel" : événements externes
@@ -163,7 +166,7 @@ export function useDailyActions() {
         // LRP-4 — source de vérité recurring_programs (status='active' obligatoire) : un
         // programme paused/cancelled/completed ne doit plus jamais générer d'entrée
         // "Aujourd'hui", même règle que LRP-2 appliquée au nouveau modèle.
-        supabase.from('recurring_programs').select('id, client_id, status, next_occurrence_date, end_mode, end_date, client:clients(full_name, archived_at)').eq('user_id', uid).eq('status', 'active').not('next_occurrence_date', 'is', null).gte('next_occurrence_date', day.date).lte('next_occurrence_date', renewalDate).order('next_occurrence_date').order('id').limit(20),
+        supabase.from('recurring_programs').select('id, client_id, status, next_occurrence_date, end_mode, end_date, client:clients(full_name, archived_at)').eq('user_id', uid).eq('status', 'active').eq('renewal_mode', 'manual').not('next_occurrence_date', 'is', null).gte('next_occurrence_date', day.date).lte('next_occurrence_date', renewalDate).order('next_occurrence_date').order('id').limit(20),
       ])
 
       const result: DailyActionItem[] = []
@@ -212,6 +215,7 @@ export function useDailyActions() {
           clientId: row.client_id, clientName: client?.full_name ?? '', title: row.title, at: row.start_at,
           href: `/(app)/appointments/${row.id}?returnTo=${encodeURIComponent('/(app)')}`,
           reasonKey: 'today_appointment',
+          clientTimezone: client?.timezone ?? null,
         })
       }
       // DASH-1 §7 — relance due AUJOURD'HUI, lue directement dans followups (jamais
@@ -447,6 +451,51 @@ export function useMonthlyRevenue() {
   return { amount, loading, refresh: fetch }
 }
 
+// DASH-ACTIVITY-1 — "Mon activité" : abonnements à renouveler sous 30 jours et accompagnements
+// en cours (deux comptages légers, aucune ligne transférée).
+export function useMonthActivity() {
+  const { session } = useAuth()
+  const [renewalsSoon, setRenewalsSoon] = useState(0)
+  const [activeCareJourneys, setActiveCareJourneys] = useState(0)
+  const [loading, setLoading] = useState(true)
+
+  const fetch = useCallback(async () => {
+    if (!session) return
+    setLoading(true)
+    try {
+      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const now = new Date()
+      const in30 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30)
+      const [renewals, care] = await Promise.all([
+        supabase
+          .from('recurring_programs')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', session.user.id)
+          .eq('status', 'active')
+          .eq('renewal_mode', 'manual')
+          .gte('next_occurrence_date', fmt(now))
+          .lte('next_occurrence_date', fmt(in30)),
+        supabase
+          .from('care_journeys')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', session.user.id)
+          .eq('status', 'active'),
+      ])
+      if (renewals.error) throw renewals.error
+      if (care.error) throw care.error
+      setRenewalsSoon(renewals.count ?? 0)
+      setActiveCareJourneys(care.count ?? 0)
+    } catch (e) {
+      console.error('[dashboard.monthActivity]', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [session])
+
+  useEffect(() => { fetch() }, [fetch])
+  return { renewalsSoon, activeCareJourneys, loading, refresh: fetch }
+}
+
 export function usePipelineStats() {
   const { session } = useAuth()
   const [byStage, setByStage] = useState<Record<string, number>>({})
@@ -478,6 +527,21 @@ export function usePipelineStats() {
 const NO_CONTACT_CHECK_KEY_PREFIX = 'oryalis.lastNoContactCheckAt.'
 const NO_CONTACT_CHECK_MIN_INTERVAL_MS = 12 * 60 * 60 * 1000 // 12h — évite de relancer l'automatisation à chaque affichage du dashboard, sans nouvelle table (AsyncStorage, déjà utilisé par ThemeProvider).
 
+const AUTO_RENEWAL_KEY_PREFIX = 'oryalis.lastAutoRenewalRunAt.'
+const AUTO_RENEWAL_MIN_INTERVAL_MS = 60 * 60 * 1000 // 1h — rattrapage des renouvellements automatiques.
+
+async function runAutoRenewalsThrottled(userId: string) {
+  const key = AUTO_RENEWAL_KEY_PREFIX + userId
+  try {
+    const lastRun = await AsyncStorage.getItem(key)
+    if (lastRun && Date.now() - Number(lastRun) < AUTO_RENEWAL_MIN_INTERVAL_MS) return
+    await processAutoRenewals(userId)
+    await AsyncStorage.setItem(key, String(Date.now()))
+  } catch (e) {
+    console.error('[runAutoRenewalsThrottled]', e)
+  }
+}
+
 async function runNoContactCheckThrottled(userId: string) {
   const key = NO_CONTACT_CHECK_KEY_PREFIX + userId
   try {
@@ -507,6 +571,7 @@ export function useAlerts() {
       // doit plus être calculée à chaque chargement du dashboard sans lecteur réel.
       // checkNoContact reste utile : effet de bord réel (relances "reprendre contact").
       runNoContactCheckThrottled(session.user.id)
+      runAutoRenewalsThrottled(session.user.id)
       setAlerts(await fetchUnreadAlerts(session.user.id))
     } catch (e) {
       console.error('[useAlerts]', e)

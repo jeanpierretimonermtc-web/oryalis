@@ -215,7 +215,8 @@ export default function OrdersScreen() {
                         style={styles.deleteBtn}
                         onPress={() => {
                           if (confirmAction.type === 'cancel') cancel(order.id)
-                          else remove(order.id)
+                          // Après suppression : fiche du contact concerné.
+                          else remove(order.id).then(ok => { if (ok) router.push(`/(app)/clients/${order.client_id}` as any) })
                           setConfirmAction(null)
                         }}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

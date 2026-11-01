@@ -8,7 +8,7 @@ import { useFocusEffect, router } from 'expo-router'
 import { useCatalogs, useCatalogProducts } from '@/features/catalogs/useCatalog'
 import { useCatalogPrefs } from '@/features/catalogs/CatalogPrefsProvider'
 import { createRecommendation } from '@/features/recommendations/recommendationService'
-import { addProductToCatalog, updateCatalogProduct, createCustomCatalog } from '@/features/catalogs/catalogService'
+import { addProductToCatalog, updateCatalogProduct, createCustomCatalog, deleteCustomCatalog } from '@/features/catalogs/catalogService'
 import type { CatalogProductInput } from '@/features/catalogs/catalogService'
 import { supabase } from '@/shared/lib/supabase'
 import { useAuth } from '@/features/auth/AuthProvider'
@@ -340,7 +340,10 @@ function ProductFormModal({ catalogId, initial, isWide, onClose, onSaved }: {
       }
       onSaved()
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('common.error'))
+      // CATALOG-IMPORT-SCHEMA-1 — référence (SKU) déjà utilisée dans ce catalogue : message
+      // explicite plutôt qu'une erreur technique (contrainte unique catalog_id + sku).
+      const code = (e as { code?: string } | null)?.code
+      setError(code === '23505' ? t('catalog.error_duplicate_sku') : e instanceof Error ? e.message : t('common.error'))
       console.error('[catalog.saveProduct]', e)
     } finally {
       setSaving(false)
@@ -402,6 +405,10 @@ export default function CatalogScreen() {
 
   // RDV-PRODUCTS-1 / Lot E — création de catalogue personnel + création/édition de produit.
   const [showNewCatalog, setShowNewCatalog] = useState(false)
+  // CATALOG-DELETE-1 — confirmation explicite avant toute suppression.
+  const [confirmDeleteCatalog, setConfirmDeleteCatalog] = useState(false)
+  const [deletingCatalog, setDeletingCatalog] = useState(false)
+  const [deleteCatalogError, setDeleteCatalogError] = useState<string | null>(null)
   const [productForm, setProductForm] = useState<{ catalogId: string; initial: CatalogProductListItem | null } | null>(null)
 
   // Recommend modal
@@ -424,6 +431,7 @@ export default function CatalogScreen() {
   useEffect(() => {
     setSearchQuery('')
     setSelectedCategory(null)
+    setConfirmDeleteCatalog(false)
   }, [selectedCatalogId])
 
   const categories = useMemo(() => {
@@ -494,6 +502,23 @@ export default function CatalogScreen() {
     setRefreshKey(k => k + 1)
     setSelectedCatalogId(catalog.id)
     setShowNewCatalog(false)
+  }
+
+  async function handleDeleteCatalog() {
+    if (!session || !selectedCatalog || selectedCatalog.type !== 'custom') return
+    setDeletingCatalog(true)
+    setDeleteCatalogError(null)
+    try {
+      await deleteCustomCatalog(session.user.id, selectedCatalog.id)
+      setConfirmDeleteCatalog(false)
+      setSelectedCatalogId(null)
+      setRefreshKey(k => k + 1)
+    } catch (e) {
+      console.error('[catalog.deleteCustomCatalog]', e)
+      setDeleteCatalogError(t('catalog.delete_catalog_error'))
+    } finally {
+      setDeletingCatalog(false)
+    }
   }
 
   function openProductForm(catalogId: string, initial: CatalogProductListItem | null) {
@@ -611,7 +636,50 @@ export default function CatalogScreen() {
               <Text style={styles.catalogActionPillText}>{t('catalog.add_product_cta')}</Text>
             </TouchableOpacity>
           ) : null}
+          {selectedCatalog?.type === 'custom' && !confirmDeleteCatalog ? (
+            <TouchableOpacity
+              style={[styles.catalogActionPill, { backgroundColor: colors.dangerLight }]}
+              onPress={() => { setDeleteCatalogError(null); setConfirmDeleteCatalog(true) }}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.catalogActionPillText, { color: colors.danger }]}>🗑 {t('catalog.delete_catalog_cta')}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
+
+        {/* CATALOG-DELETE-1 — confirmation obligatoire (clic par erreur), jamais de suppression
+            directe. Les catalogues officiels n'affichent jamais ce bouton. */}
+        {selectedCatalog?.type === 'custom' && confirmDeleteCatalog ? (
+          <View style={{ gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.dangerLight }}>
+            <Text style={{ fontSize: 14, fontFamily: fonts.semibold, color: colors.text }}>
+              {t('catalog.delete_catalog_confirm_title', { name: selectedCatalog.name })}
+            </Text>
+            <Text style={{ fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 19 }}>
+              {t('catalog.delete_catalog_confirm_text', { count: products.length })}
+            </Text>
+            {deleteCatalogError ? <Text style={{ fontSize: 13, fontFamily: fonts.medium, color: colors.danger }}>{deleteCatalogError}</Text> : null}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+              <TouchableOpacity
+                style={{ paddingVertical: 9, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}
+                onPress={() => setConfirmDeleteCatalog(false)}
+                disabled={deletingCatalog}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 13, fontFamily: fonts.semibold, color: colors.text }}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ paddingVertical: 9, paddingHorizontal: 14, borderRadius: 10, backgroundColor: colors.danger, opacity: deletingCatalog ? 0.6 : 1 }}
+                onPress={handleDeleteCatalog}
+                disabled={deletingCatalog}
+                activeOpacity={0.85}
+              >
+                {deletingCatalog
+                  ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                  : <Text style={{ fontSize: 13, fontFamily: fonts.semibold, color: colors.onPrimary }}>{t('catalog.delete_catalog_confirm_cta')}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
         <Input label="" value={searchQuery} onChangeText={setSearchQuery} placeholder={t('catalog.search_placeholder')} />
 

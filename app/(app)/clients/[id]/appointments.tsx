@@ -14,6 +14,8 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import { colors as brandColors, type ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { formatDate } from '@/shared/lib/dateFormat'
+import { useClient } from '@/features/clients/useClient'
+import { RemoteTimeBadge } from '@/features/clients/RemoteTimeBadge'
 
 function pad2(n: number) { return String(n).padStart(2, '0') }
 function formatDateTime(iso: string, locale: string) {
@@ -28,6 +30,8 @@ function formatDateTime(iso: string, locale: string) {
 export default function ClientAppointmentsScreen() {
   const { t, i18n } = useTranslation()
   const { id } = useLocalSearchParams<{ id: string }>()
+  // CLIENT-TZ-1 — fuseau du contact pour afficher son heure sur chaque RDV.
+  const { client: contactClient } = useClient(id)
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { appointments, loading, refresh } = useClientAppointments(id)
@@ -100,6 +104,7 @@ export default function ClientAppointmentsScreen() {
                   <AppointmentCard
                     key={appt.id}
                     appt={appt}
+                    contactTz={contactClient?.timezone}
                     locale={locale}
                     confirmId={confirmId}
                     onPress={() => viewAppointment(appt.id)}
@@ -122,6 +127,7 @@ export default function ClientAppointmentsScreen() {
                   <AppointmentCard
                     key={appt.id}
                     appt={appt}
+                    contactTz={contactClient?.timezone}
                     locale={locale}
                     confirmId={confirmId}
                     onPress={() => viewAppointment(appt.id)}
@@ -143,8 +149,9 @@ export default function ClientAppointmentsScreen() {
 }
 
 // ── AppointmentCard ───────────────────────────────────────────────────────────
-function AppointmentCard({ appt, locale, confirmId, onPress, onDeleteRequest, onDeleteCancel, onDeleteConfirm, colors, styles }: {
+function AppointmentCard({ appt, locale, confirmId, onPress, onDeleteRequest, onDeleteCancel, onDeleteConfirm, colors, styles, contactTz }: {
   appt: Appointment
+  contactTz?: string | null
   locale: string
   confirmId: string | null
   onPress: () => void
@@ -195,6 +202,7 @@ function AppointmentCard({ appt, locale, confirmId, onPress, onDeleteRequest, on
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={styles.apptTitle} numberOfLines={1}>{appt.title}</Text>
             <Text style={styles.apptDate}>{dateStr} – {endStr}</Text>
+            <RemoteTimeBadge at={new Date(appt.start_at)} contactTz={contactTz} showCity />
           </View>
           <View style={[styles.statusBadge, { backgroundColor: (statusColor[appt.status] ?? colors.textSecondary) + '22' }]}>
             <Text style={[styles.statusText, { color: statusColor[appt.status] ?? colors.textSecondary }]} numberOfLines={1}>
@@ -213,7 +221,7 @@ function AppointmentCard({ appt, locale, confirmId, onPress, onDeleteRequest, on
 // ── Styles ────────────────────────────────────────────────────────────────────
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgDim },
+  container: { flex: 1, backgroundColor: colors.bg },
   list:      { padding: 12, gap: 8 },
   loader:    { marginTop: 40 },
 

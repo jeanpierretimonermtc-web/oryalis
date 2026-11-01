@@ -78,33 +78,34 @@ const light = {
 // ── Dark mode ─────────────────────────────────────────────────────────────────
 const dark: typeof light = {
   // ── Backgrounds & surfaces ────────────────────────────────────────────────
-  bg:                      '#0B1220',
-  surface:                 '#111827',
-  bgDim:                   '#1E293B',
-  card:                    '#111827',
-  surfaceContainerLow:     '#0F172A',
-  surfaceContainer:        '#1E293B',
-  surfaceContainerHigh:    '#263548',
-  surfaceContainerHighest: '#334155',
+  // DESIGN-A — neutres sombres légèrement réchauffés (moins bleu-noir), en écho au fond crème du clair.
+  bg:                      '#13161C',
+  surface:                 '#1A1E25',
+  bgDim:                   '#22272F',
+  card:                    '#1A1E25',
+  surfaceContainerLow:     '#161920',
+  surfaceContainer:        '#22272F',
+  surfaceContainerHigh:    '#2C323C',
+  surfaceContainerHighest: '#3A414D',
 
   // ── Text ─────────────────────────────────────────────────────────────────
   text:           '#F8FAFC',
   textSecondary:  '#CBD5E1',
-  textTertiary:   '#64748B',   // textMuted — intentionally de-emphasized
+  textTertiary:   '#7E8794',   // textMuted — discret mais lisible sur fond sombre
   textInverse:    '#0F172A',
   inverseText:    '#0F172A',
 
   // ── Borders ───────────────────────────────────────────────────────────────
-  border:         '#334155',
-  borderStrong:   '#475569',
-  cardBorder:     '#263548',
+  border:         '#323843',
+  borderStrong:   '#454C59',
+  cardBorder:     '#2A2F38',
 
   // ── Primary action (blue — slightly brighter on dark bg) ─────────────────
   // DESIGN-A — même bleu adouci qu'en clair, éclairci juste assez pour rester lisible.
   primary:              '#5B7FE0',
   primaryAction:        '#4A6CD0',
-  primaryLight:         '#1E3A5F',
-  primaryLighter:       '#172844',
+  primaryLight:         '#25325A',
+  primaryLighter:       '#1D2640',
   onPrimary:            '#FFFFFF',
   onPrimaryContainer:   '#93C5FD',
 

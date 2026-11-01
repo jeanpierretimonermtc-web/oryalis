@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
-import { router, Stack } from 'expo-router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useNetworkTree } from '@/features/network/useNetwork'
@@ -13,10 +14,17 @@ import { fonts } from '@/shared/theme/fonts'
 import type { NetworkNode, Client } from '@/shared/lib/types'
 import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
 import { getDaysUntilLrp } from '@/features/clients/clientService'
+import { NetworkOrgChart, isPartnerNode } from '@/features/network/NetworkOrgChart'
+import type { BrandNetwork } from '@/features/network/networkService'
+import { BrandAvatar } from '@/features/brands/BrandPill'
+import { brandRoleLabel } from '@/features/brands/brandRoleLabels'
+import type { Brand } from '@/shared/lib/types'
 
 const INDENT = 22
 
 type RoleFilter = 'all' | 'network' | 'customers'
+type ViewMode = 'tree' | 'list'
+const VIEW_MODE_KEY = 'oryalis.networkViewMode'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,8 +56,8 @@ function filterTree(nodes: NetworkNode[], filter: RoleFilter): NetworkNode[] {
       children: filterTree(node.children, filter),
     }))
     .filter(node => {
-      if (filter === 'network') return node.contact_role.includes('distributor') || node.contact_role.includes('leader') || node.children.length > 0
-      if (filter === 'customers') return node.contact_role.includes('customer') || node.contact_role.includes('prospect')
+      if (filter === 'network') return isPartnerNode(node)
+      if (filter === 'customers') return !isPartnerNode(node)
       return true
     })
 }
@@ -57,13 +65,14 @@ function filterTree(nodes: NetworkNode[], filter: RoleFilter): NetworkNode[] {
 // ── NodeRow ───────────────────────────────────────────────────────────────────
 
 interface NodeRowProps {
+  brand?:     Brand | null
   node:       NetworkNode
   collapsed:  Set<string>
   onToggle:   (id: string) => void
   onMessage:  (node: NetworkNode) => void
 }
 
-function NodeRow({ node, collapsed, onToggle, onMessage }: NodeRowProps) {
+function NodeRow({ node, collapsed, onToggle, onMessage, brand = null }: NodeRowProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -132,7 +141,9 @@ function NodeRow({ node, collapsed, onToggle, onMessage }: NodeRowProps) {
       {/* Role badge */}
       <View style={[styles.roleBadge, { backgroundColor: rp.bg }]}>
         <Text style={[styles.roleText, { color: rp.text }]}>
-          {node.contact_role.map(r => getRoleLabel(r)).join(' · ')}
+          {node.networkRole && brand
+            ? brandRoleLabel(brand, node.networkRole, getRoleLabel)
+            : node.contact_role.map(r => getRoleLabel(r)).join(' · ')}
         </Text>
       </View>
 
@@ -151,21 +162,46 @@ function NodeRow({ node, collapsed, onToggle, onMessage }: NodeRowProps) {
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
+type BrandTab = 'all' | string
+const NO_BRAND_TAB = '__none__'
+
+function networkKey(n: BrandNetwork): string {
+  return n.brand?.id ?? NO_BRAND_TAB
+}
+
+function flattenAll(nodes: NetworkNode[]): NetworkNode[] {
+  return nodes.flatMap(n => [n, ...flattenAll(n.children)])
+}
+
 export default function NetworkScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
-  const { tree, totalSize, distributors, activeThisMonth, loading, error } = useNetworkTree()
-  const { nodes: uplineNodes } = useUpline()
-  const sortedUpline = useMemo(
-    () => [...uplineNodes].sort((a, b) => b.position - a.position),
-    [uplineNodes]
-  )
+  const { networks, loading, error, reload } = useNetworkTree()
+  const { nodes: uplineNodes, reload: reloadUpline } = useUpline()
+  // Retour sur l'écran (après "Modifier" un contact ou la ligne ascendante) : données à jour.
+  const focusedOnce = useRef(false)
+  useFocusEffect(useCallback(() => {
+    if (!focusedOnce.current) { focusedOnce.current = true; return }
+    reload()
+    reloadUpline()
+  }, [reload, reloadUpline]))
 
   const [collapsed,     setCollapsed]     = useState<Set<string>>(new Set())
   const [roleFilter,    setRoleFilter]    = useState<RoleFilter>('all')
+  const [brandTab,      setBrandTab]      = useState<BrandTab>('all')
   const [messageTarget, setMessageTarget] = useState<NetworkNode | null>(null)
+  // NETWORK-TREE-1 — organigramme par défaut sur grand écran, liste sur téléphone ; choix retenu.
+  const { width } = useWindowDimensions()
+  const [viewMode, setViewMode] = useState<ViewMode>(width >= 768 ? 'tree' : 'list')
+  useEffect(() => {
+    AsyncStorage.getItem(VIEW_MODE_KEY).then(v => { if (v === 'tree' || v === 'list') setViewMode(v) }).catch(() => {})
+  }, [])
+  function changeViewMode(mode: ViewMode) {
+    setViewMode(mode)
+    AsyncStorage.setItem(VIEW_MODE_KEY, mode).catch(() => {})
+  }
 
   const advisorName = session?.user?.user_metadata?.full_name ?? session?.user?.email ?? ''
   const firstName   = advisorName.split(' ')[0] || advisorName
@@ -178,14 +214,85 @@ export default function NetworkScreen() {
     })
   }
 
-  const filteredTree = useMemo(() => filterTree(tree, roleFilter), [tree, roleFilter])
-  const flat         = useMemo(() => flattenVisible(filteredTree, collapsed), [filteredTree, collapsed])
+  // BRAND-NETWORK-1 — un réseau par marque ; "Toutes" les empile.
+  const tabKeys = networks.map(networkKey)
+  const activeTab = brandTab !== 'all' && !tabKeys.includes(brandTab) ? 'all' : brandTab
+  const shown = useMemo(
+    () => networks
+      .filter(n => activeTab === 'all' || networkKey(n) === activeTab)
+      .map(n => ({ ...n, roots: filterTree(n.roots, roleFilter) })),
+    [networks, activeTab, roleFilter],
+  )
+
+  // Ligne ascendante d'une marque ; une personne sans marque reste visible partout tant
+  // qu'elle n'est pas attribuée à une marque (écran "Gérer").
+  const uplineFor = useCallback((brandId: string | null) =>
+    [...uplineNodes]
+      .filter(u => brandId === null ? u.brand_id === null : (u.brand_id === brandId || u.brand_id === null))
+      .sort((a, b) => b.position - a.position),
+  [uplineNodes])
+
+  const stats = useMemo(() => {
+    const unique = new Map<string, NetworkNode>()
+    for (const n of networks.filter(nw => activeTab === 'all' || networkKey(nw) === activeTab)) {
+      for (const node of flattenAll(n.roots)) if (!unique.has(node.id) || isPartnerNode(node)) unique.set(node.id, node)
+    }
+    const all = [...unique.values()]
+    const cutoff = Date.now() - 30 * 86400000
+    return {
+      total: all.length,
+      partners: all.filter(isPartnerNode).length,
+      active: all.filter(n => n.updated_at && new Date(n.updated_at).getTime() >= cutoff).length,
+    }
+  }, [networks, activeTab])
+
+  const hasContent = shown.some(n => n.roots.length > 0)
+  const openUpline = (brandId: string | null) =>
+    router.push({ pathname: '/(app)/network/upline', params: brandId ? { brandId } : {} } as any)
 
   const FILTERS: { key: RoleFilter; label: string }[] = [
     { key: 'all',       label: t('network.filter_all')       },
     { key: 'network',   label: t('network.filter_network')   },
     { key: 'customers', label: t('network.filter_customers') },
   ]
+
+  function renderListHeader(n: BrandNetwork) {
+    const upline = uplineFor(n.brand?.id ?? null)
+    return (
+      <View>
+        <View style={styles.uplineHeader}>
+          <Text style={styles.uplineTitle}>{t('network.upline_title')}</Text>
+          <TouchableOpacity onPress={() => openUpline(n.brand?.id ?? null)} hitSlop={8}>
+            <Text style={styles.uplineManageBtn}>{t('network.upline_manage')}</Text>
+          </TouchableOpacity>
+        </View>
+        {upline.length === 0 ? (
+          <TouchableOpacity style={styles.uplineEmpty} onPress={() => openUpline(n.brand?.id ?? null)} activeOpacity={0.7}>
+            <Text style={styles.uplineEmptyText}>+ {t('network.upline_add')}</Text>
+          </TouchableOpacity>
+        ) : (
+          upline.map(node => (
+            <View key={node.id} style={styles.uplineRow}>
+              <View style={styles.uplineLine} />
+              <View style={[styles.dot, { backgroundColor: colors.textSecondary }]} />
+              <Text style={[styles.name, { flex: 1 }]} numberOfLines={1}>{node.name}</Text>
+              {node.member_id ? <Text style={styles.uplineMemberId}>#{node.member_id}</Text> : null}
+            </View>
+          ))
+        )}
+        <View style={styles.youRow}>
+          {upline.length > 0 && <View style={styles.uplineLine} />}
+          <View style={[styles.dot, { backgroundColor: colors.primary }]} />
+          <Text style={[styles.name, styles.nameStrong, { color: colors.primary, flex: 1 }]} numberOfLines={1}>
+            {firstName ? `${firstName} · ` : ''}{t('network.you')}
+          </Text>
+        </View>
+        <View style={styles.downlineDivider}>
+          <Text style={styles.downlineDividerText}>{t('network.subtitle')}</Text>
+        </View>
+      </View>
+    )
+  }
 
   return (
     <>
@@ -198,49 +305,88 @@ export default function NetworkScreen() {
           <Text style={styles.title}>{t('network.title')}</Text>
           <Text style={styles.subtitle}>{t('network.subtitle')}</Text>
 
-          {totalSize > 0 && (
+          {networks.length > 1 ? (
+            <View style={styles.brandTabs}>
+              {['all', ...tabKeys].map(key => {
+                const n = networks.find(nw => networkKey(nw) === key)
+                const active = activeTab === key
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.brandTab, active && styles.brandTabActive]}
+                    onPress={() => setBrandTab(key)}
+                    activeOpacity={0.75}
+                  >
+                    {n?.brand ? <BrandAvatar brand={n.brand} size={18} /> : null}
+                    <Text style={[styles.brandTabText, active && styles.brandTabTextActive]}>
+                      {key === 'all' ? t('network.brand_all') : n?.brand?.name ?? t('network.no_brand')}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          ) : null}
+
+          {stats.total > 0 && (
             <View style={styles.statsRow}>
               <View style={styles.statChip}>
-                <Text style={styles.statNum}>{totalSize}</Text>
+                <Text style={styles.statNum}>{stats.total}</Text>
                 <Text style={styles.statLabel}>{t('network.members')}</Text>
               </View>
               <View style={styles.statChip}>
-                <Text style={[styles.statNum, { color: colors.secondary }]}>{distributors}</Text>
-                <Text style={styles.statLabel}>{t('network.distributors')}</Text>
+                <Text style={[styles.statNum, { color: colors.secondary }]}>{stats.partners}</Text>
+                <Text style={styles.statLabel}>{t('network.partners')}</Text>
               </View>
               <View style={styles.statChip}>
-                <Text style={[styles.statNum, { color: colors.success }]}>{activeThisMonth}</Text>
+                <Text style={[styles.statNum, { color: colors.success }]}>{stats.active}</Text>
                 <Text style={styles.statLabel}>{t('network.active_month')}</Text>
               </View>
             </View>
           )}
 
-          {/* Filter tabs */}
-          {totalSize > 0 && (
-            <View style={styles.filterRow}>
-              {FILTERS.map(f => (
-                <TouchableOpacity
-                  key={f.key}
-                  style={[styles.filterChip, roleFilter === f.key && styles.filterChipActive]}
-                  onPress={() => setRoleFilter(f.key)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.filterText, roleFilter === f.key && styles.filterTextActive]}>
-                    {f.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+          {stats.total > 0 && (
+            <View style={styles.filterBar}>
+              <View style={styles.filterRow}>
+                {FILTERS.map(f => (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[styles.filterChip, roleFilter === f.key && styles.filterChipActive]}
+                    onPress={() => setRoleFilter(f.key)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.filterText, roleFilter === f.key && styles.filterTextActive]}>
+                      {f.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.viewToggle}>
+                {(['tree', 'list'] as ViewMode[]).map(m => (
+                  <TouchableOpacity
+                    key={m}
+                    style={[styles.viewToggleBtn, viewMode === m && styles.viewToggleBtnActive]}
+                    onPress={() => changeViewMode(m)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.viewToggleText, viewMode === m && styles.viewToggleTextActive]}>
+                      {m === 'tree' ? `🌳 ${t('network.view_tree')}` : `☰ ${t('network.view_list')}`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           )}
         </View>
 
         {/* ── Legend ──────────────────────────────────────── */}
-        {flat.length > 0 && (
+        {hasContent && (
           <View style={styles.legend}>
             <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: colors.success }]} /><Text style={styles.legendLabel}>&lt; 15j</Text></View>
             <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: colors.warning }]} /><Text style={styles.legendLabel}>15–30j</Text></View>
             <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: colors.danger  }]} /><Text style={styles.legendLabel}>&gt; 30j</Text></View>
-            <Text style={styles.legendHint}>{t('network.tap_expand')} · {t('network.long_press_open')}</Text>
+            <Text style={styles.legendHint}>
+              {viewMode === 'tree' ? t('network.tree_hint') : `${t('network.tap_expand')} · ${t('network.long_press_open')}`}
+            </Text>
           </View>
         )}
 
@@ -249,78 +395,47 @@ export default function NetworkScreen() {
           <ActivityIndicator style={styles.loader} color={colors.primary} />
         ) : error ? (
           <Text style={styles.errorText}>{error}</Text>
-        ) : flat.length === 0 ? (
+        ) : !hasContent ? (
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyEmoji}>🌐</Text>
             <Text style={styles.emptyTitle}>{t('network.empty')}</Text>
             <Text style={styles.emptySub}>{t('network.empty_sub')}</Text>
           </View>
         ) : (
-          <FlatList
-            data={flat}
-            keyExtractor={n => n.id}
-            renderItem={({ item }) => (
-              <NodeRow
-                node={item}
-                collapsed={collapsed}
-                onToggle={toggleCollapse}
-                onMessage={setMessageTarget}
-              />
-            )}
-            contentContainerStyle={styles.list}
-            showsVerticalScrollIndicator={false}
-            ListHeaderComponent={
-              <View>
-                {/* ── Upline ──────────────────────────────── */}
-                <View style={styles.uplineHeader}>
-                  <Text style={styles.uplineTitle}>{t('network.upline_title')}</Text>
-                  <TouchableOpacity
-                    onPress={() => router.push('/(app)/network/upline' as any)}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.uplineManageBtn}>{t('network.upline_manage')}</Text>
-                  </TouchableOpacity>
-                </View>
-                {sortedUpline.length === 0 ? (
-                  <TouchableOpacity
-                    style={styles.uplineEmpty}
-                    onPress={() => router.push('/(app)/network/upline' as any)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.uplineEmptyText}>+ {t('network.upline_add')}</Text>
-                  </TouchableOpacity>
+          <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+            {shown.filter(n => n.roots.length > 0).map(n => (
+              <View key={networkKey(n)} style={styles.brandSection}>
+                {shown.length > 1 ? (
+                  <View style={styles.brandSectionHeader}>
+                    {n.brand ? <BrandAvatar brand={n.brand} size={22} /> : null}
+                    <Text style={styles.brandSectionTitle}>
+                      {n.brand ? t('network.brand_network', { brand: n.brand.name }) : t('network.no_brand')}
+                    </Text>
+                  </View>
+                ) : null}
+                {viewMode === 'tree' ? (
+                  <NetworkOrgChart
+                    roots={n.roots}
+                    meLabel={firstName || t('network.you')}
+                    upline={uplineFor(n.brand?.id ?? null)}
+                    onOpen={cid => router.push(`/(app)/clients/${cid}` as any)}
+                    onManageUpline={() => openUpline(n.brand?.id ?? null)}
+                    brand={n.brand}
+                  />
                 ) : (
-                  sortedUpline.map((node, index) => (
-                    <View key={node.id} style={styles.uplineRow}>
-                      {index < sortedUpline.length && (
-                        <View style={styles.uplineLine} />
-                      )}
-                      <View style={[styles.dot, { backgroundColor: colors.textSecondary }]} />
-                      <Text style={[styles.name, { flex: 1 }]} numberOfLines={1}>{node.name}</Text>
-                      {node.member_id ? (
-                        <Text style={styles.uplineMemberId}>#{node.member_id}</Text>
-                      ) : null}
-                    </View>
-                  ))
+                  <>
+                    {renderListHeader(n)}
+                    {flattenVisible(n.roots, collapsed).map((item, i) => (
+                      <View key={item.id}>
+                        {i > 0 ? <View style={styles.separator} /> : null}
+                        <NodeRow node={item} brand={n.brand} collapsed={collapsed} onToggle={toggleCollapse} onMessage={setMessageTarget} />
+                      </View>
+                    ))}
+                  </>
                 )}
-
-                {/* ── Moi ─────────────────────────────────── */}
-                <View style={styles.youRow}>
-                  {sortedUpline.length > 0 && <View style={styles.uplineLine} />}
-                  <View style={[styles.dot, { backgroundColor: colors.primary }]} />
-                  <Text style={[styles.name, styles.nameStrong, { color: colors.primary, flex: 1 }]} numberOfLines={1}>
-                    {firstName ? `${firstName} · ` : ''}{t('network.you')}
-                  </Text>
-                </View>
-
-                {/* Séparateur downline */}
-                <View style={styles.downlineDivider}>
-                  <Text style={styles.downlineDividerText}>{t('network.subtitle')}</Text>
-                </View>
               </View>
-            }
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-          />
+            ))}
+          </ScrollView>
         )}
       </View>
 
@@ -349,7 +464,13 @@ function makeStyles(colors: ThemeColors) {
   statNum:   { fontSize: 22, fontFamily: fonts.display, color: colors.text },
   statLabel: { fontSize: 10, fontFamily: fonts.medium, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 1 },
 
+  filterBar:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
   filterRow:     { flexDirection: 'row', gap: 8 },
+  viewToggle:    { flexDirection: 'row', borderRadius: 10, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+  viewToggleBtn: { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: colors.card },
+  viewToggleBtnActive: { backgroundColor: colors.primaryLight },
+  viewToggleText: { fontSize: 12.5, fontFamily: fonts.medium, color: colors.textSecondary },
+  viewToggleTextActive: { color: colors.primary, fontFamily: fonts.semibold },
   filterChip:    { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border },
   filterChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
   filterText:    { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
@@ -362,6 +483,14 @@ function makeStyles(colors: ThemeColors) {
   legendHint:  { flex: 1, fontSize: 10, fontFamily: fonts.body, color: colors.textTertiary, textAlign: 'right' },
 
   list:      { paddingBottom: 80 },
+  brandTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4, marginBottom: 8 },
+  brandTab:  { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  brandTabActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+  brandTabText: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+  brandTabTextActive: { color: colors.primary, fontFamily: fonts.semibold },
+  brandSection: { paddingBottom: 12 },
+  brandSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
+  brandSectionTitle: { fontSize: 15, fontFamily: fonts.semibold, color: colors.text },
 
   // ── Upline ──────────────────────────────────────────────────────────────────
   uplineHeader: {

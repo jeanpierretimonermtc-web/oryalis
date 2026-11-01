@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Platform, Modal, useWindowDimensions, Switch,
+  StyleSheet, ActivityIndicator, Platform, Modal, useWindowDimensions, Switch, Linking,
 } from 'react-native'
+import { MEETING_MODE_ICON, meetingActionUrl } from '@/features/appointments/meetingMode'
+import { RemoteTimeHint } from '@/features/clients/RemoteTimeHint'
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { Lock, Snowflake, CloudSun, Flame, Check, X, TriangleAlert, ArrowDown } from 'lucide-react-native'
@@ -41,6 +43,7 @@ import type { OrderItem } from '@/shared/lib/types'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
+import { SOFT_CARD_SHADOW } from '@/shared/theme/elevation'
 import { formatDate, formatTime } from '@/shared/lib/dateFormat'
 import { formatMoney, formatMoneyAmount } from '@/shared/lib/moneyFormat'
 import { MessageModal } from '@/shared/components/ui/MessageModal'
@@ -162,6 +165,7 @@ function abbreviateName(full: string): string {
 // Supabase supplémentaire), pour que le bouton E-mail du récap sache si le contact en a une.
 type ClientInfo = {
   id: string; full_name: string; status: string; first_name: string | null; phone: string | null; email: string | null
+  timezone: string | null
   next_lrp_date: string | null
   contact_role: ContactRole[]
 }
@@ -840,7 +844,7 @@ export default function AppointmentDetailScreen() {
   useEffect(() => {
     const cid = appointment?.client_id
     if (!cid) return
-    supabase.from('clients').select('id, full_name, status, first_name, phone, email, next_lrp_date, contact_role').eq('id', cid).single()
+    supabase.from('clients').select('id, full_name, status, first_name, phone, email, timezone, next_lrp_date, contact_role').eq('id', cid).single()
       .then(({ data }) => { if (data) setClientInfo(data as ClientInfo) })
     // LRP-4.1 §3 — tous les programmes actifs, source pour le sélecteur "Commande {nom du
     // programme}" de la section vente (remplace clientInfo.lrp_*).
@@ -2068,6 +2072,44 @@ export default function AppointmentDetailScreen() {
             {dateStr} · {startTime} → {endTime} · {appointment.duration_minutes} min
           </Text>
 
+          {clientInfo?.timezone ? (
+            <View style={{ marginTop: 8 }}>
+              <RemoteTimeHint
+                start={new Date(appointment.start_at)}
+                end={new Date(appointment.end_at)}
+                contactTz={clientInfo.timezone}
+                contactName={clientInfo.first_name || clientInfo.full_name}
+              />
+            </View>
+          ) : null}
+
+          {/* MEETING-MODE-1 — comment se déroule le RDV + l'action du jour J en un geste. */}
+          {appointment.meeting_mode ? (() => {
+            const mode = appointment.meeting_mode
+            const detail = mode === 'in_person' ? appointment.location
+              : mode === 'video' ? appointment.meeting_url
+              : clientInfo?.phone ?? null
+            const actionUrl = meetingActionUrl(mode, { location: appointment.location, meetingUrl: appointment.meeting_url, phone: clientInfo?.phone })
+            return (
+              <View style={styles.meetingRow}>
+                <Text style={styles.meetingText} numberOfLines={2}>
+                  {MEETING_MODE_ICON[mode]} {t(`appointments.meeting_mode_${mode}`)}{detail ? ` · ${detail}` : ''}
+                </Text>
+                {actionUrl ? (
+                  <TouchableOpacity style={styles.meetingActionBtn} onPress={() => Linking.openURL(actionUrl).catch(e => console.error('[meeting.open]', e))} activeOpacity={0.8}>
+                    <Text style={styles.meetingActionText}>{t(`appointments.meeting_action_${mode}`)}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )
+          })() : !isCancelled ? (
+            // RDV créé avant MEETING-MODE-1 (ou mode non choisi) : invitation discrète à préciser.
+            <TouchableOpacity style={styles.meetingRowEmpty} onPress={() => router.push(`/(app)/appointments/new?id=${id}` as any)} activeOpacity={0.75}>
+              <Text style={styles.meetingEmptyText}>📍 {t('appointments.meeting_mode_unset')}</Text>
+              <Text style={styles.meetingEmptyLink}>{t('appointments.meeting_mode_set')} ›</Text>
+            </TouchableOpacity>
+          ) : null}
+
           <View style={styles.pillsRow}>
             {/* RDV-1 §5 — statut affiché ici uniquement sur mobile (pas de colonne latérale) ;
                 sur web il figure déjà, en lecture seule, dans la colonne de droite (sidebar) —
@@ -2116,7 +2158,7 @@ export default function AppointmentDetailScreen() {
             ) : null}
           </View>
 
-          {(biz?.commercial_intent?.length || biz?.estimated_value != null || appointment.location || practitionerName) ? (
+          {(biz?.commercial_intent?.length || biz?.estimated_value != null || (appointment.location && !appointment.meeting_mode) || practitionerName) ? (
             <View style={styles.metaGrid}>
               {biz?.commercial_intent?.length ? (
                 <View style={styles.metaItem}>
@@ -2130,7 +2172,7 @@ export default function AppointmentDetailScreen() {
                   <Text style={styles.metaValue}>{formatMoney(biz.estimated_value, locale)}</Text>
                 </View>
               ) : null}
-              {!!appointment.location ? (
+              {!!appointment.location && !appointment.meeting_mode ? (
                 <View style={styles.metaItem}>
                   <Text style={styles.metaLabel}>{t('appointments.field_location')}</Text>
                   <Text style={styles.metaValue}>{appointment.location}</Text>
@@ -4461,18 +4503,25 @@ export default function AppointmentDetailScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container:     { flex: 1, backgroundColor: colors.bgDim },
+    container:     { flex: 1, backgroundColor: colors.bg },
     center:        { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bgDim },
     scrollContent: { padding: 16, gap: 14, paddingBottom: 40 },
     emptyText:     { fontSize: 15, fontFamily: fonts.body, color: colors.textSecondary, textAlign: 'center' },
 
     // Hero
-    heroCard:    { backgroundColor: colors.card, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, overflow: 'hidden' },
+    heroCard:    { backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder, overflow: 'hidden', ...SOFT_CARD_SHADOW },
     heroRow:     { flexDirection: 'row' },
     heroAccent:  { width: 4 },
     heroBody:    { flex: 1, padding: 16, gap: 8 },
-    heroTitle:   { fontSize: 20, fontFamily: fonts.semibold, color: colors.text, lineHeight: 26 },
+    heroTitle:   { fontSize: 26, fontFamily: fonts.display, color: colors.text, lineHeight: 32, letterSpacing: -0.5 },
     heroSub:     { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary },
+    meetingRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+    meetingText: { flex: 1, fontSize: 13.5, fontFamily: fonts.medium, color: colors.text },
+    meetingActionBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.primaryAction },
+    meetingActionText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.onPrimary },
+    meetingRowEmpty: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border },
+    meetingEmptyText: { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary },
+    meetingEmptyLink: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
 
     pillsRow:    { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     pill:        { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20 },
@@ -4484,7 +4533,7 @@ function makeStyles(colors: ThemeColors) {
     metaValue:   { fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
 
     // Generic card
-    card:      { backgroundColor: colors.card, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, padding: 16 },
+    card:      { backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder, padding: 16, ...SOFT_CARD_SHADOW },
     cardLabel: { fontSize: 12, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 12 },
     notesSectionTitle: { fontSize: 12, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.6 },
     notesSectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
@@ -4669,7 +4718,7 @@ function makeStyles(colors: ThemeColors) {
     headerBtnSuccessText: { fontSize: 12, fontFamily: fonts.semibold, color: '#ffffff' },
 
     // Mobile client card
-    mobileClientCard: { backgroundColor: colors.card, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    mobileClientCard: { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.cardBorder, ...SOFT_CARD_SHADOW, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
 
     // Web layout
     webLayout: { flex: 1, flexDirection: 'row', backgroundColor: colors.bgDim },

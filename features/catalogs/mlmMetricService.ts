@@ -201,6 +201,32 @@ export async function setMetricDefinitionActive(id: string, active: boolean): Pr
   if (error) throw new Error(error.message)
 }
 
+// MLM-UNIT-1 — type de valeur (points, %, €, nombre) d'une valeur personnelle. N'altère ni les
+// valeurs produits ni les snapshots de commandes : seul l'affichage (suffixe) change.
+export async function updateMetricDefinitionUnit(id: string, unit: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('mlm_metric_definitions')
+    .update({ unit, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('origin', 'personal')
+  if (error) throw new Error(error.message)
+}
+
+// MLM-METRIC-DELETE-1 — suppression d'une valeur PERSONNELLE uniquement (origin='personal' filtré
+// ici en plus de la RLS). Les valeurs saisies sur les produits et les liens catalogues partent en
+// cascade ; les commandes passées gardent leur snapshot (metric_code_snapshot/metric_label_snapshot,
+// metric_definition_id → NULL), que computeMlmTotals sait déjà regrouper par code figé.
+export async function deletePersonalMetricDefinition(id: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('mlm_metric_definitions')
+    .delete()
+    .eq('id', id)
+    .eq('origin', 'personal')
+    .select('id')
+  if (error) throw new Error(error.message)
+  if (!data || data.length === 0) throw new MetricNotOwnedError()
+}
+
 export interface ProductMetricValueWithDefinition extends CatalogProductMetricValue {
   definition: MlmMetricDefinition
 }

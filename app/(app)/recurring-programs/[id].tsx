@@ -1,10 +1,10 @@
 import { useState, useCallback, useMemo } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput } from 'react-native'
 import { router, Stack, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '@/shared/lib/supabase'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
-import { fetchProgramById, updateProgram, completeIfDurationReached } from '@/features/clients/recurringProgramService'
+import { fetchProgramById, updateProgram, completeIfDurationReached, deleteProgram } from '@/features/clients/recurringProgramService'
 import {
   fetchOccurrencesForProgram, deriveOccurrenceDisplayStatus, confirmOccurrence, skipOccurrence,
   reactivateProgram, computeReactivationCandidateDate, isReactivationDateWithinEnd,
@@ -15,13 +15,17 @@ import { getLrpFrequencyLabel, programToEditValue, buildProgramEditPatch, format
 import type { LrpProgramValue } from '@/features/clients/lrpProgramService'
 import { LrpProgramFields } from '@/features/clients/LrpProgramFields'
 import { getOrdersByRecurringProgram, getOrderById, updateOrder } from '@/features/orders/orderService'
+import { processAutoRenewals, revertAutoRenewal } from '@/features/clients/autoRenewalService'
+import { useBrands } from '@/features/brands/useBrands'
+import { BrandPill } from '@/features/brands/BrandPill'
+import { programTitleForBrand } from '@/features/brands/programNaming'
 import { OrderEditModal } from '@/features/orders/OrderEditModal'
 import { DateInput } from '@/shared/components/ui/DateInput'
 import { formatDate } from '@/shared/lib/dateFormat'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
-import type { RecurringProgram, RecurringProgramOccurrence, OrderListItem } from '@/shared/lib/types'
+import type { RecurringProgram, RecurringProgramOccurrence, OrderListItem, RecurringRenewalMode } from '@/shared/lib/types'
 
 type ProgramClient = { id: string; full_name: string }
 type PendingAction = 'pause' | 'cancel' | 'reactivate' | null
@@ -76,6 +80,22 @@ export default function RecurringProgramScreen() {
   const [editingProgram, setEditingProgram] = useState(false)
   const [editValue, setEditValue] = useState<LrpProgramValue | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
+  // AUTO-RENEWAL-1 — mode de renouvellement et "Ce renouvellement n'a pas eu lieu".
+  const [savingRenewal, setSavingRenewal] = useState(false)
+  const [renewalError, setRenewalError] = useState('')
+  const [revertConfirmId, setRevertConfirmId] = useState<string | null>(null)
+  const [revertingId, setRevertingId] = useState<string | null>(null)
+  // PROGRAM-BRAND-1 — marque du programme, % de fidélité et notes propres au programme.
+  const { brands } = useBrands()
+  const [loyaltyDraft, setLoyaltyDraft] = useState('')
+  const [notesDraft, setNotesDraft] = useState('')
+  const [savingLoyalty, setSavingLoyalty] = useState(false)
+  const [loyaltySaved, setLoyaltySaved] = useState(false)
+  // PROGRAM-DELETE-1 — suppression définitive, toujours confirmée (erreur de saisie ou test).
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteWithOrders, setDeleteWithOrders] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -86,7 +106,15 @@ export default function RecurringProgramScreen() {
       // durée est en réalité déjà atteinte (occurrence_limit ou end_date dépassée) ne doit
       // jamais rester visible comme "actif" plus longtemps que nécessaire.
       p = await completeIfDurationReached(p)
+      // AUTO-RENEWAL-1 — rattrape tout de suite un renouvellement automatique échu, sans attendre
+      // le passage throttlé de l'accueil.
+      if (p.status === 'active' && p.renewal_mode === 'company_auto') {
+        await processAutoRenewals(p.user_id).catch(e => console.error('[program.autoRenewal]', e))
+        p = (await fetchProgramById(id)) ?? p
+      }
       setProgram(p)
+      setLoyaltyDraft(p.loyalty_percent != null ? String(p.loyalty_percent) : '')
+      setNotesDraft(p.notes ?? '')
       const [clientRes, ordersRes, occurrencesRes] = await Promise.all([
         supabase.from('clients').select('id, full_name').eq('id', p.client_id).single(),
         getOrdersByRecurringProgram(p.id),
@@ -166,6 +194,53 @@ export default function RecurringProgramScreen() {
     }
   }
 
+  async function saveRenewalSettings(patch: { renewal_mode?: RecurringRenewalMode; checkin_before_renewal?: boolean; brand_id?: string | null }) {
+    if (!program) return
+    setSavingRenewal(true)
+    setRenewalError('')
+    try {
+      await updateProgram(program.id, patch)
+      await load()
+    } catch (e) {
+      console.error('[program.renewalMode]', e)
+      setRenewalError(t('recurring_program.renewal_error'))
+    } finally {
+      setSavingRenewal(false)
+    }
+  }
+
+  async function saveLoyalty() {
+    if (!program) return
+    setSavingLoyalty(true)
+    setRenewalError('')
+    setLoyaltySaved(false)
+    try {
+      const pct = loyaltyDraft.trim() ? Math.max(0, Math.min(100, parseInt(loyaltyDraft, 10) || 0)) : null
+      await updateProgram(program.id, { loyalty_percent: pct, notes: notesDraft.trim() || null })
+      setLoyaltySaved(true)
+      await load()
+    } catch (e) {
+      console.error('[program.loyalty]', e)
+      setRenewalError(t('recurring_program.renewal_error'))
+    } finally {
+      setSavingLoyalty(false)
+    }
+  }
+
+  async function handleRevertAutoRenewal(occurrence: RecurringProgramOccurrence) {
+    setRevertingId(occurrence.id)
+    try {
+      await revertAutoRenewal(occurrence)
+      setRevertConfirmId(null)
+      await load()
+    } catch (e) {
+      console.error('[program.revertAutoRenewal]', e)
+      setRenewalError(t('recurring_program.renewal_error'))
+    } finally {
+      setRevertingId(null)
+    }
+  }
+
   async function openOrder(orderId: string) {
     const found = await getOrderById(orderId)
     if (found) setEditingOrder(found)
@@ -209,6 +284,22 @@ export default function RecurringProgramScreen() {
     else router.replace('/(app)/clients' as any)
   }
   const backLabel = client?.full_name ?? t('common.back')
+
+  async function handleDeleteProgram() {
+    if (!program) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await deleteProgram(program.id, deleteWithOrders)
+      // Retour sur la fiche du contact (jamais l'écran précédent, qui peut être ailleurs).
+      if (client) router.dismissTo(`/(app)/clients/${client.id}` as any)
+      else goBack()
+    } catch (e) {
+      console.error('[program.delete]', e)
+      setDeleteError(t('recurring_program.delete_error'))
+      setDeleting(false)
+    }
+  }
   const navBar = (
     <View style={styles.navBar}>
       <TouchableOpacity style={styles.backRow} onPress={goBack} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -242,7 +333,11 @@ export default function RecurringProgramScreen() {
 
   // LRP-4.1 §1 — libellé propre à cette instance en plus du nom global du concept, jamais un
   // remplacement : "Abonnement — Nutrition", pas juste "Nutrition".
-  const programTitle = formatProgramTitle(getLrpName(), program.label)
+  // PROGRAM-BRAND-1 — "LRP doTERRA", "Abonnement Zinzino" : nom propre à la marque si renseigné.
+  const programBrand = brands.find(b => b.id === program.brand_id) ?? null
+  const programTitle = programBrand
+    ? programTitleForBrand(programBrand, getLrpName(), program.label)
+    : formatProgramTitle(getLrpName(), program.label)
   const frequencyLabel = getLrpFrequencyLabel(program.frequency_value, program.frequency_unit, t)
   const daysUntilNext = program.next_occurrence_date ? getDaysUntilLrp(program.next_occurrence_date) : null
   const todayIso = new Date().toISOString().split('T')[0]
@@ -299,7 +394,9 @@ export default function RecurringProgramScreen() {
           <Text style={[styles.orderProduct, (isCancelled || isReturned) && styles.orderProductMuted]} numberOfLines={1}>
             {order.product_name}
           </Text>
-          <Text style={[styles.orderStatus, { color: statusColorForOrder }]}>{statusLabel}</Text>
+          <Text style={[styles.orderStatus, { color: statusColorForOrder }]}>
+            {statusLabel}{order.auto_renewal ? ` · ${t('recurring_program.auto_renewal_order_tag')}` : ''}
+          </Text>
         </View>
         {order.amount != null ? <Text style={styles.orderAmount}>{order.amount.toFixed(2)}€</Text> : null}
         <Text style={styles.orderOpen}>{t('common.open')} ›</Text>
@@ -380,6 +477,103 @@ export default function RecurringProgramScreen() {
                 </Text>
               ) : null}
 
+              {/* PROGRAM-BRAND-1 — marque du programme, % de fidélité et notes. */}
+              <View style={styles.renewalBlock}>
+                <Text style={styles.renewalTitle}>{t('recurring_program.brand_title')}</Text>
+                {brands.length > 0 ? (
+                  <View style={styles.brandChips}>
+                    {brands.map(b => {
+                      const selected = program.brand_id === b.id
+                      return (
+                        <TouchableOpacity
+                          key={b.id}
+                          style={[styles.brandChip, selected && styles.brandChipActive]}
+                          onPress={() => saveRenewalSettings({ brand_id: selected ? null : b.id })}
+                          disabled={savingRenewal}
+                          accessibilityRole="radio"
+                          accessibilityState={{ checked: selected }}
+                          activeOpacity={0.8}
+                        >
+                          <BrandPill brand={b} size="sm" />
+                        </TouchableOpacity>
+                      )
+                    })}
+                  </View>
+                ) : (
+                  <Text style={styles.reactivationOptionHint}>{t('recurring_program.brand_none_hint')}</Text>
+                )}
+                <View style={styles.loyaltyRow}>
+                  <Text style={styles.reactivationOptionTitle}>{t('clients.fields.lrp_loyalty_percent')}</Text>
+                  <TextInput
+                    style={styles.loyaltyInput}
+                    value={loyaltyDraft}
+                    onChangeText={v => { setLoyaltyDraft(v.replace(/\D/g, '').slice(0, 3)); setLoyaltySaved(false) }}
+                    placeholder="0-100"
+                    placeholderTextColor={colors.textTertiary}
+                    keyboardType="number-pad"
+                    accessibilityLabel={t('clients.fields.lrp_loyalty_percent')}
+                  />
+                  <Text style={styles.reactivationOptionHint}>%</Text>
+                </View>
+                <TextInput
+                  style={styles.notesInput}
+                  value={notesDraft}
+                  onChangeText={v => { setNotesDraft(v); setLoyaltySaved(false) }}
+                  placeholder={t('clients.fields.loyalty_notes')}
+                  placeholderTextColor={colors.textTertiary}
+                  multiline
+                  accessibilityLabel={t('clients.fields.loyalty_notes')}
+                />
+                <View style={styles.loyaltyRow}>
+                  <TouchableOpacity style={styles.actionBtn} onPress={saveLoyalty} disabled={savingLoyalty} activeOpacity={0.75}>
+                    {savingLoyalty ? <ActivityIndicator size="small" color={colors.text} /> : <Text style={styles.actionBtnText}>{t('common.save')}</Text>}
+                  </TouchableOpacity>
+                  {loyaltySaved ? <Text style={styles.reactivationOptionHint}>✓ {t('recurring_program.saved')}</Text> : null}
+                </View>
+              </View>
+
+              {/* AUTO-RENEWAL-1 — qui gère le renouvellement : l'entreprise (automatique) ou moi. */}
+              <View style={styles.renewalBlock}>
+                <Text style={styles.renewalTitle}>{t('recurring_program.renewal_title')}</Text>
+                {(['company_auto', 'manual'] as RecurringRenewalMode[]).map(mode => {
+                  const selected = program.renewal_mode === mode
+                  return (
+                    <TouchableOpacity
+                      key={mode}
+                      style={[styles.reactivationOption, selected && styles.reactivationOptionActive]}
+                      onPress={() => { if (!selected) saveRenewalSettings({ renewal_mode: mode }) }}
+                      disabled={savingRenewal}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.radioDot, selected && styles.radioDotActive]} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.reactivationOptionTitle}>{t(`recurring_program.renewal_${mode}`)}</Text>
+                        <Text style={styles.reactivationOptionHint}>{t(`recurring_program.renewal_${mode}_hint`)}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  )
+                })}
+                {program.renewal_mode === 'company_auto' ? (
+                  <TouchableOpacity
+                    style={styles.checkinRow}
+                    onPress={() => saveRenewalSettings({ checkin_before_renewal: !program.checkin_before_renewal })}
+                    disabled={savingRenewal}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: program.checkin_before_renewal }}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[styles.checkBox, program.checkin_before_renewal && styles.checkBoxOn]}>
+                      {program.checkin_before_renewal ? <Text style={styles.checkMark}>✓</Text> : null}
+                    </View>
+                    <Text style={styles.checkinText}>{t('recurring_program.checkin_before_renewal')}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {savingRenewal ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                {renewalError ? <Text style={styles.reactivationErrorText}>{renewalError}</Text> : null}
+              </View>
+
               <View style={styles.actionsRow}>
                 {/* Demande utilisateur — "Modifier" déplacé du lien texte en haut de carte vers
                     ce groupe de boutons, même design pilule que pause/réactiver/annuler plutôt
@@ -406,7 +600,52 @@ export default function RecurringProgramScreen() {
                     <Text style={styles.actionBtnDangerText}>{t('recurring_program.action_cancel')}</Text>
                   </TouchableOpacity>
                 ) : null}
+                <TouchableOpacity
+                  style={styles.actionBtnDeleteOutline}
+                  onPress={() => { setPendingAction(null); setDeleteWithOrders(false); setDeleteError(''); setConfirmDelete(true) }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.actionBtnDangerText}>🗑 {t('common.delete')}</Text>
+                </TouchableOpacity>
               </View>
+
+              {confirmDelete ? (
+                <View style={styles.deleteConfirmBox}>
+                  <Text style={styles.deleteConfirmTitle}>
+                    {t('recurring_program.delete_confirm', {
+                      name: program.label ?? '',
+                      client: client?.full_name ?? '',
+                      count: occurrences.length,
+                    })}
+                  </Text>
+                  <Text style={styles.confirmText}>{t('recurring_program.delete_hint')}</Text>
+                  {orders.length > 0 ? (
+                    <TouchableOpacity
+                      style={styles.checkinRow}
+                      onPress={() => setDeleteWithOrders(v => !v)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: deleteWithOrders }}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.checkBox, deleteWithOrders && styles.checkBoxDanger]}>
+                        {deleteWithOrders ? <Text style={styles.checkMark}>✓</Text> : null}
+                      </View>
+                      <Text style={styles.checkinText}>{t('recurring_program.delete_with_orders', { count: orders.length })}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {deleteError ? <Text style={styles.reactivationErrorText}>{deleteError}</Text> : null}
+                  <View style={styles.actionsRow}>
+                    <TouchableOpacity style={styles.actionBtn} onPress={() => setConfirmDelete(false)} disabled={deleting} activeOpacity={0.75}>
+                      <Text style={styles.actionBtnText}>{t('common.cancel')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.actionBtnDeleteSolid} onPress={handleDeleteProgram} disabled={deleting} activeOpacity={0.85}>
+                      {deleting
+                        ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                        : <Text style={styles.actionBtnDeleteSolidText}>{t('recurring_program.delete_confirm_btn')}</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
             </>
           )}
 
@@ -553,7 +792,11 @@ export default function RecurringProgramScreen() {
                       {/* LRP-5 §5 — jamais "Commande envoyée"/"Commande reçue" : Oryalis n'est
                           connecté à aucun système officiel de l'entreprise, cette échéance n'est
                           qu'une prévision tant qu'elle n'est pas confirmée explicitement. */}
-                      <Text style={styles.occurrenceHint}>{t('recurring_program.automatic_order_expected')}</Text>
+                      <Text style={styles.occurrenceHint}>
+                        {program.renewal_mode === 'company_auto'
+                          ? t('recurring_program.auto_renewal_pending')
+                          : t('recurring_program.automatic_order_expected')}
+                      </Text>
                       <View style={styles.actionsRow}>
                         <TouchableOpacity style={styles.actionBtn} onPress={() => handleConfirmOccurrence(occurrence)} disabled={isResolving} activeOpacity={0.75}>
                           {isResolving
@@ -565,6 +808,32 @@ export default function RecurringProgramScreen() {
                         </TouchableOpacity>
                       </View>
                     </>
+                  ) : null}
+
+                  {/* AUTO-RENEWAL-1 — échéance confirmée par Oryalis : signalée, et annulable. */}
+                  {occurrence.auto_confirmed && displayStatus === 'confirmed' ? (
+                    <View style={{ gap: 6 }}>
+                      <Text style={styles.occurrenceHint}>🔁 {t('recurring_program.auto_renewal_done')}</Text>
+                      {revertConfirmId === occurrence.id ? (
+                        <View style={styles.confirmRow}>
+                          <Text style={styles.confirmText}>{t('recurring_program.auto_renewal_revert_confirm')}</Text>
+                          <View style={styles.confirmActions}>
+                            <TouchableOpacity onPress={() => setRevertConfirmId(null)} disabled={revertingId === occurrence.id}>
+                              <Text style={styles.confirmCancelText}>{t('common.cancel')}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => handleRevertAutoRenewal(occurrence)} disabled={revertingId === occurrence.id}>
+                              {revertingId === occurrence.id
+                                ? <ActivityIndicator size="small" color={colors.primary} />
+                                : <Text style={styles.confirmConfirmText}>{t('common.confirm')}</Text>}
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ) : (
+                        <TouchableOpacity onPress={() => setRevertConfirmId(occurrence.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                          <Text style={styles.revertLink}>{t('recurring_program.auto_renewal_revert')}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   ) : null}
 
                   {displayStatus === 'confirmed' || displayStatus === 'skipped' ? (
@@ -647,6 +916,12 @@ function makeStyles(colors: ThemeColors) {
     actionBtnText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
     actionBtnDanger: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, backgroundColor: colors.dangerLight },
     actionBtnDangerText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.danger },
+    actionBtnDeleteOutline: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.card },
+    actionBtnDeleteSolid: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, backgroundColor: colors.danger, minWidth: 140, alignItems: 'center' },
+    actionBtnDeleteSolidText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.onPrimary },
+    deleteConfirmBox: { marginTop: 12, gap: 8, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.dangerLight },
+    deleteConfirmTitle: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+    checkBoxDanger: { backgroundColor: colors.danger, borderColor: colors.danger },
 
     confirmRow: { marginTop: 12, gap: 8, padding: 12, borderRadius: 10, backgroundColor: colors.bgDim },
     confirmText: { fontSize: 13, fontFamily: fonts.body, color: colors.text },
@@ -666,6 +941,20 @@ function makeStyles(colors: ThemeColors) {
     reactivationOptionHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 1 },
     reactivationOptionDate: { fontSize: 12, fontFamily: fonts.semibold, color: colors.secondary, marginTop: 4 },
     reactivationErrorText: { fontSize: 12, fontFamily: fonts.medium, color: colors.danger, marginTop: 6 },
+    brandChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    brandChip: { padding: 3, borderRadius: 999, borderWidth: 2, borderColor: 'transparent' },
+    brandChipActive: { borderColor: colors.primary },
+    loyaltyRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+    loyaltyInput: { width: 70, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7, fontSize: 13, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.card, textAlign: 'right' },
+    notesInput: { minHeight: 60, borderWidth: 1, borderColor: colors.border, borderRadius: 9, padding: 10, fontSize: 13, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.card, textAlignVertical: 'top' },
+    renewalBlock: { gap: 8, marginTop: 6, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+    renewalTitle: { fontSize: 12, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+    checkinRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+    checkBox: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+    checkBoxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+    checkMark: { color: colors.onPrimary, fontFamily: fonts.bold, fontSize: 12 },
+    checkinText: { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.text },
+    revertLink: { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.danger },
 
     sectionTitle: { fontSize: 12, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 4 },
 

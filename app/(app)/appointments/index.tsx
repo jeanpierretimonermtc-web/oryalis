@@ -1,8 +1,11 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, Pressable,
-  StyleSheet, ActivityIndicator, useWindowDimensions, Modal, Platform,
+  StyleSheet, ActivityIndicator, useWindowDimensions, Modal, Platform, Linking,
 } from 'react-native'
+import { MEETING_MODE_ICON, meetingActionUrl } from '@/features/appointments/meetingMode'
+import { RemoteTimeBadge } from '@/features/clients/RemoteTimeBadge'
+import { RemoteTimeHint } from '@/features/clients/RemoteTimeHint'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -223,11 +226,111 @@ function AppointmentPreviewContent({
         <Text style={styles.previewDate}>{formatFullDate(start, isFr, daysLong, monthsFull)}</Text>
       )}
       <Text style={styles.previewTime}>{formatTime(start)} → {formatTime(end)}</Text>
+      {appt.client?.timezone ? (
+        <View style={{ marginTop: 4 }}>
+          <RemoteTimeBadge at={start} contactTz={appt.client.timezone} showCity />
+        </View>
+      ) : null}
       {!isPersonal && <Text style={styles.previewType}>{typeLabel}</Text>}
       {!isPersonal && statusLine && <Text style={styles.previewStatus}>{statusLine}</Text>}
       {showTitle && (
         <Text style={styles.previewTitle} numberOfLines={compact ? 2 : 3}>{appt.title}</Text>
       )}
+    </View>
+  )
+}
+
+// CAL-POPOVER-3 — aperçu au clic : contact, quand, comment (avec l'action du jour J), puis les
+// actions en boutons. Le Hover Preview garde AppointmentPreviewContent (compact).
+function AppointmentQuickPreview({
+  appt, colors, styles, t, getRoleLabel, isFr, daysLong, monthsFull,
+}: {
+  appt: CalendarAppointment
+  colors: ThemeColors
+  styles: ReturnType<typeof makeStyles>
+  t: (key: string, opts?: Record<string, unknown>) => string
+  getRoleLabel: (role: ContactRole) => string
+  isFr: boolean
+  daysLong: string[]
+  monthsFull: string[]
+}) {
+  const accent = apptAccent(appt.client, colors)
+  const sp = statusPresentation(appt.status, t)
+  const isPersonal = appt.provider === 'google'
+  const contactName = appt.client ? appt.client.full_name : appt.title
+  const initials = contactName.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('')
+  const roleLabels = appt.client ? appt.client.contact_role.map(getRoleLabel) : []
+  const typeLabel = t(`appointment_types.${appt.appointment_type}`)
+  const start = new Date(appt.start_at)
+  const end = new Date(appt.end_at)
+  const showTitle = !!appt.client && appt.title.trim().toLowerCase() !== typeLabel.trim().toLowerCase()
+  const statusText = sp.label ? `${sp.symbol ? `${sp.symbol} ` : ''}${sp.label}` : t('appointment_statuses.scheduled')
+  const mode = appt.meeting_mode
+  const modeDetail = mode === 'in_person' ? appt.location : mode === 'video' ? appt.meeting_url : appt.client?.phone ?? null
+  const actionUrl = meetingActionUrl(mode, { location: appt.location, meetingUrl: appt.meeting_url, phone: appt.client?.phone })
+
+  return (
+    <View style={styles.qpWrap}>
+      <View style={styles.qpHeader}>
+        <View style={[styles.qpAvatar, { backgroundColor: accent + '22' }]}>
+          <Text style={[styles.qpAvatarText, { color: accent }]}>{initials}</Text>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.qpName} numberOfLines={1}>{contactName}</Text>
+          {roleLabels.length > 0 ? <Text style={styles.qpRoles} numberOfLines={1}>{roleLabels.join(' · ')}</Text> : null}
+        </View>
+        {isPersonal ? (
+          <View style={styles.previewPersonalBadge}>
+            <Text style={styles.previewPersonalBadgeText}>{t('appointments.personal_badge')}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {!isPersonal ? (
+        <View style={styles.qpPills}>
+          <View style={[styles.qpPill, { backgroundColor: accent + '1A' }]}>
+            <Text style={[styles.qpPillText, { color: accent }]}>{typeLabel}</Text>
+          </View>
+          <View style={[styles.qpPill, { backgroundColor: colors.bgDim }]}>
+            <Text style={[styles.qpPillText, { color: colors.textSecondary }]}>{statusText}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {showTitle ? <Text style={styles.qpTitle} numberOfLines={2}>{appt.title}</Text> : null}
+
+      <View style={styles.qpInfoBox}>
+      <View style={styles.qpLine}>
+        <Text style={styles.qpIcon}>🗓</Text>
+        <Text style={styles.qpLineText}>
+          {formatFullDate(start, isFr, daysLong, monthsFull)}{'\n'}
+          <Text style={styles.qpLineSub}>{formatTime(start)} → {formatTime(end)}</Text>
+        </Text>
+      </View>
+
+      {appt.client?.timezone ? (
+        <RemoteTimeHint start={start} end={end} contactTz={appt.client.timezone} contactName={appt.client.full_name.split(' ')[0]} />
+      ) : null}
+
+      {mode ? (
+        <View style={styles.qpLine}>
+          <Text style={styles.qpIcon}>{MEETING_MODE_ICON[mode]}</Text>
+          <Text style={styles.qpLineText} numberOfLines={3}>
+            {t(`appointments.meeting_mode_${mode}`)}
+            {modeDetail ? <Text style={styles.qpLineSub}>{'\n'}{modeDetail}</Text> : null}
+          </Text>
+          {actionUrl ? (
+            <TouchableOpacity
+              style={styles.qpActionChip}
+              onPress={() => Linking.openURL(actionUrl).catch(e => console.error('[calendar.meeting]', e))}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.qpActionChipText}>{t(`appointments.meeting_action_${mode}`)} ↗</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
+      </View>
     </View>
   )
 }
@@ -591,6 +694,7 @@ export default function AgendaScreen() {
                               <Text style={[styles.monthEventText, { color: colors.text }, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                                 {prefix}{formatTime(new Date(appt.start_at))} {appt.client ? firstWord(appt.client.full_name) : appt.title}
                               </Text>
+                              <RemoteTimeBadge at={new Date(appt.start_at)} contactTz={appt.client?.timezone} size="xs" />
                             </Pressable>
                           )
                         })}
@@ -722,7 +826,10 @@ export default function AgendaScreen() {
                       accessibilityLabel={t('appointments.view_detail_hint')}
                     >
                       {hPx > 30 && (
-                        <Text style={[styles.weekApptTime, { color: colors.textSecondary }]}>{formatTime(d)}</Text>
+                        <View style={styles.weekApptTimeRow}>
+                          <Text style={[styles.weekApptTime, { color: colors.textSecondary }]}>{formatTime(d)}</Text>
+                          <RemoteTimeBadge at={d} contactTz={appt.client?.timezone} size="xs" />
+                        </View>
                       )}
                       <Text style={[styles.weekApptName, { color: colors.text }, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                         {namePrefix}{appt.client ? firstWord(appt.client.full_name) : appt.title}
@@ -835,6 +942,7 @@ export default function AgendaScreen() {
                   <Text style={[styles.dayApptTime, { color: colors.textSecondary }]}>
                     {formatTime(d)} – {formatTime(end)}
                   </Text>
+                  <RemoteTimeBadge at={d} contactTz={appt.client?.timezone} showCity size="xs" />
                 </View>
                 <Text style={[styles.dayApptClient, { color: colors.text }, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                   {isPersonal ? '🗓 ' : ''}{appt.client ? appt.client.full_name : appt.title}
@@ -1013,22 +1121,28 @@ export default function AgendaScreen() {
 
       {/* UI-POPOVER-2 — "Quick Preview" devient un vrai menu ancré près du RDV cliqué
           (§20 : ne transforme pas la fiche RDV en popover, seul ce menu court change). */}
-      <AnchoredMenu visible={!!actionMenuAppt} onClose={closeApptMenu} anchor={actionMenuPos} width={300} estimatedHeight={340}>
+      {/* Jamais par-dessus la barre latérale web (240 px dès 768 px) : ouverture à droite si besoin. */}
+      <AnchoredMenu
+        visible={!!actionMenuAppt}
+        onClose={closeApptMenu}
+        anchor={actionMenuPos}
+        width={320}
+        estimatedHeight={360}
+        minLeft={screenW >= 768 ? 240 + 12 : 8}
+      >
             {actionMenuAppt ? (
               <>
                 {/* CAL-6B — même contenu que le Hover Preview (AppointmentPreviewContent,
                     compact={false} : ajoute la date complète, explicite "Planifié" pour
                     scheduled) — le menu Voir/Modifier/Supprimer existant suit juste après,
                     inchangé. */}
-                <View style={styles.apptMenuHeader}>
-                  <AppointmentPreviewContent
-                    appt={actionMenuAppt} colors={colors} styles={styles} t={t} getRoleLabel={getRoleLabel}
-                    isFr={isFr} daysLong={daysLong} monthsFull={monthsFull} compact={false}
-                  />
-                </View>
+                <AppointmentQuickPreview
+                  appt={actionMenuAppt} colors={colors} styles={styles} t={t} getRoleLabel={getRoleLabel}
+                  isFr={isFr} daysLong={daysLong} monthsFull={monthsFull}
+                />
 
                 {confirmingDelete ? (
-                  <>
+                  <View style={styles.qpFooter}>
                     <Text style={styles.apptMenuConfirmText}>{t('appointments.confirm_delete_appt')}</Text>
                     <View style={styles.apptMenuConfirmRow}>
                       <TouchableOpacity
@@ -1048,26 +1162,26 @@ export default function AgendaScreen() {
                           : <Text style={styles.apptMenuDangerBtnText}>{t('common.delete')}</Text>}
                       </TouchableOpacity>
                     </View>
-                  </>
+                  </View>
                 ) : (
-                  <>
+                  <View style={styles.qpFooter}>
                     {/* DASH/CAL-2 §13 — un événement personnel (provider='google') n'a pas de
                         fiche RDV commerciale ni de formulaire d'édition Oryalis pertinents :
                         seul l'aperçu ci-dessus (déjà neutre) et la suppression restent proposés. */}
                     {actionMenuAppt.provider !== 'google' && (
-                      <>
-                        <TouchableOpacity style={styles.apptMenuRow} onPress={handleViewAppt} activeOpacity={0.7}>
-                          <Text style={styles.apptMenuRowText}>{t('appointments.view_detail_hint')}</Text>
+                      <View style={styles.qpBtnRow}>
+                        <TouchableOpacity style={styles.qpPrimaryBtn} onPress={handleViewAppt} activeOpacity={0.85}>
+                          <Text style={styles.qpPrimaryBtnText} numberOfLines={1}>{t('appointments.open_appointment')}</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.apptMenuRow} onPress={handleEditAppt} activeOpacity={0.7}>
-                          <Text style={styles.apptMenuRowText}>{t('common.edit')}</Text>
+                        <TouchableOpacity style={styles.qpSecondaryBtn} onPress={handleEditAppt} activeOpacity={0.8}>
+                          <Text style={styles.qpSecondaryBtnText} numberOfLines={1}>✏️ {t('common.edit')}</Text>
                         </TouchableOpacity>
-                      </>
+                      </View>
                     )}
-                    <TouchableOpacity style={styles.apptMenuRow} onPress={() => setConfirmingDelete(true)} activeOpacity={0.7}>
-                      <Text style={[styles.apptMenuRowText, { color: colors.danger }]}>{t('common.delete')}</Text>
+                    <TouchableOpacity style={styles.qpDeleteLink} onPress={() => setConfirmingDelete(true)} activeOpacity={0.7}>
+                      <Text style={styles.qpDeleteText}>🗑 {t('common.delete')}</Text>
                     </TouchableOpacity>
-                  </>
+                  </View>
                 )}
               </>
             ) : null}
@@ -1084,6 +1198,32 @@ function makeStyles(colors: ThemeColors) {
   // (UI-POPOVER-2), seul le contenu interne (header aperçu + lignes) reste ici.
   apptMenuHeader:  { marginBottom: 10, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   apptMenuRow:     { paddingVertical: 12 },
+  // CAL-POPOVER-3 — aperçu au clic.
+  qpWrap:      { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, gap: 12 },
+  qpInfoBox:   { gap: 12, padding: 12, borderRadius: 12, backgroundColor: colors.surface },
+  qpHeader:    { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  qpAvatar:    { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  qpAvatarText:{ fontSize: 14, fontFamily: fonts.bold },
+  qpName:      { fontSize: 15, fontFamily: fonts.semibold, color: colors.text },
+  qpRoles:     { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary, marginTop: 1 },
+  qpPills:     { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  qpPill:      { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  qpPillText:  { fontSize: 11.5, fontFamily: fonts.semibold },
+  qpTitle:     { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+  qpLine:      { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  qpIcon:      { width: 20, fontSize: 15, lineHeight: 18, textAlign: 'center' },
+  qpLineText:  { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.text, lineHeight: 18 },
+  qpLineSub:   { fontSize: 12.5, fontFamily: fonts.body, color: colors.textSecondary },
+  qpActionChip:     { alignSelf: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary },
+  qpActionChipText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
+  qpFooter:    { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10, gap: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  qpBtnRow:    { flexDirection: 'row', gap: 8 },
+  qpPrimaryBtn:     { flex: 1.4, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryAction },
+  qpPrimaryBtnText: { fontSize: 13.5, fontFamily: fonts.semibold, color: colors.onPrimary, textAlign: 'center' },
+  qpSecondaryBtn:     { flex: 1, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  qpSecondaryBtnText: { fontSize: 13.5, fontFamily: fonts.semibold, color: colors.text },
+  qpDeleteLink: { alignSelf: 'center', paddingVertical: 6 },
+  qpDeleteText: { fontSize: 13, fontFamily: fonts.medium, color: colors.danger },
   apptMenuRowText: { fontSize: 14, fontFamily: fonts.medium, color: colors.text },
   apptMenuConfirmText: { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18, marginBottom: 14 },
   apptMenuConfirmRow:  { flexDirection: 'row', gap: 10 },
@@ -1174,6 +1314,7 @@ function makeStyles(colors: ThemeColors) {
   // d'ombre ici (cartes nombreuses et petites, un flou par carte alourdirait la vue).
   weekApptBlock: { position: 'absolute', borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderLeftWidth: 2.5, paddingHorizontal: 4, paddingVertical: 3, overflow: 'hidden', zIndex: 2 },
   weekApptTime:  { fontSize: 9, fontFamily: fonts.medium, opacity: 0.85 },
+  weekApptTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 3, flexWrap: 'wrap' },
   weekApptName:  { fontSize: 11, fontFamily: fonts.bold },
   weekApptType:  { fontSize: 9, fontFamily: fonts.medium, opacity: 0.85 },
 
@@ -1201,7 +1342,7 @@ function makeStyles(colors: ThemeColors) {
   monthEvents:         { gap: 3 },
   // CAL-6 : borderWidth réservé en permanence (borderColor transparent par défaut) — le survol
   // ne change que la couleur, jamais la largeur, pour n'introduire aucun décalage de layout.
-  monthEventChip:      { borderRadius: 5, borderLeftWidth: 3, borderWidth: 1, borderColor: 'transparent', paddingHorizontal: 5, paddingVertical: 2.5 },
+  monthEventChip:      { borderRadius: 5, borderLeftWidth: 3, borderWidth: 1, borderColor: 'transparent', paddingHorizontal: 5, paddingVertical: 2.5, gap: 2 },
   monthEventText:      { fontSize: 9.5, fontFamily: fonts.semibold },
   monthMoreText:       { fontSize: 9.5, fontFamily: fonts.medium, color: colors.textTertiary, paddingLeft: 3, marginTop: 1 },
   monthDotsRow:        { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 3, paddingLeft: 2 },

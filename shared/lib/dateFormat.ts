@@ -24,6 +24,18 @@ export function formatTime(value: string | Date): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
+/**
+ * Splits a stored UTC timestamp into the user's LOCAL date ('YYYY-MM-DD') and time ('HH:MM').
+ * Never slice the ISO string itself: '…T08:00:00Z' is 09:00 in Paris in winter, 10:00 in summer.
+ */
+export function isoToLocalParts(value: string | Date): { date: string; time: string } {
+  const d = typeof value === 'string' ? new Date(value) : value
+  return {
+    date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+    time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+  }
+}
+
 /** Converts an ISO date ('YYYY-MM-DD') to a DD/MM/YYYY display string. */
 export function isoToDisplayDate(iso: string): string {
   const [y, m, d] = iso.split('-')

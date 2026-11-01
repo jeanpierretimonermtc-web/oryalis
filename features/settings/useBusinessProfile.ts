@@ -11,6 +11,8 @@ const DEFAULT: UserBusinessProfile = {
   custom_lrp_name: null,
   active_modules: ['products', 'renewals_lrp', 'downline', 'goals', 'calendar_sync'],
   automation_delays: {},
+  office_address: null,
+  default_meeting_url: null,
   created_at: '',
   updated_at: '',
 }

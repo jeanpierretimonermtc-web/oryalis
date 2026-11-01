@@ -17,16 +17,19 @@ import {
   useDashboardStats,
   usePipelineStats,
   useMonthlyRevenue,
+  useMonthActivity,
   useAlerts,
   useDailyActions,
   useUrgencyCounts,
   buildTopPriorities,
-  DAILY_PRIORITY,
 } from '@/features/dashboard/useDashboard'
 import type { DailyActionItem, DailyActionKind, PersonalEventItem } from '@/features/dashboard/useDashboard'
 import { useGoals } from '@/features/goals/useGoals'
 import { useMlmTrackingSummary } from '@/features/catalogs/useMlmTracking'
 import { formatMlmValue } from '@/features/catalogs/mlmTrackingService'
+import { useBrands } from '@/features/brands/useBrands'
+import { BrandAvatar } from '@/features/brands/BrandPill'
+import { RemoteTimeBadge } from '@/features/clients/RemoteTimeBadge'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useUpcomingAppointments } from '@/features/appointments/useAppointments'
 import { useOverdueFollowupCount } from '@/features/followups/useFollowups'
@@ -187,7 +190,7 @@ function PipelineStrip({ byStage }: { byStage: Record<string, number> }) {
 
   return (
     <View style={styles.pipelineWrap}>
-      <Text style={styles.pipelineLabel}>{t('dashboard.pipeline')}</Text>
+      <Text style={styles.pipelineLabel}>{t('dashboard.pipeline')} · {t('dashboard.pipeline_total', { count: pills.reduce((sum, p) => sum + p.count, 0) })}</Text>
 
       <ScrollView
         horizontal
@@ -227,10 +230,6 @@ function PipelineStrip({ byStage }: { byStage: Record<string, number> }) {
 }
 
 
-// Ordre d'affichage des catégories détaillées — reprend DAILY_PRIORITY (features/dashboard)
-// pour rester cohérent avec le tri utilisé dans "Priorités du jour".
-const DAILY_ORDER: DailyActionKind[] = (Object.keys(DAILY_PRIORITY) as DailyActionKind[])
-  .sort((a, b) => DAILY_PRIORITY[a] - DAILY_PRIORITY[b])
 
 // Une icône et une couleur d'accent par catégorie — pour que chaque groupe se
 // distingue au premier coup d'œil sans avoir à lire le libellé.
@@ -285,9 +284,11 @@ function useReasonText() {
 }
 
 // ── Priorités du jour (condensé, dédupliqué, plafonné) ──────────────────────────
-// Reçoit la liste déjà calculée (plutôt que de la recalculer) pour que le dashboard puisse
-// exclure exactement ces mêmes éléments de "À faire aujourd'hui" — jamais de doublon visuel.
-function TopPriorities({ top, loading }: { top: DailyActionItem[]; loading: boolean }) {
+// DASH-ACTIVITY-1 — unique liste d'actions de l'accueil : les priorités en cartes, puis le reste
+// des actions du jour en lignes compactes (ancien bloc "À faire aujourd'hui", supprimé).
+const REST_MAX = 8
+
+function TopPriorities({ top, rest, loading }: { top: DailyActionItem[]; rest: DailyActionItem[]; loading: boolean }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -298,7 +299,12 @@ function TopPriorities({ top, loading }: { top: DailyActionItem[]; loading: bool
 
   return (
     <View style={styles.topPriorities}>
-      <Text style={styles.topPrioritiesTitle}>{t('dashboard.priorities_title')}</Text>
+      <View style={styles.prioritiesHeader}>
+        <Text style={styles.topPrioritiesTitle}>{t('dashboard.priorities_title')}</Text>
+        {top.length + rest.length > 0 ? (
+          <Text style={styles.prioritiesCount}>{t('dashboard.priorities_count', { count: top.length + rest.length })}</Text>
+        ) : null}
+      </View>
       {top.length === 0 ? (
         <View style={styles.allClearRow}><Text style={styles.allClearText}>{t('dashboard.no_priorities')}</Text></View>
       ) : top.map(item => {
@@ -323,6 +329,11 @@ function TopPriorities({ top, loading }: { top: DailyActionItem[]; loading: bool
                     {reasonText(item)}
                     {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: item.kind === 'today_appointment' ? '2-digit' : undefined, minute: item.kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
                   </Text>
+                  {item.kind === 'today_appointment' && item.at && item.clientTimezone ? (
+                    <View style={{ marginTop: 4 }}>
+                      <RemoteTimeBadge at={new Date(item.at)} contactTz={item.clientTimezone} showCity />
+                    </View>
+                  ) : null}
                 </View>
               </View>
               <View style={styles.topPriorityActions}>
@@ -349,51 +360,36 @@ function TopPriorities({ top, loading }: { top: DailyActionItem[]; loading: bool
           </View>
         )
       })}
+      {rest.slice(0, REST_MAX).map(item => {
+        const accent = dailyAccent(item.kind, colors)
+        return (
+          <TouchableOpacity key={item.id} style={[styles.actionRow, { borderLeftColor: accent.fg }]} onPress={() => router.push(item.href as any)} activeOpacity={0.75}>
+            <View style={styles.actionRowText}>
+              <Text style={styles.actionClient}>
+                {item.clientName || item.title}
+                <Text style={[styles.restKind, { color: accent.fg }]}>{`  ${t(`dashboard.daily.${item.kind}`)}`}</Text>
+              </Text>
+              <Text style={styles.actionDetail}>
+                {reasonText(item)}
+                {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: item.kind === 'today_appointment' ? '2-digit' : undefined, minute: item.kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
+              </Text>
+              {item.kind === 'today_appointment' && item.at && item.clientTimezone ? (
+                <View style={{ marginTop: 4 }}>
+                  <RemoteTimeBadge at={new Date(item.at)} contactTz={item.clientTimezone} showCity />
+                </View>
+              ) : null}
+            </View>
+            <ChevronRight size={16} color={colors.textTertiary} strokeWidth={2.2} />
+          </TouchableOpacity>
+        )
+      })}
+      {rest.length > REST_MAX ? (
+        <TouchableOpacity onPress={() => router.push('/(app)/followups' as any)} activeOpacity={0.7}>
+          <Text style={styles.actionMore}>+{rest.length - REST_MAX} {t('dashboard.other_actions')}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   )
-}
-
-function DailyActionCenter({ items, hasAnyToday, loading }: { items: DailyActionItem[]; hasAnyToday: boolean; loading: boolean }) {
-  const { t } = useTranslation()
-  const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
-  const locale = useLocale()
-  const reasonText = useReasonText()
-  if (loading) return <View style={styles.actionCenter}><ActivityIndicator color={colors.primary} /></View>
-
-  return <View style={styles.actionCenter}>
-    <View style={styles.actionCenterHeader}><View><Text style={styles.actionCenterTitle}>{t('dashboard.action_center')}</Text><Text style={styles.actionCenterSub}>{t('dashboard.action_center_sub_rest', { count: items.length })}</Text></View><Text style={styles.actionCenterTotal}>{items.length}</Text></View>
-    {items.length === 0 ? (
-      <View style={styles.allClearRow}>
-        <Text style={styles.allClearText}>{hasAnyToday ? t('dashboard.action_center_empty_covered') : t('dashboard.no_priorities')}</Text>
-      </View>
-    ) : DAILY_ORDER.map(kind => {
-      const group = items.filter(item => item.kind === kind)
-      if (!group.length) return null
-      const accent = dailyAccent(kind, colors)
-      const Icon = DAILY_ICON[kind]
-      return <View key={kind} style={styles.actionGroup}>
-        <View style={styles.actionGroupHeader}>
-          <View style={[styles.actionGroupIconBox, { backgroundColor: accent.bg }]}>
-            <Icon size={13} color={accent.fg} strokeWidth={2.2} />
-          </View>
-          <Text style={[styles.actionGroupTitle, { color: accent.fg }]}>{t(`dashboard.daily.${kind}`)}</Text>
-          <Text style={styles.actionGroupCount}>{group.length}</Text>
-        </View>
-        {group.slice(0, 5).map(item => <TouchableOpacity key={item.id} style={[styles.actionRow, { borderLeftColor: accent.fg }]} onPress={() => router.push(item.href as any)} activeOpacity={0.75}>
-          <View style={styles.actionRowText}>
-            <Text style={styles.actionClient}>{item.clientName || item.title}</Text>
-            <Text style={styles.actionDetail}>
-              {reasonText(item)}
-              {item.at ? ` · ${formatDate(item.at, locale, { day: '2-digit', month: 'short', hour: kind === 'today_appointment' ? '2-digit' : undefined, minute: kind === 'today_appointment' ? '2-digit' : undefined })}` : ''}
-            </Text>
-          </View>
-          <ChevronRight size={16} color={colors.textTertiary} strokeWidth={2.2} />
-        </TouchableOpacity>)}
-        {group.length > 5 ? <Text style={styles.actionMore}>+{group.length - 5} {t('dashboard.other_actions')}</Text> : null}
-      </View>
-    })}
-  </View>
 }
 
 // ── DASH/CAL-2 / DASH/CAL-2.2 — Agenda personnel (événements externes d'aujourd'hui et
@@ -476,7 +472,7 @@ export default function DashboardScreen() {
 
   const { stats, loading: statsLoading, refresh: refreshStats } = useDashboardStats()
   const { loading: apptLoading, refresh: refreshAppts } = useUpcomingAppointments(10)
-  const { count: overdueFollowupCount, loading: fuLoading, refresh: refreshFu } = useOverdueFollowupCount()
+  const { loading: fuLoading, refresh: refreshFu } = useOverdueFollowupCount()
   const { byStage, refresh: refreshPipeline } = usePipelineStats()
   const { amount: monthRevenue, refresh: refreshRevenue } = useMonthlyRevenue()
   const { reload: refreshAlerts } = useAlerts()
@@ -486,23 +482,15 @@ export default function DashboardScreen() {
   const { items: dailyActions, personalEvents, loading: dailyLoading, refresh: refreshDaily } = useDailyActions()
   const { counts: urgency, refresh: refreshUrgency } = useUrgencyCounts()
 
-  // "Priorités du jour" (top 6, dédupliqué) et "À faire aujourd'hui" (tout le reste, par
-  // catégorie) ne doivent jamais montrer le même élément deux fois — le second exclut
-  // explicitement ce que le premier affiche déjà.
+  const { renewalsSoon, activeCareJourneys, refresh: refreshActivity } = useMonthActivity()
+
+  // "Priorités du jour" : les 6 premières en cartes (dédupliquées), le reste en lignes compactes
+  // dans la même liste — jamais le même élément deux fois.
   const topPriorities = useMemo(() => buildTopPriorities(dailyActions, 6), [dailyActions])
   const remainingActions = useMemo(() => {
     const shown = new Set(topPriorities.map(i => i.id))
     return dailyActions.filter(item => !shown.has(item.id))
   }, [dailyActions, topPriorities])
-
-  // DASH/CAL-2 §15-17 — "Actions du jour" = ressources CRM concrètes dues AUJOURD'HUI
-  // uniquement (jamais les retards, déjà visibles dans "Priorités du jour" ; jamais les
-  // signaux commerciaux ; jamais les événements Google). Réutilise dailyActions déjà chargé,
-  // aucune requête supplémentaire.
-  const actionsTodayCount = useMemo(
-    () => dailyActions.filter(i => i.kind === 'today_appointment' || i.kind === 'today_followup' || i.kind === 'today_interaction').length,
-    [dailyActions]
-  )
 
   const firstName = session?.user?.user_metadata?.full_name?.split(' ')[0] ?? ''
   const hour = new Date().getHours()
@@ -523,6 +511,7 @@ export default function DashboardScreen() {
     refreshDaily()
     refreshMlm()
     refreshUrgency()
+    refreshActivity()
   }
 
   // Chacun des 7 hooks ci-dessus se charge déjà lui-même au montage (son propre
@@ -545,14 +534,24 @@ export default function DashboardScreen() {
     }, []), // eslint-disable-line react-hooks/exhaustive-deps
   )
 
-  const activePct =
-    stats.totalClients > 0 ? Math.round((stats.activeClients / stats.totalClients) * 100) : 0
-
   // ORDER-BUSINESS-3.6 §29 — seules les métriques à net NON NUL sur le mois en cours sont
   // affichées (une valeur à 0 n'apporte rien à une vue synthétique) ; §28 — plafonné à 3 pour ne
   // jamais transformer le dashboard en tableau MLM, le reste résumé par un compteur "+N autres".
-  const mlmMetricsWithNet = useMemo(() => mlmMetrics.filter(m => m.net !== 0), [mlmMetrics])
-  const mlmMetricsShown = mlmMetricsWithNet.slice(0, 3)
+  // BRAND-MLM-1 — une ligne par métrique ET par marque ("PV · Zinzino") : les PV doTERRA et
+  // Zinzino ne s'additionnent jamais. Marque retrouvée via le catalogue de la ligne de commande.
+  const { brands: myBrands } = useBrands()
+  const mlmMetricsWithNet = useMemo(() => {
+    const brandByCatalog = new Map(myBrands.filter(b => b.catalog_id).map(b => [b.catalog_id as string, b]))
+    return mlmMetrics
+      .flatMap(m => m.catalogBreakdown
+        .filter(b => b.net !== 0)
+        .map(b => {
+          const brand = b.catalogId ? brandByCatalog.get(b.catalogId) ?? null : null
+          return { key: `${m.key}:${b.catalogId ?? 'none'}`, label: m.label, net: b.net, brand, sourceName: brand?.name ?? b.catalogName }
+        }))
+      .sort((a, b) => (a.sourceName ?? '\uffff').localeCompare(b.sourceName ?? '\uffff') || a.label.localeCompare(b.label))
+  }, [mlmMetrics, myBrands])
+  const mlmMetricsShown = mlmMetricsWithNet.slice(0, 4)
   const mlmMetricsMoreCount = mlmMetricsWithNet.length - mlmMetricsShown.length
 
   return (
@@ -581,7 +580,6 @@ export default function DashboardScreen() {
               {greeting}
               {firstName ? `, ${firstName}` : ''}
             </Text>
-            <Text style={styles.greetingSub}>{t('dashboard.title')}</Text>
           </View>
 
           <View style={styles.quickRow}>
@@ -646,61 +644,56 @@ export default function DashboardScreen() {
         )}
 
         {/* ── Priorités du jour (condensé, dédupliqué) ──── */}
-        <TopPriorities top={topPriorities} loading={dailyLoading} />
-
-        {/* ── Détail par catégorie ──────────────────────── */}
-        <DailyActionCenter items={remainingActions} hasAnyToday={dailyActions.length > 0} loading={dailyLoading} />
+        <TopPriorities top={topPriorities} rest={remainingActions} loading={dailyLoading} />
 
         {/* ── DASH/CAL-2 — Agenda personnel (jamais mêlé aux actions CRM) ─── */}
         <PersonalAgendaBlock events={personalEvents} loading={dailyLoading} />
 
-        {/* ── KPI principaux ────────────────────────────── */}
-        <View style={[styles.kpiGrid, isWide && styles.kpiGridWide]}>
-          <KpiCard
-            wide={isWide}
-            icon="👥"
-            value={stats.totalClients}
-            label={t('dashboard.stats.total_clients')}
-            delta={t('dashboard.kpi.new_month', { count: stats.newThisMonth })}
-            onPress={() =>
-              router.push({ pathname: '/(app)/clients', params: { status: 'all' } } as any)
-            }
-          />
-
-          <KpiCard
-            wide={isWide}
-            icon="🌱"
-            value={stats.prospects}
-            label={t('dashboard.stats.prospects')}
-            delta={t('dashboard.kpi.prospects_delta')}
-            onPress={() =>
-              router.push({ pathname: '/(app)/clients', params: { status: 'prospect' } } as any)
-            }
-          />
-
-          <KpiCard
-            wide={isWide}
-            icon="🔔"
-            value={stats.pendingFollowups}
-            label={t('dashboard.stats.pending_followups')}
-            delta={
-              overdueFollowupCount > 0
-                ? `${overdueFollowupCount} ${t('dashboard.kpi.overdue')}`
-                : t('dashboard.kpi.active_pct', { pct: activePct })
-            }
-            onPress={() => router.push('/(app)/followups')}
-          />
-
-          <KpiCard
-            wide={isWide}
-            icon="💬"
-            value={actionsTodayCount}
-            label={t('dashboard.stats.interactions_today')}
-            delta={t('dashboard.kpi.today_delta')}
-          />
+        {/* ── DASH-ACTIVITY-1 — Mon activité (mois en cours) : uniquement des chiffres absents
+            des compteurs d'urgence et du pipeline (aucune redondance). ─────────── */}
+        <View style={styles.section}>
+          <Text style={styles.activityLabel}>
+            {t('dashboard.activity_title', { month: new Date().toLocaleDateString(locale, { month: 'long' }) }).toUpperCase()}
+          </Text>
+          <View style={[styles.kpiGrid, isWide && styles.kpiGridWide]}>
+            <KpiCard
+              wide={isWide}
+              icon="👥"
+              value={stats.newThisMonth}
+              label={t('dashboard.activity_new_contacts')}
+              delta={t('dashboard.activity_this_month')}
+              onPress={() => router.push({ pathname: '/(app)/clients', params: { status: 'all' } } as any)}
+            />
+            <KpiCard
+              wide={isWide}
+              icon="🛒"
+              value={Math.round(monthRevenue)}
+              label={t('dashboard.activity_orders_amount')}
+              delta={t('dashboard.activity_this_month')}
+              onPress={() => router.push('/(app)/orders' as any)}
+            />
+            {isModuleActive('renewals_lrp') ? (
+              <KpiCard
+                wide={isWide}
+                icon="🔁"
+                value={renewalsSoon}
+                label={t('dashboard.activity_renewals')}
+                delta={t('dashboard.activity_renewals_hint')}
+                onPress={() => router.push('/(app)/orders' as any)}
+              />
+            ) : null}
+            <KpiCard
+              wide={isWide}
+              icon="🌱"
+              value={activeCareJourneys}
+              label={t('dashboard.activity_care')}
+              delta={t('dashboard.activity_care_hint')}
+              onPress={() => router.push('/(app)/followups' as any)}
+            />
+          </View>
         </View>
 
-        {/* ── Pipeline ──────────────────────────────────── */}
+        {/* ── Pipeline (avec son total, qui remplace l'ancien compteur "Total contacts") ── */}
         <PipelineStrip byStage={byStage} />
 
         {/* ── KPI réseau ────────────────────────────────── */}
@@ -724,35 +717,6 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {/* ── KPI secondaires ───────────────────────────── */}
-        <View style={[styles.kpiGrid, isWide && styles.kpiGridWide]}>
-          <KpiCard
-            wide={isWide}
-            icon="💶"
-            value={Math.round(monthRevenue)}
-            label={t('dashboard.kpi_revenue')}
-            onPress={() => router.push('/(app)/orders' as any)}
-          />
-
-          <KpiCard
-            wide={isWide}
-            icon="✅"
-            value={stats.completedThisMonth}
-            label={t('dashboard.kpi_completed_rdv')}
-            onPress={() => router.push('/(app)/appointments')}
-          />
-
-          <KpiCard
-            wide={isWide}
-            icon="🌱"
-            value={stats.newThisMonth}
-            label={t('dashboard.kpi_new_contacts')}
-            onPress={() =>
-              router.push({ pathname: '/(app)/clients', params: { status: 'all' } } as any)
-            }
-          />
-        </View>
-
         {/* ── ORDER-BUSINESS-3.6 §27/§28/§29 — Suivi MLM (mois en cours, jusqu'à 3 métriques
             à net non nul) ─────────────────────────────── */}
         {!mlmLoading && mlmMetricsWithNet.length > 0 && (
@@ -766,7 +730,11 @@ export default function DashboardScreen() {
                 <View key={m.key}>
                   {i > 0 && <View style={styles.divider} />}
                   <View style={styles.mlmRow}>
-                    <Text style={styles.mlmLabel}>{m.label}</Text>
+                    {m.brand ? <BrandAvatar brand={m.brand} size={26} /> : null}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.mlmLabel}>{m.label}</Text>
+                      <Text style={styles.mlmSource} numberOfLines={1}>{m.sourceName ?? t('dashboard.mlm_no_brand')}</Text>
+                    </View>
                     <Text style={styles.mlmValue}>{formatMlmValue(m.net, locale)}</Text>
                   </View>
                 </View>
@@ -1220,6 +1188,10 @@ function makeStyles(colors: ThemeColors) {
 
     topPriorities: { backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.cardBorder, boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }], elevation: 2, padding: 18, gap: 12 },
     topPrioritiesTitle: { fontSize: 20, fontFamily: fonts.display, color: colors.text, marginBottom: 2 },
+    prioritiesHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
+    prioritiesCount: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+    restKind: { fontSize: 10.5, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.4 },
+    activityLabel: { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
     topPriorityCard: { borderRadius: 12, borderLeftWidth: 3, backgroundColor: colors.bgDim, padding: 10, gap: 6 },
     topPriorityRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10 },
     topPriorityMain: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 180 },
@@ -1304,6 +1276,12 @@ function makeStyles(colors: ThemeColors) {
       fontFamily: fonts.medium,
       color: colors.text,
       flex: 1,
+    },
+
+    mlmSource: {
+      fontSize: 12,
+      fontFamily: fonts.body,
+      color: colors.textSecondary,
     },
 
     mlmValue: {

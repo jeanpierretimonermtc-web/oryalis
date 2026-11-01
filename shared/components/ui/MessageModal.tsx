@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Modal, View, Text, TouchableOpacity, ScrollView,
-  StyleSheet, Linking, Platform, TextInput,
+  StyleSheet, Linking, Platform, TextInput, useWindowDimensions,
 } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useTheme } from '@/shared/theme/ThemeProvider'
@@ -16,6 +16,7 @@ import {
 import type { TemplateCategory, MessageTemplate } from '@/features/messages/templates'
 import type { Client } from '@/shared/lib/types'
 import { formatDate } from '@/shared/lib/dateFormat'
+import { remoteTime, timeZoneCity } from '@/features/clients/timezones'
 import { useEntitlements } from '@/features/subscriptions/useEntitlements'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { createCustomTemplate, getCustomTemplates } from '@/features/messages/customTemplateService'
@@ -26,7 +27,7 @@ const CATEGORIES: TemplateCategory[] = ['prospection', 'lrp', 'recrutement', 'su
 // chargent déjà `client.email` (fiche contact) l'exposent automatiquement, ceux qui n'ont pas
 // encore cette colonne (voir ClientInfo de la fiche RDV avant ce lot) continuent de fonctionner
 // avec `email` simplement absent (bouton E-mail non affiché, aucune régression).
-type MessageClient = Pick<Client, 'first_name' | 'full_name' | 'next_lrp_date' | 'phone' | 'email'>
+type MessageClient = Pick<Client, 'first_name' | 'full_name' | 'next_lrp_date' | 'phone' | 'email'> & Partial<Pick<Client, 'timezone'>>
 
 interface Props {
   visible:     boolean
@@ -67,6 +68,15 @@ interface Props {
   // la persistance appartient entièrement à l'appelant (fiche RDV). Jamais appelé pour Copier
   // (Copier ne prouve même pas qu'une appli de communication a été ouverte, voir RÉCAP-5A §9).
   onExternalShareInitiated?: (payload: ExternalShareInitiatedPayload) => void
+  // MSG-UI-1 — options facultatives (défaut : comportement historique inchangé) :
+  //  - lockTemplate : le message est imposé (ex. étape d'accompagnement), pas de "Choisir un
+  //    autre message" ;
+  //  - preferredChannel : canal mis en avant comme action principale (les autres restent en
+  //    boutons secondaires) ;
+  //  - doneAction : bouton proposé après un partage (ex. "Marquer l'étape comme faite").
+  lockTemplate?: boolean
+  preferredChannel?: ExternalShareChannel
+  doneAction?: { label: string; onPress: () => void }
 }
 
 export type ExternalShareChannel = 'whatsapp' | 'sms' | 'email'
@@ -78,7 +88,7 @@ export interface ExternalShareInitiatedPayload {
   subject?: string
 }
 
-export function MessageModal({ visible, onClose, client, advisorName, lastProduct, initialTemplate, title, editable = false, beforeMessageContent, emailSubject, enableEmail = false, onExternalShareInitiated }: Props) {
+export function MessageModal({ visible, onClose, client, advisorName, lastProduct, initialTemplate, title, editable = false, beforeMessageContent, emailSubject, enableEmail = false, onExternalShareInitiated, lockTemplate = false, preferredChannel, doneAction }: Props) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -94,6 +104,12 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   const [activeCategory, setActiveCategory] = useState<TemplateCategory>('prospection')
   const [selected, setSelected] = useState<MessageTemplate | null>(null)
   const [copied, setCopied] = useState(false)
+  // MSG-UI-1 — un partage (ou une copie) a eu lieu : propose doneAction s'il est fourni.
+  const [shared, setShared] = useState(false)
+  // Hauteur du champ éditable, ajustée au contenu (jamais une grande zone vide).
+  const [inputHeight, setInputHeight] = useState(80)
+  const { width: screenWidth } = useWindowDimensions()
+  const isWide = screenWidth >= 768
   // RÉCAP-2 — message réellement modifié par l'utilisateur (source de vérité pour Copier/
   // WhatsApp/SMS quand `editable`). Distinct du texte généré par le template : ce dernier
   // reste recalculable à tout moment depuis `selected`+`vars`, jamais modifié en place.
@@ -156,6 +172,7 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   async function handleCopy() {
     await Clipboard.setStringAsync(rendered)
     setCopied(true)
+    setShared(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -164,6 +181,7 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
     // le fire-and-forget réel vit chez l'appelant) : ne doit jamais retarder ni bloquer
     // window.open/Linking.openURL ci-dessous (§10 — critique sur web, popup blockers).
     onExternalShareInitiated?.({ channel: 'whatsapp', message: rendered })
+    setShared(true)
     const raw = client?.phone?.trim() ?? ''
     let phone = ''
     if (raw) {
@@ -205,6 +223,7 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   function handleSMS() {
     // RÉCAP-5C — voir handleWhatsApp ci-dessus, même principe (synchrone, non bloquant).
     onExternalShareInitiated?.({ channel: 'sms', message: rendered })
+    setShared(true)
     const phone = client?.phone?.replace(/\D/g, '') ?? ''
     const sep   = Platform.OS === 'ios' ? '&' : '?'
     const url   = phone
@@ -226,6 +245,7 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
     // RÉCAP-5C — après les gardes ci-dessus (bouton réellement disponible, §9), avec le sujet
     // EXACT effectivement utilisé dans le mailto: ci-dessous (jamais recalculé séparément).
     onExternalShareInitiated?.({ channel: 'email', message: rendered, subject })
+    setShared(true)
     const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(rendered)}`
     Linking.openURL(url)
   }
@@ -237,6 +257,7 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
     setSelected(null)
     setEditedMessage('')
     setCopied(false)
+    setShared(false)
     dirtyRef.current = false
     setDirty(false)
     appliedTemplateBodyRef.current = null
@@ -251,12 +272,13 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
+    <Modal visible={visible} transparent animationType={isWide ? 'fade' : 'slide'} onRequestClose={handleClose}>
+      {/* MSG-UI-1 — fenêtre centrée sur grand écran ; panneau du bas sur téléphone. */}
+      <View style={[styles.overlay, isWide && styles.overlayWide]}>
+        <View style={[styles.sheet, isWide && styles.sheetWide]}>
 
           {/* Handle + header */}
-          <View style={styles.handle} />
+          {!isWide ? <View style={styles.handle} /> : null}
           <View style={styles.header}>
             <Text style={styles.title}>
               {selected ? (title ?? t('messages.title_ready')) : t('messages.title_for', { name: prénom || '…' })}
@@ -317,17 +339,16 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
               {/* RÉCAP-3 — slot neutre fourni par l'appelant (ex. sélecteur "Produits abordés"
                   de la fiche RDV), rendu avant le message, jamais interprété par MessageModal. */}
               {beforeMessageContent}
-              {/* Rendered message */}
+              {/* Rendered message — un seul titre : le libellé du message n'est répété au-dessus du
+                  texte que si l'en-tête affiche un autre titre. */}
               <View style={styles.renderedCard}>
-                <Text style={styles.renderedName}>{selected.name}</Text>
-                {/* RÉCAP-2 — zone réellement éditable uniquement quand `editable` est activé par
-                    l'appelant (récap RDV) ; tous les autres usages de MessageModal conservent le
-                    <Text> figé d'origine, aucun changement de comportement pour eux (§15). */}
+                {title && title === selected.name ? null : <Text style={styles.renderedName}>{selected.name}</Text>}
                 {editable ? (
                   <TextInput
-                    style={[styles.renderedBody, styles.renderedBodyEditable]}
+                    style={[styles.renderedBody, styles.renderedBodyEditable, { height: Math.max(80, Math.min(320, inputHeight)) }]}
                     value={editedMessage}
                     onChangeText={(v) => { setEditedMessage(v); dirtyRef.current = true; setDirty(true) }}
+                    onContentSizeChange={e => setInputHeight(e.nativeEvent.contentSize.height + 20)}
                     multiline
                     textAlignVertical="top"
                   />
@@ -336,47 +357,60 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
                 )}
               </View>
 
-              {/* RÉCAP-3 §15 — dès que le texte a été modifié manuellement, plus aucune
-                  régénération silencieuse : si les options du slot ci-dessus changent ensuite
-                  (ex. produit coché/décoché), ce bouton explicite est le seul moyen de reprendre
-                  le message généré, jamais automatique. */}
               {canUpdateFromLatestTemplate ? (
                 <TouchableOpacity style={styles.updateMessageBtn} onPress={applyLatestTemplate} activeOpacity={0.75}>
                   <Text style={styles.updateMessageBtnText}>{t('messages.update_with_changes')}</Text>
                 </TouchableOpacity>
               ) : null}
 
-              {/* Actions */}
-              <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success }]} onPress={handleCopy} activeOpacity={0.85}>
-                <Text style={styles.actionBtnText}>{copied ? t('messages.copied') : t('messages.copy')}</Text>
-              </TouchableOpacity>
+              {/* CLIENT-TZ-1 (point 1) — envoyer la nuit chez le contact : simple avertissement, l'envoi reste possible. */}
+              {(() => {
+                const remote = remoteTime(new Date(), client?.timezone)
+                if (!remote?.unsocial || !client?.timezone) return null
+                return (
+                  <Text style={styles.nightWarning}>
+                    🌙 {t('clients.tz_message_warning', { time: remote.time, name: client.first_name || client.full_name, city: timeZoneCity(client.timezone) })}
+                  </Text>
+                )
+              })()}
 
-              {/* RÉCAP-4 §10 / RÉCAP-4.1 §4 — WhatsApp/SMS et E-mail sont des canaux
-                  indépendants, chacun affiché seulement si sa donnée de contact existe. Le canal
-                  E-mail (bouton et message d'indisponibilité) n'existe que si l'appelant l'a
-                  explicitement activé via `enableEmail` — sinon ce bloc entier est absent et le
-                  comportement retombe exactement sur l'historique pré-RÉCAP-4. */}
-              {client?.phone ? (
-                <>
-                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success }]} onPress={handleWhatsApp} activeOpacity={0.85}>
-                    <Text style={styles.actionBtnText}>{t('messages.open_whatsapp')}</Text>
-                  </TouchableOpacity>
-                  {Platform.OS !== 'web' && (
-                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.primary }]} onPress={handleSMS} activeOpacity={0.85}>
-                      <Text style={styles.actionBtnText}>{t('messages.open_sms')}</Text>
+              {/* MSG-UI-1 — une seule action principale (canal préféré, sinon le premier
+                  disponible) ; les autres canaux et "Copier" en boutons secondaires. Chaque canal
+                  n'apparaît que si sa donnée de contact existe (règles RÉCAP-4 inchangées). */}
+              {(() => {
+                const available: ExternalShareChannel[] = []
+                if (client?.phone) available.push('whatsapp')
+                if (enableEmail && client?.email) available.push('email')
+                if (client?.phone && Platform.OS !== 'web') available.push('sms')
+                const primary = preferredChannel && available.includes(preferredChannel) ? preferredChannel : available[0]
+                const label = (ch: ExternalShareChannel) =>
+                  ch === 'whatsapp' ? t('messages.open_whatsapp') : ch === 'email' ? t('messages.open_email') : t('messages.open_sms')
+                const handler = (ch: ExternalShareChannel) => (ch === 'whatsapp' ? handleWhatsApp : ch === 'email' ? handleEmail : handleSMS)
+                return (
+                  <View style={[styles.actionsWrap, isWide && styles.actionsWrapWide]}>
+                    {primary ? (
+                      <TouchableOpacity
+                        style={[styles.actionBtn, isWide && styles.actionBtnWide, { backgroundColor: primary === 'whatsapp' ? colors.success : colors.primaryAction }]}
+                        onPress={handler(primary)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.actionBtnText}>{label(primary)}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {available.filter(ch => ch !== primary).map(ch => (
+                      <TouchableOpacity key={ch} style={[styles.secondaryBtn, isWide && styles.actionBtnWide]} onPress={handler(ch)} activeOpacity={0.8}>
+                        <Text style={styles.secondaryBtnText}>{label(ch)}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    <TouchableOpacity style={[styles.secondaryBtn, isWide && styles.actionBtnWide]} onPress={handleCopy} activeOpacity={0.8}>
+                      <Text style={styles.secondaryBtnText}>{copied ? t('messages.copied') : t('messages.copy')}</Text>
                     </TouchableOpacity>
-                  )}
-                </>
-              ) : null}
+                  </View>
+                )
+              })()}
 
-              {enableEmail ? (
-                client?.email ? (
-                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.primary }]} onPress={handleEmail} activeOpacity={0.85}>
-                    <Text style={styles.actionBtnText}>{t('messages.open_email')}</Text>
-                  </TouchableOpacity>
-                ) : client?.phone ? (
-                  <Text style={styles.channelUnavailableHint}>{t('messages.email_unavailable')}</Text>
-                ) : null
+              {enableEmail && !client?.email && client?.phone ? (
+                <Text style={styles.channelUnavailableHint}>{t('messages.email_unavailable')}</Text>
               ) : null}
 
               {enableEmail ? (
@@ -393,10 +427,18 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
                 ) : null
               )}
 
-              {/* Back button */}
-              <TouchableOpacity style={styles.backBtn} onPress={() => setSelected(null)} activeOpacity={0.7}>
-                <Text style={styles.backBtnText}>{t('messages.change_template')}</Text>
-              </TouchableOpacity>
+              {/* MSG-UI-1 — après un partage : clôture proposée par l'appelant. */}
+              {doneAction && shared ? (
+                <TouchableOpacity style={styles.doneBtn} onPress={() => { handleClose(); doneAction.onPress() }} activeOpacity={0.85}>
+                  <Text style={styles.doneBtnText}>✓ {doneAction.label}</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {!lockTemplate ? (
+                <TouchableOpacity style={styles.backBtn} onPress={() => setSelected(null)} activeOpacity={0.7}>
+                  <Text style={styles.backBtnText}>{t('messages.change_template')}</Text>
+                </TouchableOpacity>
+              ) : null}
               <View style={{ height: 24 }} />
             </ScrollView>
           )}
@@ -409,6 +451,8 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  overlayWide: { justifyContent: 'center', alignItems: 'center', padding: 24 },
+  sheetWide: { width: '100%', maxWidth: 560, borderRadius: 20, maxHeight: '88%', paddingTop: 8, paddingBottom: 20 },
   sheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: 24,
@@ -465,10 +509,18 @@ function makeStyles(colors: ThemeColors) {
   // haut pour lire le message sans scroll excessif (§13), sans refonte du reste de la modale.
   renderedBodyEditable: {
     borderWidth: 1, borderColor: colors.border, borderRadius: 10,
-    backgroundColor: colors.bg, padding: 10, minHeight: 160,
+    backgroundColor: colors.bg, padding: 10,
   },
 
   actionBtn:     { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
+  actionsWrap: { marginBottom: 4 },
+  nightWarning: { fontSize: 13, lineHeight: 18, fontFamily: fonts.medium, color: colors.text, backgroundColor: colors.warningLight, borderWidth: 1, borderColor: colors.warning, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 },
+  actionsWrapWide: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  actionBtnWide: { flexGrow: 1, flexBasis: 150, marginBottom: 0, paddingVertical: 12 },
+  secondaryBtn: { borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  secondaryBtnText: { fontSize: 15, fontFamily: fonts.semibold, color: colors.text },
+  doneBtn: { marginTop: 12, borderRadius: 12, paddingVertical: 12, alignItems: 'center', backgroundColor: colors.successLight, borderWidth: 1, borderColor: colors.success },
+  doneBtnText: { fontSize: 14, fontFamily: fonts.semibold, color: colors.success },
   actionBtnText: { fontSize: 15, fontFamily: fonts.semibold, color: '#fff' },
 
   updateMessageBtn: {

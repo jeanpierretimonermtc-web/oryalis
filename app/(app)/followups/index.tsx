@@ -120,6 +120,11 @@ function FollowupCard({ f, today, onRequestDone }: {
                 <Text style={[styles.badgeText, { color: colors.secondary }]}>{t('followups.auto_badge')}</Text>
               </View>
             ) : null}
+            {f.care_journey_id ? (
+              <View style={[styles.badge, { backgroundColor: colors.primaryLight }]}>
+                <Text style={[styles.badgeText, { color: colors.primary }]}>🌱 {t('care.badge')}</Text>
+              </View>
+            ) : null}
           </View>
         </TouchableOpacity>
 
@@ -141,6 +146,9 @@ function FollowupCard({ f, today, onRequestDone }: {
         {/* ── Row 2 : task title ── */}
         {(f.title ?? f.content) ? (
           <Text style={styles.taskTitle} numberOfLines={2}>{f.title ?? f.content}</Text>
+        ) : null}
+        {f.message_body ? (
+          <Text style={styles.productText} numberOfLines={1}>« {f.message_body} »</Text>
         ) : null}
 
         {/* ── Row 3 : product context ── */}

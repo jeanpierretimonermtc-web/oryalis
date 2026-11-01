@@ -16,10 +16,11 @@ export async function createUplineNode(
   name: string,
   memberId: string | null,
   position: number,
+  brandId: string | null = null,
 ): Promise<UplineNode> {
   const { data, error } = await supabase
     .from('upline_nodes')
-    .insert({ user_id: userId, name, member_id: memberId, position })
+    .insert({ user_id: userId, name, member_id: memberId, position, brand_id: brandId })
     .select()
     .single()
   if (error) throw error
@@ -30,10 +31,11 @@ export async function updateUplineNode(
   id: string,
   name: string,
   memberId: string | null,
+  brandId: string | null,
 ): Promise<void> {
   const { error } = await supabase
     .from('upline_nodes')
-    .update({ name, member_id: memberId })
+    .update({ name, member_id: memberId, brand_id: brandId })
     .eq('id', id)
   if (error) throw error
 }

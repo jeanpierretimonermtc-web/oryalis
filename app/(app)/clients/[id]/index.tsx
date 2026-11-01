@@ -16,6 +16,15 @@ import { useNotes } from '@/features/notes/useNotes'
 import { createNote, deleteNote } from '@/features/notes/noteService'
 import { useClientFollowups } from '@/features/followups/useFollowups'
 import { FollowupCompletionModal } from '@/features/followups/FollowupCompletionModal'
+import { useCareJourney } from '@/features/care/useCareJourney'
+import { CareJourneyCard } from '@/features/care/CareJourneyCard'
+import { ContactSynthesis } from '@/features/clients/ContactSynthesis'
+import { ContactExpectationsCard } from '@/features/clients/ContactExpectationsCard'
+import { ContactSensitiveCard } from '@/features/clients/ContactSensitiveCard'
+import { useClientBrands } from '@/features/brands/useBrands'
+import { BrandPill } from '@/features/brands/BrandPill'
+import { ContactBrandsCard } from '@/features/brands/ContactBrandsCard'
+import { BrandLoyaltySection } from '@/features/brands/BrandLoyaltySection'
 import type { Followup } from '@/shared/lib/types'
 import { useRecommendations } from '@/features/recommendations/useRecommendations'
 import { useClientInteractions } from '@/features/interactions/useInteractions'
@@ -23,7 +32,18 @@ import { useClientOrders } from '@/features/orders/useOrders'
 import { isOrderNetRevenue } from '@/features/orders/orderService'
 import { fetchOrderItemsForOrders, hybridLinesFromItems } from '@/features/orders/orderItemService'
 import type { OrderItem } from '@/shared/lib/types'
-import { useDirectTeam } from '@/features/network/useNetwork'
+import { useDirectTeam, useSponsorGraph } from '@/features/network/useNetwork'
+import { setClientSponsor, SponsorCycleError, NETWORK_ROLES } from '@/features/network/networkService'
+import { brandRoleLabel } from '@/features/brands/brandRoleLabels'
+import { timeZoneCity, timeZoneOffsetMinutes, formatUtcOffset } from '@/features/clients/timezones'
+import { RemoteTimeBadge } from '@/features/clients/RemoteTimeBadge'
+import { useContactLocalTime } from '@/features/clients/useContactLocalTime'
+import { ContactHoursGuard } from '@/features/clients/ContactHoursGuard'
+import type { GuardedAction } from '@/features/clients/ContactHoursGuard'
+import { MEETING_MODE_ICON, meetingActionUrl } from '@/features/appointments/meetingMode'
+import { attachToBrandSponsor, fetchBrandMembers, BrandSponsorError } from '@/features/brands/brandService'
+import type { BrandMember } from '@/features/brands/brandService'
+import { ContactPickerModal } from '@/features/network/ContactPickerModal'
 import { useClientEvents } from '@/features/clients/useClientEvents'
 import { useClientRecapShares } from '@/features/appointments/useRecapShares'
 import type { AppointmentRecapShare } from '@/features/appointments/appointmentTypes'
@@ -44,7 +64,7 @@ import { formatOrdersForClientSummary } from '@/features/orders/orderSummary'
 import { fetchUpcomingAppointmentsForClient } from '@/features/appointments/appointmentOutcomeService'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
 import {
-  Calendar, FileText, Bell, Leaf, ShoppingCart, MessageCircle, Users, Globe, Map, Hourglass,
+  Calendar, FileText, Bell, Leaf, ShoppingCart, MessageCircle, Users, Globe, Hourglass,
   Star, Lock, Phone, Mail, Cake, Briefcase, Baby, Link as LinkIcon, CalendarCheck, MapPin,
   Clock, Target, TriangleAlert, Trash2, Check, History, Camera, Image as ImageIcon, ChevronRight,
   Send, RefreshCw,
@@ -53,7 +73,7 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
 import { gravatarUrl } from '@/shared/lib/gravatar'
 import { fonts } from '@/shared/theme/fonts'
-import { formatDate, formatTime } from '@/shared/lib/dateFormat'
+import { formatDate, formatTime, isoToLocalParts } from '@/shared/lib/dateFormat'
 import { computeRelationshipHealth } from '@/features/clients/relationshipHealth'
 
 type Tab = 'synthese' | 'chrono' | 'suivi' | 'profil'
@@ -223,8 +243,12 @@ export default function ClientDetailScreen() {
   const { session } = useAuth()
   const { client, loading, refresh } = useClient(id)
   const { appointments, refresh: refreshAppointments } = useClientAppointmentsWithContext(id)
+  const [guardAction, setGuardAction] = useState<GuardedAction | null>(null)
+  const contactLocalTime = useContactLocalTime(client?.timezone)
   const { notes, refresh: refreshNotes } = useNotes(id)
   const { followups, refresh: refreshFollowups } = useClientFollowups(id)
+  const { journey: careJourney, steps: careSteps, refresh: refreshCare } = useCareJourney(id)
+  const { links: brandLinks, refresh: refreshBrandLinks } = useClientBrands(id)
   const { recommendations, refresh: refreshRecommendations } = useRecommendations(id)
   const { interactions, refresh: refreshInteractions } = useClientInteractions(id)
   const { orders, reload: reloadOrders } = useClientOrders(id)
@@ -255,6 +279,51 @@ export default function ClientDetailScreen() {
     return () => { cancelled = true }
   }, [orders])
   const { team, reload: reloadTeam } = useDirectTeam(id)
+  // SPONSOR-1 — "Ajouter un filleul" : rattacher un contact existant ou en créer un nouveau.
+  const [downlinePickerOpen, setDownlinePickerOpen] = useState(false)
+  const [downlineError, setDownlineError] = useState<string | null>(null)
+  // BRAND-NETWORK-1 — avec des marques, le filleul est rattaché dans le réseau d'une marque :
+  // choix de la marque d'abord s'il y en a plusieurs.
+  const [downlineBrandId, setDownlineBrandId] = useState<string | null>(null)
+  const [downlineBrandPickerOpen, setDownlineBrandPickerOpen] = useState(false)
+  const [downlineBrandMembers, setDownlineBrandMembers] = useState<BrandMember[]>([])
+  const { graph: sponsorGraph, reload: reloadSponsorGraph } = useSponsorGraph(downlinePickerOpen)
+  function openAddDownline() {
+    setDownlineError(null)
+    if (brandLinks.length === 0) { setDownlineBrandId(null); setDownlinePickerOpen(true); return }
+    if (brandLinks.length === 1) { chooseDownlineBrand(brandLinks[0].brand_id); return }
+    setDownlineBrandPickerOpen(true)
+  }
+  function chooseDownlineBrand(brandId: string) {
+    setDownlineBrandPickerOpen(false)
+    setDownlineBrandId(brandId)
+    setDownlineBrandMembers([])
+    fetchBrandMembers(brandId).then(setDownlineBrandMembers).catch(e => console.error('[addDownline.members]', e))
+    setDownlinePickerOpen(true)
+  }
+  const downlineOptions = useMemo(() => {
+    if (!id) return []
+    const names = new Map(sponsorGraph.map(n => [n.id, n.full_name]))
+    // Parrain de chaque contact dans le réseau concerné (marque choisie, sinon hors marque).
+    const sponsorOf = new Map<string, string | null>(downlineBrandId
+      ? downlineBrandMembers.map(m => [m.client_id, m.sponsor_client_id])
+      : sponsorGraph.map(n => [n.id, n.sponsor_id]))
+    // Exclus : le contact, ses ancêtres (boucle) et ses filleuls directs actuels.
+    const ancestors = new Set<string>([id])
+    let cursor = sponsorOf.get(id) ?? null
+    while (cursor && !ancestors.has(cursor)) { ancestors.add(cursor); cursor = sponsorOf.get(cursor) ?? null }
+    return sponsorGraph
+      .filter(n => !ancestors.has(n.id) && sponsorOf.get(n.id) !== id)
+      .map(n => {
+        const current = sponsorOf.get(n.id)
+        return {
+          id: n.id,
+          label: n.full_name,
+          sub: current && names.get(current) ? t('network.currently_under', { name: names.get(current)! }) : undefined,
+        }
+      })
+  }, [id, sponsorGraph, downlineBrandId, downlineBrandMembers, t])
+  const downlineBrandName = brandLinks.find(l => l.brand_id === downlineBrandId)?.brand.name ?? null
   const { events: clientEvents, refresh: refreshClientEvents } = useClientEvents(id)
   // RÉCAP-5D — même convention que useClientEvents ci-dessus (hook dédié + refresh au focus).
   const { shares: recapShares, refresh: refreshRecapShares } = useClientRecapShares(id)
@@ -324,7 +393,9 @@ export default function ClientDetailScreen() {
     refreshRecapShares()
     refreshDoneTasksCount()
     refreshRecurringPrograms()
-  }, [refresh, refreshAppointments, refreshNotes, refreshFollowups, refreshRecommendations, refreshInteractions, reloadOrders, reloadTeam, refreshClientEvents, refreshClientTasks, refreshRecapShares, refreshDoneTasksCount, refreshRecurringPrograms]))
+    refreshCare()
+    refreshBrandLinks()
+  }, [refresh, refreshAppointments, refreshNotes, refreshFollowups, refreshRecommendations, refreshInteractions, reloadOrders, reloadTeam, refreshClientEvents, refreshClientTasks, refreshRecapShares, refreshDoneTasksCount, refreshRecurringPrograms, refreshCare, refreshBrandLinks]))
   const [activeTab, setActiveTab]       = useState<Tab>('synthese')
   const [messageOpen, setMessageOpen]   = useState(false)
   // RÉCAP-5D §5 — vue de détail strictement lecture seule (jamais MessageModal, voir audit) :
@@ -350,7 +421,7 @@ export default function ClientDetailScreen() {
   const [apptNoteTags, setApptNoteTags] = useState<Record<string, string[]>>({})
   // Décision #7 "Protéger les données sensibles" : masqué par défaut, jamais révélé
   // automatiquement — remis à zéro à chaque montage de l'écran (pas de persistance).
-  const [sensitiveRevealed, setSensitiveRevealed] = useState(false)
+  const [expectationsEditing, setExpectationsEditing] = useState(false)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   // UI-POPOVER-2 — position capturée au clic sur "⋮" (même mécanisme que quickMorePos
   // ci-dessous), pour ancrer le menu au lieu de l'ancienne feuille inférieure systématique.
@@ -556,7 +627,9 @@ export default function ClientDetailScreen() {
       id: `relance-${f.id}`,
       date: f.due_date,
       title: f.title ?? f.content ?? t('followups.title'),
-      sub: f.done ? t('followups.done') : undefined,
+      // Relance faite : date de réalisation visible (c'est elle qui compte comme "dernier contact"
+      // dans la Synthèse), la ligne restant classée à son échéance.
+      sub: f.done ? `${t('followups.done')} · ${formatDate(f.updated_at ?? f.created_at, locale)}` : undefined,
       done: f.done,
       kind: 'relance' as const,
       statusCategory: (f.done ? 'done' : 'pending') as 'done' | 'pending',
@@ -729,6 +802,12 @@ export default function ClientDetailScreen() {
     Linking.openURL(`mailto:${email}`)
   }
 
+  // CLIENT-TZ-1 (point 1) — appeler / écrire la nuit chez le contact : prévenir avant.
+  function guarded(label: string, run: () => void) {
+    if (contactLocalTime?.unsocial) setGuardAction({ label, run })
+    else run()
+  }
+
   // Réutilise le bucket Storage "avatars" déjà en place pour les photos de profil
   // praticien (voir settings-identity.tsx), avec un préfixe distinct pour ne pas
   // entrer en collision avec "<user_id>.jpg".
@@ -838,21 +917,54 @@ export default function ClientDetailScreen() {
     ? { bg: colors.dangerLight, text: colors.danger }
     : { bg: colors.warningLight, text: colors.warning }
 
-  const particularityItems = client.particularities
-    ? client.particularities.split('\n').map(s => s.trim()).filter(Boolean)
-    : []
 
   // ── Bloc "Prochaine action" du hero — priorité visuelle maximale (décision refonte
   // Écran 3 : "Action primaire... bouton le plus visible") ────────────────────────
   const nextActionDays = client.next_action_at ? daysUntil(client.next_action_at) : null
-  const nextActionUrgency: 'overdue' | 'today' | 'upcoming' =
-    nextActionDays === null ? 'upcoming' : nextActionDays < 0 ? 'overdue' : nextActionDays === 0 ? 'today' : 'upcoming'
+  // NEXT-ACTION-URGENCY-1 — "prioritaire" seulement si en retard ou aujourd'hui ; une action
+  // dans 3 jours est "bientôt", au-delà c'est simplement "la prochaine action", affichée au calme.
+  const nextActionUrgency: 'overdue' | 'today' | 'soon' | 'later' =
+    nextActionDays === null ? 'later'
+      : nextActionDays < 0 ? 'overdue'
+      : nextActionDays === 0 ? 'today'
+      : nextActionDays <= 3 ? 'soon'
+      : 'later'
   const NEXT_ACTION_COLOR = {
-    overdue:  { fg: colors.danger,  bg: colors.dangerLight },
-    today:    { fg: colors.warning, bg: colors.warningLight },
-    upcoming: { fg: colors.primary, bg: colors.primaryLight },
+    overdue: { fg: colors.danger,  bg: colors.dangerLight,  border: colors.danger },
+    today:   { fg: colors.warning, bg: colors.warningLight, border: colors.warning },
+    soon:    { fg: colors.primary, bg: colors.primaryLight, border: colors.primary },
+    later:   { fg: colors.primary, bg: colors.card,         border: colors.border },
   }
   const nextActionColor = NEXT_ACTION_COLOR[nextActionUrgency]
+  // RDV-PHASE-1 — moment du RDV mis en avant : avant / en cours (30 min avant → fin) / passé.
+  const nextActionAppt = client.next_action_source === 'appointment'
+    ? appointments.find(a => a.id === client.next_action_source_id) ?? null
+    : null
+  const appointmentPhase: 'before' | 'live' | 'after' | null = nextActionAppt
+    ? (() => {
+        const nowMs = Date.now()
+        const startMs = new Date(nextActionAppt.start_at).getTime()
+        const endMs = new Date(nextActionAppt.end_at).getTime()
+        if (nowMs > endMs) return 'after'
+        if (nowMs >= startMs - 30 * 60000) return 'live'
+        return 'before'
+      })()
+    : null
+  const meetingUrl = nextActionAppt
+    ? meetingActionUrl(nextActionAppt.meeting_mode, { location: nextActionAppt.location, meetingUrl: nextActionAppt.meeting_url, phone: client.phone })
+    : null
+  const NEXT_ACTION_HEADING_KEY = {
+    overdue: 'clients.action_heading_overdue',
+    today:   'clients.action_heading_today',
+    soon:    'clients.action_heading_soon',
+    later:   'clients.action_heading_later',
+  } as const
+  const NEXT_ACTION_LABEL_KEY = {
+    overdue: 'clients.next_action_overdue',
+    today:   'clients.next_action_today_label',
+    soon:    'clients.next_action_title',
+    later:   'clients.next_action_planned',
+  } as const
 
   // ── Synthèse : jusqu'à 3 échéances les plus proches, tous domaines confondus ──
   // Exclut l'élément déjà mis en avant dans le bandeau "Prochaine action" (colonne gauche)
@@ -1023,6 +1135,14 @@ export default function ClientDetailScreen() {
   const validOrdersTotal = validOrdersWithAmount.reduce((sum, o) => sum + (o.amount ?? 0), 0)
   const validOrdersMissingAmount = validCustomerOrders.length - validOrdersWithAmount.length
 
+  // DESIGN-B — taux de remplissage du profil (incitation douce, jamais bloquant).
+  const profileChecks = [
+    client.phone, client.email, client.birth_date, client.profession, client.address, client.source,
+    (client.interests ?? []).length > 0 ? 'x' : null,
+    client.expectation_goals, client.expectation_habits, client.contact_preference,
+  ]
+  const profileCompletion = Math.round((profileChecks.filter(Boolean).length / profileChecks.length) * 100)
+
   // Identité, prochaine action, KPI, actions rapides — regroupés une seule fois ici pour
   // pouvoir être rendus soit dans la colonne latérale persistante (desktop), soit en tête
   // du fil unique (mobile), sans dupliquer le JSX.
@@ -1059,13 +1179,17 @@ export default function ClientDetailScreen() {
                 </View>
               </TouchableOpacity>
               <View style={styles.heroIdentity}>
-                <Text style={styles.heroName}>{client.full_name}</Text>
+                <Text style={styles.heroName} numberOfLines={1}>{client.full_name}</Text>
                 <View style={styles.heroBadges}>
-                  <View style={[styles.heroPill, { backgroundColor: sc.bg }]}>
-                    <Text style={[styles.heroPillText, { color: sc.text }]}>
-                      {t(`relationship_health.${health.tier}`).toUpperCase()}
-                    </Text>
-                  </View>
+                  {/* DESIGN-A — même règle que la liste : l'état du suivi ne s'affiche que s'il
+                      appelle une attention ("À jour" se confondait avec le vert du rôle Client). */}
+                  {health.tier !== 'up_to_date' ? (
+                    <View style={[styles.heroPill, { backgroundColor: sc.bg }]}>
+                      <Text style={[styles.heroPillText, { color: sc.text }]}>
+                        {t(`relationship_health.${health.tier}`).toUpperCase()}
+                      </Text>
+                    </View>
+                  ) : null}
                   {client.is_vip ? (
                     <View style={[styles.heroPill, { backgroundColor: statusColors.vip.bg }]}>
                       <Text style={[styles.heroPillText, { color: statusColors.vip.text }]}>
@@ -1077,12 +1201,26 @@ export default function ClientDetailScreen() {
                       rôle (Prospect, Distributeur...) — il était auparavant exclu ici, laissant
                       un contact purement "Client" sans aucune pastille de rôle à côté de la
                       santé relationnelle ("À JOUR"), contrairement à tous les autres profils. */}
-                  {client.contact_role.map(role => {
-                    const rc = getRoleColors(role, colors)
+                  {/* BRAND-ROLES-1 — avec des marques, les rôles réseau s'affichent par marque
+                      ("Conseillère · doTERRA") au lieu d'un rôle global unique. */}
+                  {client.contact_role
+                    .filter(role => brandLinks.length === 0 || !(NETWORK_ROLES as readonly string[]).includes(role))
+                    .map(role => {
+                      const rc = getRoleColors(role, colors)
+                      return (
+                        <View key={role} style={[styles.heroPill, { backgroundColor: rc.bg }]}>
+                          <Text style={[styles.heroPillText, { color: rc.text }]}>
+                            {getRoleLabel(role).toUpperCase()}
+                          </Text>
+                        </View>
+                      )
+                    })}
+                  {brandLinks.filter(l => l.network_role !== 'customer').map(l => {
+                    const rc = getRoleColors(l.network_role === 'leader' ? 'leader' : 'distributor', colors)
                     return (
-                      <View key={role} style={[styles.heroPill, { backgroundColor: rc.bg }]}>
+                      <View key={l.id} style={[styles.heroPill, { backgroundColor: rc.bg }]}>
                         <Text style={[styles.heroPillText, { color: rc.text }]}>
-                          {getRoleLabel(role).toUpperCase()}
+                          {`${brandRoleLabel(l.brand, l.network_role, getRoleLabel)} · ${l.brand.name}`.toUpperCase()}
                         </Text>
                       </View>
                     )
@@ -1091,6 +1229,16 @@ export default function ClientDetailScreen() {
                     <View style={[styles.heroPill, { backgroundColor: colors.surfaceContainerHighest, maxWidth: 160 }]}>
                       <Text style={[styles.heroPillText, { color: colors.textSecondary }]} numberOfLines={1}>
                         {client.client_type.toUpperCase()}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {/* DESIGN-B — l'étape du parcours commercial remplace l'ancienne carte "Parcours"
+                      de la Synthèse : une pastille neutre suffit. */}
+                  {client.pipeline_stage && !client.contact_role.some(role =>
+                    getRoleLabel(role).toLowerCase() === getPipelineStageLabel(client.pipeline_stage).toLowerCase()) ? (
+                    <View style={[styles.heroPill, { backgroundColor: colors.surfaceContainerHighest, maxWidth: 160 }]}>
+                      <Text style={[styles.heroPillText, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {getPipelineStageLabel(client.pipeline_stage).toUpperCase()}
                       </Text>
                     </View>
                   ) : null}
@@ -1114,17 +1262,47 @@ export default function ClientDetailScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* BRANDS-1 — marques du contact (logo si importé). */}
+            {brandLinks.length > 0 ? (
+              <View style={styles.heroBadges}>
+                {brandLinks.map(link => <BrandPill key={link.id} brand={link.brand} />)}
+              </View>
+            ) : null}
+
+            {/* DESIGN-B — coordonnées essentielles sans changer d'onglet. */}
+            <View style={styles.heroMeta}>
+              {client.phone || client.email ? (
+                <Text style={styles.heroMetaText} numberOfLines={1}>
+                  {[client.phone ? `📱 ${client.phone}` : null, client.email ? `✉️ ${client.email}` : null].filter(Boolean).join(' · ')}
+                </Text>
+              ) : null}
+              {contactLocalTime ? (
+                <Text style={[styles.heroMetaText, styles.heroLocalTime, contactLocalTime.unsocial && { color: colors.warning }]} numberOfLines={1}>
+                  {contactLocalTime.unsocial ? '🌙' : '🕒'} {t('clients.tz_live', {
+                    time: contactLocalTime.time,
+                    name: client.first_name || client.full_name.split(' ')[0],
+                    city: contactLocalTime.city,
+                  })}
+                </Text>
+              ) : null}
+              <Text style={styles.heroMetaText} numberOfLines={1}>
+                {t('clients.added_on', { date: formatDate(client.created_at, locale) })}
+              </Text>
+            </View>
+
             {/* ── Prochaine action — priorité visuelle maximale ────── */}
             {/* CONTACT-4.1 §3 — sur-titre discret rendant explicite que cette carte représente
                 LA ressource prioritaire (distincte de "Autres actions" plus bas) ; réutilise la
                 typographie existante (même famille que todoBlockTitle), aucun nouveau header. */}
             {client.next_action_source && (
-              <Text style={styles.priorityActionTitle}>{t('clients.priority_action_title')}</Text>
+              <Text style={[styles.priorityActionTitle, (nextActionUrgency === 'overdue' || nextActionUrgency === 'today') && { color: nextActionColor.fg }]}>
+                {t(NEXT_ACTION_HEADING_KEY[nextActionUrgency])}
+              </Text>
             )}
             {client.next_action_source ? (
-              <View style={[styles.nextActionBlock, { backgroundColor: nextActionColor.bg, borderColor: nextActionColor.fg }]}>
+              <View style={[styles.nextActionBlock, { backgroundColor: nextActionColor.bg, borderColor: nextActionColor.border }]}>
                 <View style={styles.nextActionTopRow}>
-                  <View style={[styles.nextActionIconBox, { backgroundColor: colors.card }]}>
+                  <View style={[styles.nextActionIconBox, { backgroundColor: nextActionUrgency === 'later' ? colors.primaryLight : colors.card }]}>
                     {(() => {
                       const NextIcon = client.next_action_type ? NEXT_ACTION_ICON[client.next_action_type] : Clock
                       return <NextIcon size={19} color={nextActionColor.fg} strokeWidth={2} />
@@ -1132,18 +1310,70 @@ export default function ClientDetailScreen() {
                   </View>
                   <View style={styles.nextActionTextBlock}>
                     <Text style={[styles.nextActionLabel, { color: nextActionColor.fg }]}>
-                      {nextActionUrgency === 'overdue' ? t('clients.next_action_overdue') : t('clients.next_action_title')}
+                      {t(NEXT_ACTION_LABEL_KEY[nextActionUrgency])}
                     </Text>
                     <Text style={styles.nextActionMainText}>
                       {client.next_action_type ? t(`next_action_types.${client.next_action_type}`) : t(`clients.next_action_source_${client.next_action_source}`)}
                     </Text>
                     {client.next_action_at ? (
                       <Text style={styles.nextActionMeta}>
-                        {formatDate(client.next_action_at, locale)} · {relativeDayLabel(client.next_action_at, t)}
+                        {formatDate(client.next_action_at, locale)}
+                        {nextActionAppt ? ` · ${formatTime(nextActionAppt.start_at)}` : ''} · {relativeDayLabel(client.next_action_at, t)}
                       </Text>
+                    ) : null}
+                    {nextActionAppt ? (
+                      <View style={{ marginTop: 4 }}>
+                        <RemoteTimeBadge at={new Date(nextActionAppt.start_at)} contactTz={client.timezone} showCity />
+                      </View>
                     ) : null}
                   </View>
                 </View>
+                {nextActionAppt && appointmentPhase !== 'after' ? (
+                  // RDV-PHASE-1 — avant le RDV : on l'ouvre pour le préparer ; le jour J (30 min
+                  // avant → fin) : l'action du mode en un geste. "Terminer et débriefer" n'arrive
+                  // qu'une fois l'heure de fin passée.
+                  <View style={styles.nextActionBtnRow}>
+                    {appointmentPhase === 'live' && meetingUrl ? (
+                      <TouchableOpacity
+                        style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionColor.fg }]}
+                        onPress={() => guarded(t(`appointments.meeting_action_${nextActionAppt.meeting_mode}`), () => {
+                          Linking.openURL(meetingUrl).catch(e => console.error('[nextAction.meeting]', e))
+                        })}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.nextActionBtnPrimaryText}>
+                          {MEETING_MODE_ICON[nextActionAppt.meeting_mode!]} {t(`appointments.meeting_action_${nextActionAppt.meeting_mode}`)}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionColor.fg }]}
+                        onPress={() => router.push(`/(app)/appointments/${nextActionAppt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.nextActionBtnPrimaryText}>{t('appointments.open_appointment')}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {appointmentPhase === 'live' && meetingUrl ? (
+                      <TouchableOpacity
+                        style={[styles.nextActionBtnSecondary, { borderColor: nextActionColor.fg }]}
+                        onPress={() => router.push(`/(app)/appointments/${nextActionAppt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionColor.fg }]}>{t('appointments.open_appointment')}</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        disabled={actionBusy}
+                        style={[styles.nextActionBtnSecondary, { borderColor: nextActionColor.fg }]}
+                        onPress={openReschedule}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionColor.fg }]}>{t('clients.postpone_action')}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : (
                 <View style={styles.nextActionBtnRow}>
                   <TouchableOpacity
                     disabled={actionBusy}
@@ -1194,6 +1424,7 @@ export default function ClientDetailScreen() {
                     <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionColor.fg }]}>{t('clients.postpone_action')}</Text>
                   </TouchableOpacity>
                 </View>
+                )}
               </View>
             ) : (
               <TouchableOpacity style={styles.nextActionEmpty} onPress={() => router.push(`/(app)/clients/${id}/followups`)} activeOpacity={0.75}>
@@ -1220,19 +1451,19 @@ export default function ClientDetailScreen() {
               ailleurs sur cet écran) — aucune nouvelle logique de communication ou de création. */}
           <View style={styles.secondaryActions}>
             {client.phone && !isDesktopWeb ? (
-              <TouchableOpacity style={styles.saBtn} onPress={() => callContact(client.phone!)} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.saBtn} onPress={() => guarded(t('clients.call_action'), () => callContact(client.phone!))} activeOpacity={0.8}>
                 <LineIcon name="phone" size={16} color={colors.text} strokeWidth={2} />
                 <Text style={styles.saLabel}>{t('clients.call_action')}</Text>
               </TouchableOpacity>
             ) : null}
             {client.phone ? (
-              <TouchableOpacity style={styles.saBtn} onPress={() => openWhatsApp(client.phone!)} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.saBtn} onPress={() => guarded('WhatsApp', () => openWhatsApp(client.phone!))} activeOpacity={0.8}>
                 <LineIcon name="whatsapp" size={16} color={colors.text} strokeWidth={2} />
                 <Text style={styles.saLabel}>WhatsApp</Text>
               </TouchableOpacity>
             ) : null}
             {client.email && isDesktopWeb ? (
-              <TouchableOpacity style={styles.saBtn} onPress={() => openEmail(client.email!)} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.saBtn} onPress={() => guarded(t('clients.fields.email'), () => openEmail(client.email!))} activeOpacity={0.8}>
                 <Mail size={16} color={colors.text} strokeWidth={2} />
                 <Text style={styles.saLabel}>{t('clients.fields.email')}</Text>
               </TouchableOpacity>
@@ -1264,8 +1495,20 @@ export default function ClientDetailScreen() {
               activeOpacity={0.8}
             >
               <LineIcon name="plus" size={16} color={colors.text} strokeWidth={2} />
+              <Text style={styles.saLabel}>{t('clients.quick_more')}</Text>
             </TouchableOpacity>
           </View>
+
+          {/* ── CARE-JOURNEY-1 : accompagnement (étapes = relances, voir features/care) ── */}
+          <CareJourneyCard
+            client={client}
+            userId={session?.user.id ?? ''}
+            advisorName={session?.user?.user_metadata?.full_name ?? session?.user?.email ?? ''}
+            journey={careJourney}
+            steps={careSteps}
+            onCompleteStep={setCompletingFollowup}
+            onChanged={() => { refreshCare(); refresh(); refreshFollowups() }}
+          />
 
           {/* ── CONTACT-4.1 : "Autres actions" — le reste des actions concrètes en
               retard/aujourd'hui, hors ressource déjà représentée par "Action prioritaire"
@@ -1547,19 +1790,32 @@ export default function ClientDetailScreen() {
 
           {/* ── Colonne latérale persistante (desktop uniquement) ─── */}
           {isDesktopWeb && (
-            <View style={styles.desktopSidebar}>
-              {heroSection}
-            </View>
+            // Colonne défilante indépendante : son contenu (accompagnement déplié, tâches…) peut
+            // dépasser la hauteur de l'écran.
+            <ScrollView
+              style={styles.desktopSidebar}
+              contentContainerStyle={styles.desktopSidebarContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.sidebarPanel}>
+                {heroSection}
+              </View>
+            </ScrollView>
           )}
 
           <ScrollView
             style={styles.scroll}
             contentContainerStyle={[styles.scrollContent, isDesktopWeb && styles.scrollContentDesktop]}
             showsVerticalScrollIndicator={false}
+            // DESIGN-B — barre d'onglets figée en haut au défilement. Toujours l'index 1 : sur
+            // mobile l'en-tête du contact la précède ; sur desktop web, react-native-web compte
+            // aussi l'enfant `false` de `{!isDesktopWeb && heroSection}` (React.Children.map).
+            stickyHeaderIndices={[1]}
           >
 
           {!isDesktopWeb && heroSection}
           {/* ── Tab bar ──────────────────────────────────────────── */}
+          <View style={styles.tabStickyWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll} contentContainerStyle={styles.tabRow}>
             {BASE_TABS.map(tab => (
               <TouchableOpacity
@@ -1571,40 +1827,43 @@ export default function ClientDetailScreen() {
                 <Text style={[styles.tabLabel, activeTab === tab.key && styles.tabLabelActive]}>
                   {t(tab.labelKey)}
                 </Text>
+                {tab.key === 'profil' && profileCompletion < 100 ? (
+                  <View style={styles.tabBadge}>
+                    <Text style={styles.tabBadgeText}>{t('clients.profile_completion', { percent: profileCompletion })}</Text>
+                  </View>
+                ) : null}
               </TouchableOpacity>
             ))}
           </ScrollView>
+          </View>
 
           {/* ── Tab content ──────────────────────────────────────── */}
           <View style={styles.tabContent}>
 
             {/* ─ Synthèse ─ */}
+            {/* DESIGN-B — Synthèse : "où en est cette personne ?" en un coup d'œil. L'étape du
+                parcours commercial est désormais une pastille de l'en-tête. */}
             {activeTab === 'synthese' && (
-              <View style={[styles.tabColumns, isDesktopWeb && styles.tabColumnsDesktop]}>
-                {!client.pipeline_stage && upcomingItems.length === 0 ? (
-                  <Text style={styles.emptyText}>{t('clients.synthese_empty')}</Text>
-                ) : null}
-
-                {/* Parcours — étape commerciale uniquement : next_action_* retiré, doublon
-                    exact du bandeau "Prochaine action" de la colonne gauche (audit UX). */}
-                {client.pipeline_stage ? (
-                  <View style={[styles.card, isDesktopWeb && styles.tabColumnItem]}>
-                    <View style={styles.cardHeader}>
-                      <View style={[styles.iconBox, { backgroundColor: colors.primaryLight }]}>
-                        <Map size={14} color={colors.primary} strokeWidth={2} />
-                      </View>
-                      <Text style={styles.cardTitle}>{t('clients.sections.journey')}</Text>
-                    </View>
-                    <View style={styles.fieldBlock}>
-                      <Text style={styles.fieldLabel}>{t('clients.fields.pipeline_stage').toUpperCase()}</Text>
-                      <Text style={styles.fieldValue}>{getPipelineStageLabel(client.pipeline_stage)}</Text>
-                    </View>
-                  </View>
-                ) : null}
-
-                {/* Prochaines échéances */}
-                {upcomingItems.length > 0 ? (
-                  <View style={[styles.card, isDesktopWeb && styles.tabColumnItem]}>
+              <ContactSynthesis
+                client={client}
+                orders={validCustomerOrders}
+                orderItemsByOrderId={orderItemsByOrderId}
+                recommendations={recommendations}
+                notes={notes}
+                interactions={interactions}
+                appointments={appointments}
+                recurringPrograms={recurringPrograms}
+                followups={followups}
+                brandNames={Object.fromEntries(brandLinks.map(l => [l.brand_id, l.brand.name]))}
+                showPrograms={isModuleActive('renewals_lrp')}
+                isDesktop={isDesktopWeb}
+                onEditExpectations={() => { setActiveTab('profil'); setExpectationsEditing(true) }}
+                onAddOrder={() => router.push(`/(app)/clients/${id}/orders` as any)}
+                onPlanAppointment={() => router.push(`/(app)/appointments/new?clientId=${id}&returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                onAddNote={() => setActiveTab('chrono')}
+                onOpenHistory={() => setActiveTab('chrono')}
+                upcoming={upcomingItems.length > 0 ? (
+                  <View style={styles.card}>
                     <View style={styles.cardHeader}>
                       <View style={[styles.iconBox, { backgroundColor: colors.secondaryLight }]}>
                         <Hourglass size={14} color={colors.secondary} strokeWidth={2} />
@@ -1634,7 +1893,7 @@ export default function ClientDetailScreen() {
                     })}
                   </View>
                 ) : null}
-              </View>
+              />
             )}
 
             {/* ─ Activité ─ */}
@@ -1942,8 +2201,11 @@ export default function ClientDetailScreen() {
                                       <Text style={styles.listCardContext} numberOfLines={1}>{contextParts.join(' · ')}</Text>
                                     )}
                                   </View>
-                                  <View style={styles.listCardBadge}>
-                                    <Text style={styles.listCardBadgeText}>{new Date(appt.start_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</Text>
+                                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                                    <View style={styles.listCardBadge}>
+                                      <Text style={styles.listCardBadgeText}>{new Date(appt.start_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</Text>
+                                    </View>
+                                    <RemoteTimeBadge at={new Date(appt.start_at)} contactTz={client.timezone} size="xs" />
                                   </View>
                                 </TouchableOpacity>
                               )
@@ -2312,6 +2574,15 @@ export default function ClientDetailScreen() {
                                 </TouchableOpacity>
                               ))
                           }
+                          {isModuleActive('downline') ? (
+                            <TouchableOpacity
+                              style={styles.addRowBtn}
+                              onPress={openAddDownline}
+                              activeOpacity={0.75}
+                            >
+                              <Text style={styles.addRowBtnText}>+ {t('network.add_downline')}</Text>
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
                       )}
 
@@ -2345,8 +2616,10 @@ export default function ClientDetailScreen() {
             {/* ─ Profil ─ */}
             {activeTab === 'profil' && (
               <View style={[styles.tabColumns, isDesktopWeb && styles.tabColumnsDesktop]}>
+                {/* PROFILE-ORDER-1 — ordre : identité, centres d'intérêt, zone sensible, marques,
+                    attentes, programme fidélité (pleine largeur, une colonne). */}
                 {/* Informations personnelles */}
-                <View style={[styles.card, isDesktopWeb && styles.tabColumnItem]}>
+                <View style={[styles.card, { width: '100%' }]}>
                   <View style={styles.cardHeader}>
                     <Text style={styles.cardTitle}>{t('clients.sections.personal')}</Text>
                     <TouchableOpacity onPress={() => router.push(`/(app)/clients/${id}/edit`)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -2420,6 +2693,21 @@ export default function ClientDetailScreen() {
                         </View>
                       </View>
                     ) : null}
+                    {client.timezone ? (
+                      <View style={styles.fieldGridItem}>
+                        <View style={styles.fieldIconBox}><Text style={{ fontSize: 13 }}>🌍</Text></View>
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.fieldLabel}>{t('clients.fields.timezone').toUpperCase()}</Text>
+                          <Text style={styles.fieldValue}>
+                            {t('clients.tz_now_there', {
+                              city: timeZoneCity(client.timezone),
+                              offset: formatUtcOffset(timeZoneOffsetMinutes(client.timezone)),
+                              time: new Intl.DateTimeFormat(locale, { timeZone: client.timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()),
+                            })}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
                     {client.source ? (
                       <View style={styles.fieldGridItem}>
                         <View style={styles.fieldIconBox}><LinkIcon size={14} color={colors.textSecondary} strokeWidth={2} /></View>
@@ -2458,121 +2746,8 @@ export default function ClientDetailScreen() {
                   ) : null}
                 </View>
 
-                {/* Programme fidélité (attributs contact) + Programmes récurrents — LRP-4 §21 :
-                    un résumé par programme avec CTA "Voir le programme", jamais l'historique
-                    complet des commandes (qui appartient à la vue programme dédiée). */}
-                {isModuleActive('renewals_lrp') && (client.doterra_id || client.loyalty_notes || client.lrp_loyalty_percent != null || recurringPrograms.length > 0) ? (
-                  <View style={[styles.card, isDesktopWeb && styles.tabColumnItem]}>
-                    <View style={styles.cardHeader}>
-                      <View style={[styles.iconBox, { backgroundColor: colors.warningLight }]}>
-                        <Star size={14} color={colors.warning} strokeWidth={2} />
-                      </View>
-                      <Text style={styles.cardTitle}>{t('clients.sections.doterra')}</Text>
-                    </View>
-                    <View style={styles.fieldGrid}>
-                      {client.doterra_id ? (
-                        <View style={styles.fieldGridItem}>
-                          <View style={styles.fieldBlock}>
-                            <Text style={styles.fieldLabel}>{t('clients.fields.doterra_id').toUpperCase()}</Text>
-                            <Text style={styles.fieldValue}>{client.doterra_id}</Text>
-                          </View>
-                        </View>
-                      ) : null}
-                      {client.lrp_loyalty_percent != null ? (
-                        <View style={styles.fieldGridItem}>
-                          <View style={styles.fieldBlock}>
-                            <Text style={styles.fieldLabel}>{t('clients.fields.lrp_loyalty_percent').toUpperCase()}</Text>
-                            <Text style={styles.fieldValue}>{client.lrp_loyalty_percent}%</Text>
-                          </View>
-                        </View>
-                      ) : null}
-                    </View>
-                    {client.loyalty_notes ? (
-                      <Text style={styles.bodyText}>{client.loyalty_notes}</Text>
-                    ) : null}
-                    {recurringPrograms.length > 0 ? (
-                      <View style={styles.programsListBlock}>
-                        {recurringPrograms.map(program => {
-                          const programColor = program.status === 'active' ? { bg: colors.successLight, text: colors.success }
-                            : program.status === 'paused' ? { bg: colors.warningLight, text: colors.warning }
-                            : program.status === 'cancelled' ? { bg: colors.dangerLight, text: colors.danger }
-                            : { bg: colors.bgDim, text: colors.textSecondary }
-                          return (
-                            <TouchableOpacity
-                              key={program.id}
-                              style={styles.programSummaryRow}
-                              onPress={() => router.push(`/(app)/recurring-programs/${program.id}` as any)}
-                              activeOpacity={0.75}
-                            >
-                              <View style={[styles.lrpStatusPill, { backgroundColor: programColor.bg }]}>
-                                <Text style={[styles.lrpStatusPillText, { color: programColor.text }]}>
-                                  {t(`lrp_statuses.${program.status}`)}
-                                </Text>
-                              </View>
-                              <View style={{ flex: 1 }}>
-                                {/* LRP-4.1 §13 — nom global + label distinguent plusieurs
-                                    cartes "Programme fidélité" identiques sinon. */}
-                                <Text style={styles.programSummaryTitle}>
-                                  {formatProgramTitle(getLrpName(), program.label)}
-                                </Text>
-                                <Text style={styles.fieldValue}>{getLrpFrequencyLabel(program.frequency_value, program.frequency_unit, t)}</Text>
-                                {program.status === 'active' && program.next_occurrence_date ? (
-                                  <Text style={styles.fieldLabel}>{t('lrp.next_order_label')} {formatDate(program.next_occurrence_date, locale)}</Text>
-                                ) : null}
-                              </View>
-                              <Text style={styles.programViewLink}>{t('recurring_program.view_link')}</Text>
-                            </TouchableOpacity>
-                          )
-                        })}
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
-
-                {/* Zone sensible — antécédents médicaux + particularités : accès explicite,
-                    jamais affichée par défaut (décision #7 de la refonte). */}
-                {(client.medical_notes || particularityItems.length > 0) ? (
-                  <View style={[styles.card, isDesktopWeb && styles.tabColumnItem]}>
-                    <View style={styles.cardHeader}>
-                      <View style={[styles.iconBox, { backgroundColor: colors.dangerLight }]}>
-                        <Lock size={14} color={colors.danger} strokeWidth={2} />
-                      </View>
-                      <Text style={styles.cardTitle}>{t('clients.section_sensitive')}</Text>
-                    </View>
-                    {sensitiveRevealed ? (
-                      <>
-                        {client.medical_notes ? (
-                          <View style={styles.fieldBlock}>
-                            <Text style={styles.fieldLabel}>{t('clients.section_medical').toUpperCase()}</Text>
-                            <Text style={styles.bodyText}>{client.medical_notes}</Text>
-                          </View>
-                        ) : null}
-                        {particularityItems.length > 0 ? (
-                          <View style={styles.fieldBlock}>
-                            <Text style={styles.fieldLabel}>{t('clients.section_particularities').toUpperCase()}</Text>
-                            {particularityItems.map((item, i) => (
-                              <View key={i} style={styles.bulletRow}>
-                                <Text style={styles.bullet}>•</Text>
-                                <Text style={styles.bulletText}>{item}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        ) : null}
-                        <TouchableOpacity onPress={() => setSensitiveRevealed(false)} activeOpacity={0.7}>
-                          <Text style={styles.sensitiveToggleText}>{t('clients.sensitive_hide')}</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : (
-                      <TouchableOpacity style={styles.sensitiveRevealBtn} onPress={() => setSensitiveRevealed(true)} activeOpacity={0.75}>
-                        <Lock size={14} color={colors.danger} strokeWidth={2} />
-                        <Text style={styles.sensitiveRevealText}>{t('clients.sensitive_reveal')}</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                ) : null}
-
                 {/* Centres d'intérêt */}
-                <View style={[styles.interestsSection, isDesktopWeb && styles.tabColumnItem]}>
+                <View style={[styles.interestsSection, { width: '100%' }]}>
                   <Text style={styles.interestsTitle}>{t('clients.section_interests')}</Text>
                   <View style={styles.pillsWrap}>
                     {(client.interests ?? []).map((interest, i) => (
@@ -2589,6 +2764,44 @@ export default function ClientDetailScreen() {
                     </TouchableOpacity>
                   </View>
                 </View>
+
+                {/* Zone sensible — antécédents médicaux + particularités : accès explicite,
+                    jamais affichée par défaut (décision #7 de la refonte). */}
+                <ContactSensitiveCard client={client} onSaved={refresh} />
+
+                {/* BRANDS-1 — Ses marques (origine, numéro de membre par marque). */}
+                <View style={{ width: '100%' }}>
+                  <ContactBrandsCard
+                    clientId={id}
+                    userId={session?.user.id ?? ''}
+                    links={brandLinks}
+                    onChanged={() => { refreshBrandLinks(); refresh() }}
+                  />
+                </View>
+
+                {/* CONTACT-EXPECTATIONS-1 — Ses attentes. */}
+                <View style={{ width: '100%' }}>
+                  <ContactExpectationsCard
+                    client={client}
+                    editing={expectationsEditing}
+                    onEditingChange={setExpectationsEditing}
+                    onSaved={refresh}
+                  />
+                </View>
+
+                {/* PROGRAM-BRAND-1 — un bloc par marque (N° membre + programmes, % et notes par
+                    programme), programmes sans marque à rattacher, ancien numéro à attribuer. */}
+                {isModuleActive('renewals_lrp') || brandLinks.length > 0 ? (
+                  <View style={{ width: '100%' }}>
+                    <BrandLoyaltySection
+                      client={client}
+                      links={brandLinks}
+                      programs={recurringPrograms}
+                      globalProgramName={getLrpName()}
+                      onChanged={() => { refresh(); refreshBrandLinks(); refreshRecurringPrograms() }}
+                    />
+                  </View>
+                ) : null}
               </View>
             )}
 
@@ -2628,15 +2841,66 @@ export default function ClientDetailScreen() {
 
       <CalendarPickerModal
         visible={showRescheduleCal}
-        value={client.next_action_at ? client.next_action_at.slice(0, 10) : new Date().toISOString().slice(0, 10)}
+        value={isoToLocalParts(client.next_action_at ?? new Date()).date}
         locale={locale}
         dayAppointments={rescheduleBusyDays}
         showTime
-        initialTime={client.next_action_at ? client.next_action_at.slice(11, 16) : '09:00'}
+        initialTime={client.next_action_at ? isoToLocalParts(client.next_action_at).time : '09:00'}
         showDuration={client.next_action_source === 'appointment'}
         initialDurationMinutes={rescheduleDuration}
         onClose={() => setShowRescheduleCal(false)}
         onConfirm={handleRescheduleConfirm}
+      />
+
+      <ContactHoursGuard
+        action={guardAction}
+        contact={client}
+        userId={session?.user.id ?? ''}
+        locale={locale}
+        onClose={() => setGuardAction(null)}
+        onFollowupCreated={() => { refresh(); refreshFollowups() }}
+      />
+
+      <ContactPickerModal
+        visible={downlineBrandPickerOpen}
+        title={t('network.add_downline_pick_brand')}
+        options={brandLinks.map(l => ({ id: l.brand_id, label: l.brand.name }))}
+        onPick={brandId => { if (brandId) chooseDownlineBrand(brandId) }}
+        onClose={() => setDownlineBrandPickerOpen(false)}
+      />
+
+      <ContactPickerModal
+        visible={downlinePickerOpen}
+        title={downlineBrandName
+          ? t('network.add_downline_title_brand', { name: client.full_name, brand: downlineBrandName })
+          : t('network.add_downline_title', { name: client.full_name })}
+        options={downlineOptions}
+        errorMsg={downlineError}
+        createLabel={t('network.create_downline')}
+        onCreate={() => {
+          setDownlinePickerOpen(false)
+          router.push({
+            pathname: '/(app)/clients/new',
+            params: { sponsorId: id, sponsorName: client.full_name, ...(downlineBrandId ? { brandId: downlineBrandId } : {}) },
+          } as any)
+        }}
+        onPick={async pickedId => {
+          if (!pickedId || !session) return
+          setDownlineError(null)
+          try {
+            if (downlineBrandId) await attachToBrandSponsor(session.user.id, pickedId, downlineBrandId, id)
+            else await setClientSponsor(session.user.id, pickedId, id)
+            setDownlinePickerOpen(false)
+            reloadTeam()
+            reloadSponsorGraph()
+            refreshBrandLinks()
+          } catch (e) {
+            console.error('[addDownline]', e)
+            const cycle = e instanceof SponsorCycleError || e instanceof BrandSponsorError
+            setDownlineError(t(cycle ? 'network.cycle_error' : 'network.attach_error'))
+          }
+        }}
+        onClose={() => setDownlinePickerOpen(false)}
       />
 
       {completingFollowup && (
@@ -2644,7 +2908,7 @@ export default function ClientDetailScreen() {
           followup={completingFollowup}
           userId={session?.user.id ?? ''}
           onClose={() => setCompletingFollowup(null)}
-          onSaved={() => { setCompletingFollowup(null); refresh(); refreshFollowups() }}
+          onSaved={() => { setCompletingFollowup(null); refresh(); refreshFollowups(); refreshCare() }}
         />
       )}
     </>
@@ -2712,8 +2976,11 @@ function makeRecapShareDetailStyles(colors: ThemeColors) {
 }
 
 const CARD_SHADOW = {
-  boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 12, color: 'rgba(28, 26, 23, 0.04)' }],
-  elevation: 1,
+  boxShadow: [
+    { offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' },
+    { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' },
+  ],
+  elevation: 2,
 }
 
 // ACTION-2.1 — dimensions du menu "+" compact (desktop web uniquement). Largeur dans la
@@ -2724,7 +2991,7 @@ const QUICK_MENU_EST_H  = 260
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  root:   { flex: 1, backgroundColor: colors.bgDim },
+  root:   { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 100, maxWidth: 900, alignSelf: 'center', width: '100%' },
@@ -2739,7 +3006,10 @@ function makeStyles(colors: ThemeColors) {
     gap: 28,
     paddingHorizontal: 24,
   },
-  desktopSidebar: { width: 300, flexShrink: 0, paddingTop: 24 },
+  desktopSidebar: { width: 340, flexShrink: 0, flexGrow: 0 },
+  desktopSidebarContent: { paddingTop: 24, paddingBottom: 40 },
+  // DESIGN-B — toute la colonne dans un seul panneau, plutôt que des blocs flottants.
+  sidebarPanel:   { backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder, paddingTop: 18, paddingBottom: 4, ...CARD_SHADOW },
   scrollContentDesktop: { maxWidth: '100%', alignSelf: 'stretch', paddingHorizontal: 0 },
 
   // ── Nav bar ────────────────────────────────────────────────────────────────
@@ -2761,14 +3031,17 @@ function makeStyles(colors: ThemeColors) {
   // ── Hero ───────────────────────────────────────────────────────────────────
   hero:          { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 4, gap: 14 },
   heroTopRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  bigAvatar:     { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  bigAvatarText: { fontSize: 24, fontFamily: fonts.bold },
+  bigAvatar:     { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  bigAvatarText: { fontSize: 19, fontFamily: fonts.bold },
   avatarWrap:    { position: 'relative', flexShrink: 0 },
-  avatarRing:    { width: 72, height: 72, borderRadius: 36, borderWidth: 3, alignItems: 'center', justifyContent: 'center' },
-  avatarRingImg: { width: 62, height: 62, borderRadius: 31 },
+  avatarRing:    { width: 56, height: 56, borderRadius: 28, borderWidth: 2.5, alignItems: 'center', justifyContent: 'center' },
+  avatarRingImg: { width: 48, height: 48, borderRadius: 24 },
   avatarEditBadge: { position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   heroIdentity:  { flex: 1, gap: 6 },
-  heroName:      { fontSize: 19, lineHeight: 24, fontFamily: fonts.display, color: colors.text },
+  heroName:      { fontSize: 20, lineHeight: 26, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.3 },
+  heroMeta:      { gap: 3, marginTop: -4 },
+  heroMetaText:  { fontSize: 12.5, fontFamily: fonts.body, color: colors.textSecondary },
+  heroLocalTime: { fontFamily: fonts.semibold, color: colors.text },
   heroBadges:    { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   heroPill:      { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 9999 },
   heroPillText:  { fontSize: 10, fontFamily: fonts.bold, letterSpacing: 0.5 },
@@ -2799,17 +3072,18 @@ function makeStyles(colors: ThemeColors) {
   nextActionBtnPrimaryText:  { fontSize: 14, fontFamily: fonts.semibold, color: '#fff', textAlign: 'center' },
   nextActionBtnSecondary:     { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, borderWidth: 1.5, backgroundColor: colors.card },
   nextActionBtnSecondaryText: { fontSize: 14, fontFamily: fonts.semibold, textAlign: 'center' },
-  nextActionEmpty:        { width: '100%', borderRadius: 16, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.border, padding: 16, alignItems: 'center', gap: 10 },
+  nextActionEmpty:        { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 4 },
   nextActionEmptyText:    { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
   nextActionEmptyBtn:     { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 9999, backgroundColor: colors.primaryLight },
   nextActionEmptyBtnText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primaryAction },
 
   // ── Actions secondaires (contact rapide) ────────────────────────────────────
-  secondaryActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14 },
+  // DESIGN-B — une seule rangée de boutons de même largeur (icône au-dessus du libellé).
+  secondaryActions: { flexDirection: 'row', alignItems: 'stretch', gap: 6, paddingHorizontal: 20, paddingVertical: 14 },
 
   // ── CONTACT-4 — bloc "À traiter" (raccourci compact, pas un second Dashboard) ───────────
   todoBlockWrap:  { width: '100%', paddingHorizontal: 20, marginTop: -6, marginBottom: 6 },
-  todoBlock:      { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 12, gap: 4, ...CARD_SHADOW },
+  todoBlock:      { backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder, padding: 12, gap: 4, ...CARD_SHADOW },
   todoBlockTitle: { fontSize: 12.5, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
   // TASK-RDV-1 — affordance secondaire et compacte, jamais une grosse carte (§10).
   doneTasksToggle:     { paddingVertical: 8 },
@@ -2824,8 +3098,8 @@ function makeStyles(colors: ThemeColors) {
   clientTaskInfo: { flex: 1, gap: 2 },
   clientTaskTitle:{ fontSize: 13.5, fontFamily: fonts.semibold, color: colors.text },
   clientTaskMeta: { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },
-  saBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.border, ...CARD_SHADOW },
-  saLabel:    { fontSize: 13, fontFamily: fonts.semibold, color: colors.textSecondary },
+  saBtn:      { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 2, borderWidth: 1, borderColor: colors.border },
+  saLabel:    { fontSize: 11, fontFamily: fonts.semibold, color: colors.textSecondary },
 
   // ── Menu "Plus" (feuille inférieure) ────────────────────────────────────────
   moreMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
@@ -2844,9 +3118,13 @@ function makeStyles(colors: ThemeColors) {
   photoUrlSaveBtnText: { fontSize: 15, fontFamily: fonts.semibold, color: '#fff' },
 
   // ── Tab bar ────────────────────────────────────────────────────────────────
-  tabScroll: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.border, marginTop: 20 },
+  // Fond opaque : le contenu défile dessous sans transparaître quand la barre est figée.
+  tabStickyWrap: { backgroundColor: colors.bg, paddingTop: 20, zIndex: 10 },
+  tabScroll: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.border },
   tabRow:    { flexDirection: 'row', paddingHorizontal: 12 },
-  tabBtn:    { paddingHorizontal: 14, paddingVertical: 14, borderBottomWidth: 2, borderBottomColor: 'transparent', marginRight: 2 },
+  tabBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 14, borderBottomWidth: 2, borderBottomColor: 'transparent', marginRight: 2 },
+  tabBadge:     { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, backgroundColor: colors.warningLight },
+  tabBadgeText: { fontSize: 10.5, fontFamily: fonts.bold, color: colors.warning },
   tabBtnActive:   { borderBottomColor: colors.primaryAction },
   tabLabel:       { fontSize: 14, fontFamily: fonts.medium, color: colors.textSecondary },
   tabLabelActive: { color: colors.primaryAction, fontFamily: fonts.semibold },
@@ -2866,7 +3144,7 @@ function makeStyles(colors: ThemeColors) {
   tabColumnItemThird: { flexBasis: '31%', flexGrow: 1, minWidth: 230 },
 
   // Section cards
-  card:       { backgroundColor: colors.card, borderRadius: 16, padding: 20, gap: 14, ...CARD_SHADOW },
+  card:       { backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder, padding: 20, gap: 14, ...CARD_SHADOW },
   // flexWrap : quand le titre + le badge + "Voir tout" ne tiennent pas sur une ligne (colonnes
   // étroites, ex. Interactions/Recommandations/Commandes sur 3 colonnes), "Voir tout" passe
   // à la ligne suivante plutôt que de forcer le titre à se réduire jusqu'à couper le mot en
@@ -2897,15 +3175,6 @@ function makeStyles(colors: ThemeColors) {
   // Body text
   bodyText: { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 22 },
 
-  // Bullet list
-  bulletRow:  { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  bullet:     { fontSize: 14, color: colors.primaryAction, lineHeight: 22 },
-  bulletText: { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary, flex: 1, lineHeight: 22 },
-
-  // ── Zone sensible (Profil) — accès explicite aux données de santé ──────────
-  sensitiveRevealBtn:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 10, borderWidth: 1.5, borderColor: colors.danger },
-  sensitiveRevealText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.danger },
-  sensitiveToggleText: { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary, textAlign: 'center', marginTop: 2 },
 
   // Interests
   interestsSection: { gap: 10 },
@@ -2919,7 +3188,7 @@ function makeStyles(colors: ThemeColors) {
   // PROFILE-SHARE-1 — bloc compact "Contenu à inclure" du composeur "Partager ma fiche" ;
   // volontairement léger (pas de grosse carte), même langage visuel que les cases à cocher
   // déjà utilisées côté RDV (case + libellé).
-  shareOptionsCard:    { backgroundColor: colors.card, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, padding: 12, gap: 2, marginBottom: 12 },
+  shareOptionsCard:    { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.cardBorder, padding: 12, gap: 2, marginBottom: 12 },
   shareOptionsTitle:   { fontSize: 11, fontFamily: fonts.semibold, color: colors.textSecondary, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
   shareOptionRow:      { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   shareOptionCheckbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
@@ -2935,7 +3204,7 @@ function makeStyles(colors: ThemeColors) {
   suiviGroupsWrap: { gap: 22 },
   suiviGroup:      { gap: 10 },
   suiviGroupTitle: { fontSize: 11, fontFamily: fonts.bold, color: colors.textSecondary, letterSpacing: 1, textTransform: 'uppercase', paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.border },
-  suiviSection: { gap: 10, backgroundColor: colors.card, borderRadius: 16, padding: 14, ...CARD_SHADOW },
+  suiviSection: { gap: 10, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder, padding: 16, ...CARD_SHADOW },
   suiviViewAll: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
   // Toujours collé à droite, y compris quand il passe à la ligne sous le titre (cardHeader
   // flexWrap ci-dessus) — jamais coincé entre le titre et le badge.
@@ -3007,7 +3276,7 @@ function makeStyles(colors: ThemeColors) {
   timelineNoteTagText:  { fontSize: 11, fontFamily: fonts.medium, color: colors.textSecondary },
 
   // ── Composeur de note libre (en tête de l'onglet Activité) ─────────────────
-  noteComposer:        { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: colors.card, borderRadius: 14, padding: 10, ...CARD_SHADOW },
+  noteComposer:        { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.cardBorder, padding: 10, ...CARD_SHADOW },
   noteComposerInput:   { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, fontFamily: fonts.body, color: colors.text, maxHeight: 100 },
   noteComposerBtn:     { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   noteComposerBtnDisabled: { backgroundColor: colors.textTertiary },
@@ -3022,7 +3291,7 @@ function makeStyles(colors: ThemeColors) {
   timelineConfirmDeleteBtn:  { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: colors.danger },
   timelineConfirmDeleteText: { fontSize: 12, fontFamily: fonts.semibold, color: '#ffffff' },
 
-  listCard:       { backgroundColor: colors.card, borderRadius: 14, padding: 16, gap: 6, flexDirection: 'row', alignItems: 'flex-start', ...CARD_SHADOW },
+  listCard:       { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.cardBorder, padding: 16, gap: 6, flexDirection: 'row', alignItems: 'flex-start', ...CARD_SHADOW },
   listCardDone:   { opacity: 0.55 },
   // CONTACT-4 §9 — accent très léger (jamais un aplat agressif), lisible en light/dark.
   listCardOverdue: { backgroundColor: colors.dangerLight, borderWidth: 1, borderColor: colors.danger },

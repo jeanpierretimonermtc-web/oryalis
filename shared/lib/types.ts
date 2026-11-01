@@ -86,6 +86,9 @@ export interface UserBusinessProfile {
   custom_lrp_name: string | null
   active_modules: ModuleKey[]
   automation_delays: Record<string, number>
+  // MEETING-MODE-1 — préremplissage des rendez-vous ("mon cabinet", "mon lien visio").
+  office_address: string | null
+  default_meeting_url: string | null
   created_at: string
   updated_at: string
 }
@@ -188,9 +191,20 @@ export interface RecurringProgram {
   // LRP-4.2 §8 — clé d'idempotence de création (retry sans duplication), NULL hors création
   // depuis un flux commande.
   closure_action_key: string | null
+  // AUTO-RENEWAL-1 — 'manual' : "Je gère" (échéance à confirmer) ; 'company_auto' : l'entreprise
+  // renouvelle seule, Oryalis confirme l'échéance et recopie la dernière commande à la date prévue.
+  renewal_mode: RecurringRenewalMode
+  // Mode automatique : relance "prendre des nouvelles" 3 jours avant le renouvellement.
+  checkin_before_renewal: boolean
+  // PROGRAM-BRAND-1 — marque du programme, et fidélité propre à ce programme.
+  brand_id: string | null
+  loyalty_percent: number | null
+  notes: string | null
   created_at: string
   updated_at: string
 }
+
+export type RecurringRenewalMode = 'manual' | 'company_auto'
 
 // LRP-5 — statut STOCKÉ d'une échéance de programme récurrent. Volontairement 3 valeurs
 // seulement (pas de 'due' en base) : "à confirmer" est un état DÉRIVÉ à l'affichage
@@ -211,6 +225,8 @@ export interface RecurringProgramOccurrence {
   status: RecurringProgramOccurrenceStatus
   confirmed_at: string | null
   notes: string | null
+  // AUTO-RENEWAL-1 — confirmée par Oryalis (mode automatique), jamais par un clic.
+  auto_confirmed: boolean
   created_at: string
   updated_at: string
 }
@@ -389,6 +405,8 @@ export interface Client {
   pipeline_stage_updated_at: string | null
   // ── CRM International (migrate13) ─────────────────────────────────────────
   country: string | null
+  // CLIENT-TZ-1 — fuseau IANA du contact (null = même fuseau que moi).
+  timezone: string | null
   first_contact_date: string | null
   first_purchase_date: string | null
   acquisition_source: AcquisitionSource | null
@@ -405,6 +423,12 @@ export interface Client {
   // ── Modèle relationnel (migrate42) ─────────────────────────────────────────
   is_vip: boolean
   manually_inactive: boolean
+  // ── Ses attentes (CONTACT-EXPECTATIONS-1) — ressenti et préférences, jamais médical ──
+  expectation_goals: string | null
+  expectation_habits: string | null
+  expectation_motivation: string | null
+  contact_preference: string | null
+  next_exchange_questions: string | null
   // ──────────────────────────────────────────────────────────────────────────
   created_at: string
   updated_at: string | null
@@ -412,7 +436,7 @@ export interface Client {
 
 /** Lightweight projection of Client used by list screens, to keep egress low. */
 export type ClientListItem = Pick<Client,
-  'id' | 'full_name' | 'first_name' | 'avatar_url' | 'email' | 'phone' | 'status' | 'pipeline_stage' | 'contact_role' |
+  'id' | 'full_name' | 'first_name' | 'avatar_url' | 'email' | 'phone' | 'status' | 'pipeline_stage' | 'contact_role' | 'sponsor_id' |
   'last_interaction_at' | 'next_action_at' | 'next_action_type' | 'next_action_source' | 'is_vip' | 'manually_inactive' | 'created_at'
 >
 
@@ -426,6 +450,7 @@ export interface UplineNode {
   name: string
   member_id: string | null
   position: number
+  brand_id: string | null
   created_at: string
 }
 
@@ -473,8 +498,65 @@ export interface Followup {
   // créée autrement. Traçabilité uniquement, jamais une contrainte d'unicité (§12 : une même
   // interaction peut légitimement produire plusieurs relances dans le temps).
   source_interaction_id: string | null
+  // CARE-JOURNEY-1 — étape d'un accompagnement (null pour toute autre relance) : clé stable de
+  // l'étape et message prêt à envoyer, distinct de `content`.
+  care_journey_id: string | null
+  care_step_key: string | null
+  message_body: string | null
   created_at: string
   updated_at: string | null
+}
+
+// BRANDS-1 — marque saisie librement par l'utilisateur (unicité sur normalized_name en base).
+export interface Brand {
+  id: string
+  user_id: string
+  name: string
+  normalized_name: string
+  color: string | null
+  logo_url: string | null
+  catalog_id: string | null
+  // PROGRAM-BRAND-1 — nom du programme de fidélité de cette marque ("LRP", "Abonnement").
+  program_name: string | null
+  // BRAND-ROLES-1 — libellés propres à la marque, par rôle réseau.
+  role_labels: Partial<Record<BrandNetworkRole, string>>
+  created_at: string
+  updated_at: string
+}
+
+export type ClientBrandSource = 'manual' | 'order' | 'recommendation' | 'appointment'
+
+export interface ClientBrand {
+  id: string
+  user_id: string
+  client_id: string
+  brand_id: string
+  source: ClientBrandSource
+  source_at: string | null
+  member_number: string | null
+  // BRAND-NETWORK-1 — place du contact dans le réseau de cette marque.
+  sponsor_client_id: string | null
+  network_role: BrandNetworkRole
+  created_at: string
+  updated_at: string
+}
+
+export type BrandNetworkRole = 'customer' | 'partner' | 'leader'
+
+export type CareJourneyStatus = 'active' | 'completed' | 'stopped'
+
+export interface CareJourney {
+  id: string
+  user_id: string
+  client_id: string
+  template_key: string
+  label: string
+  start_date: string
+  status: CareJourneyStatus
+  stopped_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface Recommendation {
@@ -688,6 +770,8 @@ export interface Order {
   closure_action_key: string | null
   // Lot 1.2.1 (suite) — annulation douce, distincte de status='returned' et de la suppression.
   cancelled_at: string | null
+  // AUTO-RENEWAL-1 — recopiée automatiquement lors d'un renouvellement géré par l'entreprise.
+  auto_renewal: boolean
   // Lot 1.2.1 (suite) — figée à la création, jamais recalculée depuis le nombre de commandes
   // actuel (qui change avec le temps). NULL = commande antérieure à ce champ, inconnu.
   is_first_order: boolean | null
@@ -726,7 +810,7 @@ export type OrderListItem = Pick<Order,
   'id' | 'client_id' | 'product_name' | 'amount' | 'order_date' | 'status' |
   'notes' | 'is_lrp' | 'order_type' | 'cancelled_at' | 'client' | 'products' |
   'recurring_program_id' | 'recurring_occurrence_date' | 'recurring_occurrence_id' | 'recurring_program' |
-  'recurring_occurrence' | 'appointment_id' | 'source_appointment'
+  'recurring_occurrence' | 'appointment_id' | 'source_appointment' | 'auto_renewal'
 >
 
 // ── Joined types ──────────────────────────────────────────────────────────────
@@ -737,6 +821,8 @@ export interface NetworkNode extends Pick<Client,
 > {
   children: NetworkNode[]
   level: number
+  // BRAND-NETWORK-1 — rôle dans le réseau de la marque affichée (absent hors marque).
+  networkRole?: BrandNetworkRole
   // LRP-4 — programme récurrent actif le plus proche pour ce contact (recurring_programs),
   // remplace next_lrp_date/lrp_status hérités de Client.
   activeProgramId: string | null

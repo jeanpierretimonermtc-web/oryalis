@@ -82,7 +82,7 @@ export default function OnboardingScreen() {
         is_vip: false, manually_inactive: false, source: null, language: locale, birth_date: null, inscription_date: new Date().toISOString().slice(0, 10), profession: null,
         children: null, interests: [], client_type: null, medical_treatment: false, medical_notes: null, particularities: null, welcome_email_sent: false,
         doterra_id: null, next_lrp_date: null, lrp_status: 'not_enrolled', lrp_loyalty_percent: null, lrp_start_date: null, lrp_frequency_value: null, lrp_frequency_unit: null, tracking_consent_at: null, address: null, loyalty_notes: null, sponsor_id: null, contact_role: [role],
-        pipeline_stage: role === 'distributor' ? 'distributor' : 'new_lead', country: null, first_contact_date: null, first_purchase_date: null,
+        pipeline_stage: role === 'distributor' ? 'distributor' : 'new_lead', country: null, timezone: null, first_contact_date: null, first_purchase_date: null,
         acquisition_source: null, next_action_date: null, next_action_type: null, referrals_count: 0, referral_count: 0, network_potential: null,
       })
       setClientId(created.id)

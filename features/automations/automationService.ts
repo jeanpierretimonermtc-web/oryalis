@@ -1,5 +1,6 @@
 import { supabase } from '@/shared/lib/supabase'
 import type { NextActionType } from '@/shared/lib/types'
+import { hasActiveCareJourney, CARE_JOURNEY_SUPERSEDED_RULES } from '@/features/care/careJourneyService'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -225,7 +226,13 @@ export async function applyOrderAutomation(
 ): Promise<void> {
   try {
     const { modules, delays } = await getAutomationConfig(userId)
-    const rules = getSuggestedRules(isFirstOrder).filter(r => modules.includes(r.moduleKey))
+    let rules = getSuggestedRules(isFirstOrder).filter(r => modules.includes(r.moduleKey))
+    // CARE-JOURNEY-1 — pendant un accompagnement actif, ses étapes assurent déjà le suivi :
+    // seule la vérification de réception (J+3) est conservée, pour éviter deux messages la
+    // même semaine. Un plan explicite (choix de l'utilisateur dans la modale) fait foi.
+    if (!plan && await hasActiveCareJourney(clientId)) {
+      rules = rules.filter(r => !CARE_JOURNEY_SUPERSEDED_RULES.includes(r.id))
+    }
     for (const rule of rules) {
       const planItem = plan?.find(p => p.ruleId === rule.id)
       const shouldCreate = plan ? !!planItem?.create : true

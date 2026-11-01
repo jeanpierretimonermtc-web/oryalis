@@ -17,13 +17,15 @@ import type { Catalog, CatalogProductListItem } from '@/shared/lib/types'
 import { getCatalogs, getCatalogProducts } from '@/features/catalogs/catalogService'
 import {
   fetchMetricValuesForProductIds, setMetricValueForProduct, deleteMetricValueForProduct,
-  updateMetricDefinitionDisplayName, setMetricDefinitionActive,
+  updateMetricDefinitionDisplayName, setMetricDefinitionActive, updateMetricDefinitionUnit,
   fetchMetricDefinitionCatalogIds, updateMlmMetricScope, countConfiguredValuesForCatalogs,
   bulkSetMetricValueForProducts, bulkDeleteMetricValueForProducts,
   ScopeRequiresCatalogError, CatalogNotAccessibleError,
 } from '@/features/catalogs/mlmMetricService'
 import type { MlmMetricDefinitionOverview } from '@/features/catalogs/mlmMetricService'
 import type { MlmMetricScope } from '@/shared/lib/types'
+import { MLM_UNITS, toMlmUnit, mlmUnitSuffix } from './mlmUnits'
+import type { MlmUnit } from './mlmUnits'
 
 interface Props {
   userId: string
@@ -51,6 +53,11 @@ export function MlmMetricProductsModal({ userId, definition, onClose, onChanged 
   const [displayName, setDisplayNameState] = useState(definition.display_name)
   const [savingName, setSavingName] = useState(false)
   const [active, setActive] = useState(definition.active)
+  // MLM-UNIT-1 — type de valeur (affichage uniquement).
+  const [unit, setUnit] = useState<MlmUnit>(toMlmUnit(definition.unit))
+  const [unitEditing, setUnitEditing] = useState(false)
+  const [unitSaving, setUnitSaving] = useState(false)
+  const unitSuffix = mlmUnitSuffix(unit)
   const [togglingActive, setTogglingActive] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
 
@@ -191,6 +198,23 @@ export function MlmMetricProductsModal({ userId, definition, onClose, onChanged 
       if (isMountedRef.current) setModalError(t('mlm_values.save_error'))
     } finally {
       if (isMountedRef.current) setSavingName(false)
+    }
+  }
+
+  async function handleChangeUnit(next: MlmUnit) {
+    if (next === unit) { setUnitEditing(false); return }
+    setUnitSaving(true)
+    setModalError(null)
+    try {
+      await updateMetricDefinitionUnit(definition.id, next === 'number' ? null : next)
+      setUnit(next)
+      setUnitEditing(false)
+      onChanged()
+    } catch (e) {
+      console.error('[mlmValues.unit]', e)
+      setModalError(t('mlm_values.unit_error'))
+    } finally {
+      setUnitSaving(false)
     }
   }
 
@@ -475,8 +499,39 @@ export function MlmMetricProductsModal({ userId, definition, onClose, onChanged 
               </Text>
             </View>
           </View>
-          {/* §3/§4/§30/§31 — type de valeur, toujours affiché, jamais éditable. */}
-          <Text style={styles.valueTypeText}>{t('mlm_values.value_type_value')}</Text>
+          {/* MLM-UNIT-1 — type de valeur : modifiable pour une valeur personnelle. */}
+          {editable ? (
+            <View style={styles.scopeSection}>
+              <Text style={styles.fieldLabel}>{t('mlm_values.value_type_label')}</Text>
+              {!unitEditing ? (
+                <View style={styles.scopeSummaryRow}>
+                  <Text style={styles.scopeText}>{t(`mlm_values.unit_${unit}`)}</Text>
+                  <TouchableOpacity onPress={() => setUnitEditing(true)}>
+                    <Text style={styles.editLink}>{t('mlm_values.edit_button')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.unitRow}>
+                  {MLM_UNITS.map(u => (
+                    <TouchableOpacity
+                      key={u}
+                      style={[styles.filterChip, unit === u && styles.filterChipActive]}
+                      onPress={() => handleChangeUnit(u)}
+                      disabled={unitSaving}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: unit === u }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.filterChipText, unit === u && styles.filterChipTextActive]}>{t(`mlm_values.unit_${u}`)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  {unitSaving ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                </View>
+              )}
+            </View>
+          ) : (
+            <Text style={styles.valueTypeText}>{t(`mlm_values.unit_${unit}`)}</Text>
+          )}
 
           {!editable ? (
             <Text style={styles.scopeText}>{t('mlm_values.scope_summary_global_single', { catalog: definition.catalogNames[0] ?? '—' })}</Text>
@@ -574,7 +629,9 @@ export function MlmMetricProductsModal({ userId, definition, onClose, onChanged 
             placeholderTextColor={colors.textTertiary}
           />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+          {/* flexShrink 0 : sans ça, la barre est écrasée à 0 px de haut quand la liste de produits
+              ("Tous") remplit la modale. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterRow}>
             {(['all', 'configured', 'unconfigured'] as StatusFilter[]).map(f => (
               <TouchableOpacity key={f} style={[styles.filterChip, statusFilter === f && styles.filterChipActive]} onPress={() => setStatusFilter(f)} activeOpacity={0.8}>
                 <Text style={[styles.filterChipText, statusFilter === f && styles.filterChipTextActive]}>
@@ -585,7 +642,7 @@ export function MlmMetricProductsModal({ userId, definition, onClose, onChanged 
           </ScrollView>
 
           {targetCatalogs.length > 1 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterRow}>
               <TouchableOpacity style={[styles.filterChip, catalogFilter === 'all' && styles.filterChipActive]} onPress={() => setCatalogFilter('all')} activeOpacity={0.8}>
                 <Text style={[styles.filterChipText, catalogFilter === 'all' && styles.filterChipTextActive]}>{t('mlm_values.catalog_filter_all')}</Text>
               </TouchableOpacity>
@@ -644,20 +701,23 @@ export function MlmMetricProductsModal({ userId, definition, onClose, onChanged 
                     </View>
                     {editable ? (
                       <View style={styles.valueInputWrap}>
-                        <TextInput
-                          style={[styles.valueInput, error && styles.valueInputError]}
-                          value={displayValue}
-                          onChangeText={v => setDraftByProductId(prev => new Map(prev).set(p.id, v))}
-                          onBlur={() => handleCommitValue(p.id)}
-                          placeholder={t('mlm_values.value_placeholder')}
-                          placeholderTextColor={colors.textTertiary}
-                          keyboardType="decimal-pad"
-                        />
+                        <View style={styles.valueWithUnit}>
+                          <TextInput
+                            style={[styles.valueInput, error && styles.valueInputError]}
+                            value={displayValue}
+                            onChangeText={v => setDraftByProductId(prev => new Map(prev).set(p.id, v))}
+                            onBlur={() => handleCommitValue(p.id)}
+                            placeholder={t('mlm_values.value_placeholder')}
+                            placeholderTextColor={colors.textTertiary}
+                            keyboardType="decimal-pad"
+                          />
+                          {unitSuffix ? <Text style={styles.unitSuffix}>{unitSuffix}</Text> : null}
+                        </View>
                         {savedFlash.has(p.id) ? <Text style={styles.savedFlash}>{t('mlm_values.saved_feedback')}</Text> : null}
                       </View>
                     ) : (
                       <Text style={styles.readOnlyValue}>
-                        {currentValue !== undefined ? String(currentValue) : t('mlm_values.value_not_configured')}
+                        {currentValue !== undefined ? `${currentValue}${unitSuffix ? ` ${unitSuffix}` : ''}` : t('mlm_values.value_not_configured')}
                       </Text>
                     )}
                     {error ? <Text style={styles.rowErrorText}>{error}</Text> : null}
@@ -759,6 +819,10 @@ function makeStyles(colors: ThemeColors) {
     searchInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12, fontSize: 14, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.bg },
 
     filterRow: { gap: 8, paddingVertical: 2 },
+    filterScroll: { flexGrow: 0, flexShrink: 0 },
+    unitRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4 },
+    valueWithUnit: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    unitSuffix: { minWidth: 22, fontSize: 13, fontFamily: fonts.semibold, color: colors.textSecondary },
     filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.border },
     filterChipActive: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
     filterChipText: { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary },

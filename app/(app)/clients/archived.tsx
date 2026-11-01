@@ -67,7 +67,7 @@ export default function ArchivedClientsScreen() {
             data={clients}
             keyExtractor={item => item.id}
             contentContainerStyle={[styles.list, clients.length === 0 && styles.emptyList]}
-            ListEmptyComponent={<EmptyState icon="📦" message={t('clients.archived_empty')} />}
+            ListEmptyComponent={<EmptyState icon="🗄️" message={t('clients.archived_empty')} />}
             renderItem={({ item }) => (
               <View style={styles.card}>
                 <View style={styles.info}>

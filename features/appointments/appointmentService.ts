@@ -23,7 +23,7 @@ import {
   type DiscussedProduct,
 } from './appointmentTypes'
 
-const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, provider, cancelled_at, cancellation_reason, followup_of_appointment_id, created_at, updated_at'
+const APPT_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, duration_minutes, timezone, location, meeting_url, meeting_mode, provider, cancelled_at, cancellation_reason, followup_of_appointment_id, created_at, updated_at'
 
 export async function fetchAppointments(filters: AppointmentFilters = {}): Promise<Appointment[]> {
   let query = supabase
@@ -78,7 +78,7 @@ export async function fetchActiveAppointmentsByUser(userId: string): Promise<{ i
 // (getPrimaryRole/getRoleColors) au lieu d'une couleur propre au type de RDV.
 // DASH/CAL-2 — provider ajouté à la même jointure existante (aucun fetch supplémentaire) :
 // permet au calendrier de distinguer un RDV Oryalis d'un événement externe importé.
-const CALENDAR_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, provider, client:clients(id, full_name, status, contact_role)'
+const CALENDAR_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, provider, meeting_mode, location, meeting_url, client:clients(id, full_name, status, contact_role, phone, timezone)'
 
 // RDV d'une plage [rangeStart, rangeEnd[ (borne haute exclusive), avec jointure client
 // minimale pour l'affichage calendrier (Mois/Semaine/Jour). Distincte de fetchAppointments :

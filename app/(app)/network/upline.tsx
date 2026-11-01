@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Modal } from 'react-native'
-import { router, Stack } from 'expo-router'
+import { Stack, useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useUpline } from '@/features/network/useUpline'
+import { useBrands } from '@/features/brands/useBrands'
+import { BrandAvatar } from '@/features/brands/BrandPill'
 import { Input } from '@/shared/components/ui/Input'
 import { Button } from '@/shared/components/ui/Button'
 import { useTheme } from '@/shared/theme/ThemeProvider'
@@ -14,7 +16,15 @@ export default function UplineScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { nodes, loading, add, update, remove } = useUpline()
+  const { nodes: allNodes, loading, add, update, remove } = useUpline()
+  // BRAND-NETWORK-1 — une ligne ascendante par marque ; celles sans marque restent listées
+  // tant qu'elles ne sont pas attribuées.
+  const { brandId: brandParam } = useLocalSearchParams<{ brandId?: string }>()
+  const brandFilter = brandParam || null
+  const { brands } = useBrands()
+  const brand = brands.find(b => b.id === brandFilter) ?? null
+  const nodes = allNodes.filter(n => !brandFilter || n.brand_id === brandFilter || n.brand_id === null)
+  const [nodeBrandId, setNodeBrandId]   = useState<string | null>(brandFilter)
 
   const [modalVisible, setModalVisible] = useState(false)
   const [editing, setEditing]           = useState<UplineNode | null>(null)
@@ -27,6 +37,7 @@ export default function UplineScreen() {
     setEditing(null)
     setName('')
     setMemberId('')
+    setNodeBrandId(brandFilter)
     setErrorMsg(null)
     setModalVisible(true)
   }
@@ -35,6 +46,7 @@ export default function UplineScreen() {
     setEditing(node)
     setName(node.name)
     setMemberId(node.member_id ?? '')
+    setNodeBrandId(node.brand_id ?? brandFilter)
     setErrorMsg(null)
     setModalVisible(true)
   }
@@ -49,9 +61,9 @@ export default function UplineScreen() {
     setSaving(true)
     try {
       if (editing) {
-        await update(editing.id, name.trim(), memberId.trim() || null)
+        await update(editing.id, name.trim(), memberId.trim() || null, nodeBrandId)
       } else {
-        await add(name.trim(), memberId.trim() || null)
+        await add(name.trim(), memberId.trim() || null, nodeBrandId)
       }
       closeModal()
     } catch (e) {
@@ -67,10 +79,11 @@ export default function UplineScreen() {
 
   // Trier du plus haut (position max) au plus bas (direct sponsor, position 0)
   const sorted = [...nodes].sort((a, b) => b.position - a.position)
+  const brandName = (id: string | null) => brands.find(b => b.id === id)?.name ?? null
 
   return (
     <>
-      <Stack.Screen options={{ title: t('network.upline_title'), headerBackTitle: '' }} />
+      <Stack.Screen options={{ title: brand ? t('network.upline_title_brand', { brand: brand.name }) : t('network.upline_title'), headerBackTitle: '' }} />
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
 
         {/* Explication */}
@@ -104,6 +117,11 @@ export default function UplineScreen() {
                         <Text style={styles.nodeLevel}>{levelLabel}</Text>
                         {node.member_id ? (
                           <Text style={styles.nodeMemberId}>#{node.member_id}</Text>
+                        ) : null}
+                        {brands.length > 0 ? (
+                          <Text style={[styles.nodeMemberId, !node.brand_id && { color: colors.warning }]}>
+                            {brandName(node.brand_id) ?? t('network.upline_no_brand')}
+                          </Text>
                         ) : null}
                       </View>
                     </View>
@@ -158,6 +176,28 @@ export default function UplineScreen() {
               placeholder="123456"
               keyboardType="default"
             />
+
+            {brands.length > 0 ? (
+              <View style={{ gap: 6 }}>
+                <Text style={styles.brandLabel}>{t('network.upline_brand')}</Text>
+                <View style={styles.brandChips}>
+                  {brands.map(b => {
+                    const active = nodeBrandId === b.id
+                    return (
+                      <TouchableOpacity
+                        key={b.id}
+                        style={[styles.brandChip, active && styles.brandChipActive]}
+                        onPress={() => setNodeBrandId(active ? null : b.id)}
+                        activeOpacity={0.75}
+                      >
+                        <BrandAvatar brand={b} size={18} />
+                        <Text style={[styles.brandChipText, active && styles.brandChipTextActive]}>{b.name}</Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+              </View>
+            ) : null}
 
             {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
@@ -241,6 +281,12 @@ function makeStyles(colors: ThemeColors) {
     sheetTitle:  { fontSize: 18, fontFamily: fonts.bold, color: colors.text, marginBottom: 4 },
 
     error:     { fontSize: 13, fontFamily: fonts.body, color: colors.danger },
+    brandLabel: { fontSize: 13, fontFamily: fonts.semibold, color: colors.textSecondary },
+    brandChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    brandChip:  { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
+    brandChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+    brandChipText: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+    brandChipTextActive: { color: colors.primary, fontFamily: fonts.semibold },
     cancelBtn: { alignItems: 'center', paddingVertical: 10 },
     cancelText:{ fontSize: 14, fontFamily: fonts.medium, color: colors.textSecondary },
   })

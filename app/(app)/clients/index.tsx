@@ -8,6 +8,7 @@ import { archiveClient, deleteClient } from '@/features/clients/clientService'
 import { useContactQuota } from '@/features/clients/useContactQuota'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { LinearGradient } from 'expo-linear-gradient'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 import { AnchoredMenu } from '@/shared/components/ui/AnchoredMenu'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
@@ -21,20 +22,43 @@ import { computeRelationshipHealth, type RelationshipHealthInput } from '@/featu
 import { URGENCY_WINDOWS, isInUrgencyWindow, clientHasActionInWindow, type UrgencyWindow } from '@/features/clients/actionWindows'
 import { findDuplicates, type DuplicateReason } from '@/features/clients/duplicates'
 import { ContactsExamplePreview } from '@/features/clients/ContactsExamplePreview'
+import { useClientBrandMap } from '@/features/brands/useBrands'
+import type { BrandRoleEntry } from '@/features/brands/useBrands'
+import { brandRoleLabel } from '@/features/brands/brandRoleLabels'
+
+function normalizeSearch(s: string): string {
+  return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+import { BrandPill } from '@/features/brands/BrandPill'
+import { brandPalette } from '@/features/brands/brandColors'
+import type { Brand } from '@/shared/lib/types'
 
 // CONTACTS-SEGMENTS-1 — 3 populations lisibles en un clic au lieu de 7 rôles techniques.
 // "Partenaires" regroupe distributeur/leader/membre d'équipe (sous-filtres conservés). Un
 // contact multi-rôles (client ET distributeur) apparaît dans chaque segment concerné : rien ne se
 // perd, contrairement à des cases étanches.
-type Segment = 'all' | 'prospect' | 'customer' | 'partner'
-const SEGMENTS: Segment[] = ['all', 'prospect', 'customer', 'partner']
+type Segment = 'all' | 'prospect' | 'customer' | 'partner' | 'team_clients'
+const SEGMENTS: Segment[] = ['all', 'prospect', 'customer', 'partner', 'team_clients']
 const PARTNER_ROLES: ContactRole[] = ['distributor', 'leader', 'team_member']
 const SEGMENT_LABEL_KEY: Record<Segment, string> = {
   all: 'clients.filter_all', prospect: 'clients.segment_prospects',
   customer: 'clients.segment_customers', partner: 'clients.segment_partners',
+  team_clients: 'clients.segment_team_clients',
 }
 
-function inSegment(c: ClientListItem, s: Segment): boolean {
+// SPONSOR-1 — client rattaché à un partenaire : il appartient à ce partenaire, il n'apparaît
+// que sous le filtre "Clients de mon équipe". Avec des marques, la règle se lit marque par
+// marque (BRAND-NETWORK-1, teamClientIds) ; sans marque, parrain renseigné et aucun rôle réseau.
+type TeamInfo = { linkedClientIds: Set<string>; teamClientIds: Set<string> }
+
+function isTeamClient(c: ClientListItem, team: TeamInfo): boolean {
+  if (team.linkedClientIds.has(c.id)) return team.teamClientIds.has(c.id)
+  return !!c.sponsor_id && !c.contact_role.some(r => PARTNER_ROLES.includes(r))
+}
+
+function inSegment(c: ClientListItem, s: Segment, team: TeamInfo): boolean {
+  if (s === 'team_clients') return isTeamClient(c, team)
+  if (isTeamClient(c, team)) return false
   if (s === 'all') return true
   if (s === 'partner') return c.contact_role.some(r => PARTNER_ROLES.includes(r))
   return c.contact_role.includes(s)
@@ -235,6 +259,29 @@ function RolePill({ role }: { role: ContactRole }) {
   )
 }
 
+// BRAND-ROLES-1 — rôles d'un contact : les rôles réseau d'un contact rattaché à une marque
+// s'affichent par marque ("Conseillère · doTERRA"), avec le vocabulaire de cette marque.
+function RolePills({ client, brandRoles, linked }: { client: ClientListItem; brandRoles?: BrandRoleEntry[]; linked: boolean }) {
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const { getRoleLabel } = useAppConfig()
+  return (
+    <>
+      {client.contact_role
+        .filter(role => !linked || !PARTNER_ROLES.includes(role))
+        .map(role => <RolePill key={role} role={role} />)}
+      {(brandRoles ?? []).map(({ brand, role }) => {
+        const rc = getRoleColors(role === 'leader' ? 'leader' : 'distributor', colors)
+        return (
+          <View key={brand.id} style={[styles.pill, { backgroundColor: rc.bg }]}>
+            <Text style={[styles.pillText, { color: rc.text }]}>{brandRoleLabel(brand, role, getRoleLabel)} · {brand.name}</Text>
+          </View>
+        )
+      })}
+    </>
+  )
+}
+
 function VipTag() {
   const { t } = useTranslation()
   const { colors, statusColors } = useTheme()
@@ -340,7 +387,7 @@ function NextActionRow({
 }
 
 function ClientCard({
-  client, actionOverride, otherActions = [], isActionsExpanded = false, onToggleActionsExpanded, onMenuPress, duplicateReasons,
+  client, actionOverride, otherActions = [], isActionsExpanded = false, onToggleActionsExpanded, onMenuPress, duplicateReasons, brands = [], brandRoles,
 }: {
   client: ClientListItem
   actionOverride?: ActionOverride
@@ -349,6 +396,9 @@ function ClientCard({
   onToggleActionsExpanded?: () => void
   onMenuPress: (c: ClientListItem, pos: { x: number; y: number }) => void
   duplicateReasons?: DuplicateReason[]
+  // BRANDS-1 — marques du contact (pastilles).
+  brands?: Brand[]
+  brandRoles?: BrandRoleEntry[]
 }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
@@ -368,8 +418,13 @@ function ClientCard({
               {client.is_vip ? <VipTag /> : null}
               {/* "customer" (Client) doit s'afficher comme n'importe quel autre rôle — voir
                   fiche contact (clients/[id]/index.tsx) où le même correctif a été appliqué. */}
-              {client.contact_role.map(role => <RolePill key={role} role={role} />)}
+              <RolePills client={client} brandRoles={brandRoles} linked={brands.length > 0} />
             </View>
+            {brands.length > 0 ? (
+              <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
+                {brands.map(b => <BrandPill key={b.id} brand={b} size="sm" />)}
+              </View>
+            ) : null}
             {/* Distincte des pills de rôle ci-dessus (même libellé possible pour customer/
                 distributor — voir getPipelineStageLabel) : un libellé de contexte + un texte
                 simple, sans fond coloré, pour ne jamais se confondre visuellement avec un
@@ -443,6 +498,78 @@ function ClientCard({
   )
 }
 
+// CONTACTS-COMPACT-1 — affichage "liste" : une ligne par contact (nom, rôles, marques, prochaine
+// action), pour voir beaucoup plus de contacts à l'écran. Toute la ligne ouvre la fiche.
+function ClientRow({ client, brands = [], brandRoles, onMenuPress }: {
+  client: ClientListItem
+  brands?: Brand[]
+  brandRoles?: BrandRoleEntry[]
+  onMenuPress: (c: ClientListItem, pos: { x: number; y: number }) => void
+}) {
+  const { t } = useTranslation()
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const rc = getRoleColors(getPrimaryRole(client.contact_role), colors)
+  const summary = nextActionSummary(client, t)
+  // Prochaine action en pastille alignée à droite (couleur selon l'urgence) ; sans action : un
+  // simple tiret discret, jamais une phrase répétée sur chaque ligne.
+  const actionTone = !summary ? null
+    : summary.tier === 'overdue' ? { bg: colors.dangerLight, text: colors.danger }
+    : summary.tier === 'today' ? { bg: colors.warningLight, text: colors.warning }
+    : { bg: colors.bgDim, text: colors.textSecondary }
+  const initials = client.full_name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase()).join('')
+
+  return (
+    <View style={styles.rowCard}>
+      <TouchableOpacity
+        style={styles.rowMain}
+        onPress={() => router.push(`/(app)/clients/${client.id}`)}
+        activeOpacity={0.75}
+        accessibilityRole="button"
+        accessibilityLabel={`${t('common.open')} ${client.full_name}`}
+      >
+        {client.avatar_url ? (
+          <Image source={{ uri: client.avatar_url }} style={styles.rowAvatarImg} />
+        ) : (
+          <View style={[styles.rowAvatar, { backgroundColor: rc.bg }]}>
+            <Text style={[styles.rowAvatarText, { color: rc.text }]}>{initials}</Text>
+          </View>
+        )}
+        <View style={styles.rowIdentity}>
+          <View style={styles.rowNameLine}>
+            <Text style={styles.rowName} numberOfLines={1}>{client.full_name}</Text>
+            {client.is_vip ? <VipTag /> : null}
+            <RolePills client={client} brandRoles={brandRoles} linked={brands.length > 0} />
+            {brands.map(b => <BrandPill key={b.id} brand={b} size="sm" />)}
+          </View>
+        </View>
+        <View style={styles.rowActionCol}>
+          {summary && actionTone ? (
+            <View style={[styles.rowActionChip, { backgroundColor: actionTone.bg }]}>
+              <Text style={[styles.rowActionText, { color: actionTone.text }]} numberOfLines={1}>
+                {summary.emoji} {summary.text}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.rowActionNone} accessibilityLabel={t('clients.next_action_empty')}>—</Text>
+          )}
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.rowMenuBtn}
+        onPress={(e) => onMenuPress(client, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
+        accessibilityLabel={t('common.more_options')}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.rowMenuDots}>⋯</Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+
+const VIEW_MODE_KEY = 'oryalis.contactsViewMode'
+type ViewMode = 'cards' | 'list'
+
 export default function ClientsScreen() {
   const { t } = useTranslation()
   const { colors, statusColors } = useTheme()
@@ -463,6 +590,19 @@ export default function ClientsScreen() {
   const [partnerRole, setPartnerRole] = useState<ContactRole | null>(null)
   const [extraFilter, setExtraFilter] = useState<ExtraFilter>(null)
   const [pipelineFilter, setPipelineFilter] = useState<PipelineStage | null>(pipelineParam ?? null)
+  // BRANDS-1 — filtre Marque (id de marque, ou 'none' = sans marque), combiné aux autres.
+  const [brandFilter, setBrandFilter] = useState<string | null>(null)
+  // CONTACTS-COMPACT-1 — cartes ou liste compacte ; préférence mémorisée sur cet appareil.
+  const [viewMode, setViewMode] = useState<ViewMode>('cards')
+  useEffect(() => {
+    AsyncStorage.getItem(VIEW_MODE_KEY).then(v => { if (v === 'list' || v === 'cards') setViewMode(v) }).catch(() => {})
+  }, [])
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode)
+    AsyncStorage.setItem(VIEW_MODE_KEY, mode).catch(() => {})
+  }
+  const { brands: myBrands, byClient: brandsByClient, linkedClientIds, teamClientIds, brandRolesByClient, refresh: refreshBrandMap } = useClientBrandMap()
+  const teamInfo = useMemo(() => ({ linkedClientIds, teamClientIds }), [linkedClientIds, teamClientIds])
   const [actionFilter, setActionFilter] = useState<ActionFilter>('all')
   // ACTION-3.3 — pas de persistance (§13) : simples useState, valeurs par défaut à chaque
   // ouverture de l'écran, jamais lues/écrites dans AsyncStorage.
@@ -528,7 +668,7 @@ export default function ClientsScreen() {
     }
   }
 
-  useFocusEffect(useCallback(() => { refresh(); refreshActions() }, []))
+  useFocusEffect(useCallback(() => { refresh(); refreshActions(); refreshBrandMap() }, []))
 
   // Paramètre `status` historique (dashboard, autres écrans) : traduit vers segment / sous-rôle
   // partenaire / filtre VIP, pour que les anciens liens continuent d'ouvrir la même population.
@@ -566,7 +706,25 @@ export default function ClientsScreen() {
   }, [debouncedQuery])
 
 
-  const baseDisplayed: ClientListItem[] = debouncedQuery.length >= 2 ? results : clients
+  // BRAND-ROLES-1 — la recherche trouve aussi un rôle dans le vocabulaire de chaque marque
+  // ("conseillère" → conseillères doTERRA, "partenaire" → partenaires Zinzino).
+  const roleMatches = useMemo(() => {
+    const q = normalizeSearch(debouncedQuery)
+    if (q.length < 2) return []
+    return clients.filter(c => {
+      const linked = (brandsByClient.get(c.id)?.length ?? 0) > 0
+      const labels = [
+        ...c.contact_role.filter(r => !linked || !PARTNER_ROLES.includes(r)).map(r => getRoleLabel(r)),
+        ...(brandRolesByClient.get(c.id) ?? []).map(({ brand, role }) => brandRoleLabel(brand, role, getRoleLabel)),
+      ]
+      return labels.some(l => normalizeSearch(l).includes(q))
+    })
+  }, [debouncedQuery, clients, brandsByClient, brandRolesByClient, getRoleLabel])
+  const baseDisplayed: ClientListItem[] = useMemo(() => {
+    if (debouncedQuery.length < 2) return clients
+    const ids = new Set(results.map(c => c.id))
+    return [...results, ...roleMatches.filter(c => !ids.has(c.id))]
+  }, [debouncedQuery, clients, results, roleMatches])
   const actionMaps = useMemo(
     () => ({ appointment: appointmentAllMap, followup: followupAllMap, interaction: interactionAllMap }),
     [appointmentAllMap, followupAllMap, interactionAllMap],
@@ -576,16 +734,28 @@ export default function ClientsScreen() {
   const segmentCounts = useMemo(() => {
     const counts = {} as Record<Segment, { total: number; overdue: number }>
     for (const s of SEGMENTS) {
-      const members = baseDisplayed.filter(c => inSegment(c, s))
+      const members = baseDisplayed.filter(c => inSegment(c, s, teamInfo))
       counts[s] = { total: members.length, overdue: members.filter(c => clientHasActionInWindow(c.id, actionMaps, 'overdue')).length }
     }
     return counts
-  }, [baseDisplayed, actionMaps])
+  }, [baseDisplayed, actionMaps, teamInfo])
 
   const segmentFiltered = baseDisplayed
-    .filter(c => inSegment(c, segment))
+    .filter(c => inSegment(c, segment, teamInfo))
     .filter(c => !partnerRole || c.contact_role.includes(partnerRole))
-  const displayed = pipelineFilter ? segmentFiltered.filter(c => c.pipeline_stage === pipelineFilter) : segmentFiltered
+  const pipelineFiltered = pipelineFilter ? segmentFiltered.filter(c => c.pipeline_stage === pipelineFilter) : segmentFiltered
+  const brandCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const c of pipelineFiltered) {
+      const list = brandsByClient.get(c.id)
+      if (!list?.length) counts.set('none', (counts.get('none') ?? 0) + 1)
+      else for (const b of list) counts.set(b.id, (counts.get(b.id) ?? 0) + 1)
+    }
+    return counts
+  }, [pipelineFiltered, brandsByClient])
+  const displayed = !brandFilter ? pipelineFiltered
+    : brandFilter === 'none' ? pipelineFiltered.filter(c => !brandsByClient.get(c.id)?.length)
+    : pipelineFiltered.filter(c => brandsByClient.get(c.id)?.some(b => b.id === brandFilter))
 
   const noActionContacts = useMemo(() => displayed.filter(c => !c.next_action_at), [displayed])
   const hotContacts = useMemo(() => displayed.filter(c => hotClientIds.has(c.id)), [displayed, hotClientIds])
@@ -729,8 +899,24 @@ export default function ClientsScreen() {
               </Text>
             )}
           </View>
+          <View style={styles.viewToggle}>
+            {(['cards', 'list'] as ViewMode[]).map(mode => (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.viewToggleBtn, viewMode === mode && styles.viewToggleBtnActive]}
+                onPress={() => changeViewMode(mode)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: viewMode === mode }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.viewToggleText, viewMode === mode && styles.viewToggleTextActive]}>
+                  {mode === 'cards' ? `▦ ${t('clients.view_cards')}` : `☰ ${t('clients.view_list')}`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <TouchableOpacity style={styles.archiveLink} onPress={() => router.push('/(app)/clients/archived' as any)}>
-            <Text style={styles.archiveLinkText}>{t('clients.archived_title')}</Text>
+            <Text style={styles.archiveLinkText}>🗄️ {t('clients.archived_title')}</Text>
           </TouchableOpacity>
           {isWide && (
             <TouchableOpacity
@@ -753,12 +939,12 @@ export default function ClientsScreen() {
         {/* CONTACTS-SEGMENTS-1 — niveau 1 : la population (Prospects / Clients / Partenaires),
             avec le nombre de contacts en retard par segment. */}
         <View style={styles.segmentRow}>
-          {SEGMENTS.map(s => {
+          {SEGMENTS.filter(s => s !== 'team_clients' || segmentCounts.team_clients.total > 0 || segment === s).map(s => {
             const active = segment === s
             const { total, overdue } = segmentCounts[s]
             // Couleur d'identité de la population = celle de son badge de rôle sur les cartes
             // (Partenaires = Conseillère, son rôle principal) ; "Tous" reste neutre (bleu nuit).
-            const segmentColor = s === 'all' ? null : getRoleColors(s === 'partner' ? 'distributor' : s, colors)
+            const segmentColor = s === 'all' || s === 'team_clients' ? null : getRoleColors(s === 'partner' ? 'distributor' : s, colors)
             return (
               <TouchableOpacity
                 key={s}
@@ -843,6 +1029,41 @@ export default function ClientsScreen() {
           })}
         </View>
 
+        {/* BRANDS-1 — filtre Marque (affiché dès qu'au moins une marque existe). */}
+        {myBrands.length > 0 && (
+          <View style={styles.actionFilterRow}>
+            <Text style={styles.brandFilterLabel}>{t('brands.filter_label').toUpperCase()}</Text>
+            <TouchableOpacity
+              style={[styles.chip, { backgroundColor: !brandFilter ? colors.primaryLight : colors.card, borderColor: !brandFilter ? colors.primary : colors.border }]}
+              onPress={() => setBrandFilter(null)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.chipText, { color: !brandFilter ? colors.primary : colors.textSecondary }]}>{t('brands.filter_all')}</Text>
+            </TouchableOpacity>
+            {myBrands.map(b => {
+              const active = brandFilter === b.id
+              const palette = brandPalette(b)
+              return (
+                <TouchableOpacity
+                  key={b.id}
+                  style={[styles.chip, { backgroundColor: active ? palette.bg : colors.card, borderColor: active ? palette.text : colors.border }]}
+                  onPress={() => setBrandFilter(active ? null : b.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.chipText, { color: palette.text, fontFamily: active ? fonts.bold : fonts.semibold }]}>{b.name} · {brandCounts.get(b.id) ?? 0}</Text>
+                </TouchableOpacity>
+              )
+            })}
+            <TouchableOpacity
+              style={[styles.chip, { backgroundColor: brandFilter === 'none' ? colors.primaryLight : colors.card, borderColor: brandFilter === 'none' ? colors.primary : colors.border }]}
+              onPress={() => setBrandFilter(brandFilter === 'none' ? null : 'none')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.chipText, { color: brandFilter === 'none' ? colors.primary : colors.textSecondary }]}>{t('brands.filter_none')} · {brandCounts.get('none') ?? 0}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {extraFilter === 'duplicates' && (
           <Text style={styles.duplicatesHint}>{t('clients.duplicates_hint')}</Text>
         )}
@@ -919,13 +1140,16 @@ export default function ClientsScreen() {
           ? <ActivityIndicator style={styles.loader} color={colors.primaryAction} />
           : (
             <FlatList
-              key={isWide ? '2-col' : '1-col'}
-              numColumns={isWide ? 2 : 1}
-              columnWrapperStyle={isWide ? styles.columnWrapper : undefined}
+              key={viewMode === 'list' ? 'list' : isWide ? '2-col' : '1-col'}
+              numColumns={viewMode === 'cards' && isWide ? 2 : 1}
+              columnWrapperStyle={viewMode === 'cards' && isWide ? styles.columnWrapper : undefined}
               data={actionFiltered}
               keyExtractor={c => c.id}
-              extraData={[statusLabels, actionFilter, sourceFilter, expandedActionClientIds, extraFilter]}
+              extraData={[statusLabels, actionFilter, sourceFilter, expandedActionClientIds, extraFilter, viewMode, brandsByClient]}
               renderItem={({ item }) => {
+                if (viewMode === 'list') {
+                  return <ClientRow client={item} brands={brandsByClient.get(item.id)} brandRoles={brandRolesByClient.get(item.id)} onMenuPress={(c, pos) => { setMenuClient(c); setMenuPos(pos) }} />
+                }
                 let actionOverride: ActionOverride = null
                 // CONTACTS-3.6 — ressources restantes (hors action principale), uniquement pour
                 // "Tous types" : jamais calculé/affiché pour les filtres spécifiques (§11).
@@ -949,6 +1173,8 @@ export default function ClientsScreen() {
                       onToggleActionsExpanded={() => toggleActionExpanded(item.id)}
                       onMenuPress={(c, pos) => { setMenuClient(c); setMenuPos(pos) }}
                       duplicateReasons={extraFilter === 'duplicates' ? duplicateInfo.get(item.id)?.reasons : undefined}
+                      brands={brandsByClient.get(item.id)}
+                      brandRoles={brandRolesByClient.get(item.id)}
                     />
                   </View>
                 )
@@ -1046,7 +1272,7 @@ export default function ClientsScreen() {
                 </TouchableOpacity>
                 <View style={styles.menuDivider} />
                 <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => setConfirmArchive(true)}>
-                  <Text style={styles.menuItemIcon}>📦</Text>
+                  <Text style={styles.menuItemIcon}>🗄️</Text>
                   <Text style={styles.menuItemText}>{t('clients.menu_archive')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => setConfirmDelete(true)}>
@@ -1103,7 +1329,26 @@ function makeStyles(colors: ThemeColors) {
   pageEyebrow: { fontSize: 11, fontFamily: fonts.bold, color: colors.primary, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 },
   pageTitle:  { fontSize: 30, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.6, lineHeight: 36 },
   pageSub:    { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 4 },
-  archiveLink: { marginLeft: 'auto', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 7 },
+  viewToggle: { marginLeft: 'auto', flexDirection: 'row', borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.card, padding: 2, gap: 2 },
+  viewToggleBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  viewToggleBtnActive: { backgroundColor: colors.primaryLight },
+  viewToggleText: { fontSize: 12.5, fontFamily: fonts.medium, color: colors.textSecondary },
+  viewToggleTextActive: { color: colors.primary, fontFamily: fonts.semibold },
+  rowCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder, paddingLeft: 12, paddingRight: 6, marginHorizontal: 16, marginBottom: 6 },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, minWidth: 0, flexWrap: 'wrap' },
+  rowAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  rowAvatarImg: { width: 32, height: 32, borderRadius: 16 },
+  rowAvatarText: { fontSize: 12, fontFamily: fonts.bold },
+  rowIdentity: { flex: 1, minWidth: 180 },
+  rowNameLine: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  rowName: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text, maxWidth: 220 },
+  rowActionCol: { width: 200, alignItems: 'flex-end' },
+  rowActionChip: { maxWidth: 200, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  rowActionText: { fontSize: 12, fontFamily: fonts.semibold },
+  rowActionNone: { fontSize: 14, fontFamily: fonts.medium, color: colors.textTertiary, paddingRight: 10 },
+  rowMenuBtn: { width: 32, height: 32, borderRadius: 16, marginLeft: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  rowMenuDots: { fontSize: 16, lineHeight: 18, color: colors.textSecondary, fontFamily: fonts.bold },
+  archiveLink: { marginLeft: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 7 },
   archiveLinkText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.textSecondary },
   newClientBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
@@ -1127,6 +1372,7 @@ function makeStyles(colors: ThemeColors) {
 
   // ── Filter chips ───────────────────────────────────────────────────────────
   actionFilterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, marginBottom: 10 },
+  brandFilterLabel: { alignSelf: 'center', fontSize: 11, fontFamily: fonts.bold, color: colors.textSecondary, letterSpacing: 0.5 },
   filtersList:    { flexGrow: 0, flexShrink: 0 },
   filtersContent: { paddingHorizontal: 16, paddingBottom: 14, alignItems: 'center' },
   chip:     { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },

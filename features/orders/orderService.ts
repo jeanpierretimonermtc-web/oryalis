@@ -108,6 +108,8 @@ export interface OrderInput {
   // par un index unique partiel en base (appointment_id, closure_action_key) : un rejeu du
   // même plan confirmé ne crée jamais une seconde commande, y compris sous concurrence.
   closure_action_key?: string | null
+  // AUTO-RENEWAL-1 — commande recopiée par un renouvellement automatique (voir autoRenewalService).
+  auto_renewal?: boolean
 }
 
 export interface OrderEditInput {
@@ -158,7 +160,7 @@ export function computeOrderProductName(products: OrderProduct[]): string {
 // principe, une seule jointure groupée dans la requête déjà partagée, jamais une requête RDV
 // séparée par ligne de commande. Volontairement minimal (ni notes, ni business_context, ni
 // tasks) : seul ce qu'affiche OrderEditModal.
-const ORDER_LIST_COLS = 'id, client_id, product_name, amount, order_date, status, notes, is_lrp, order_type, cancelled_at, products, recurring_program_id, recurring_occurrence_date, recurring_occurrence_id, appointment_id, client:clients(full_name), recurring_program:recurring_programs(label), recurring_occurrence:recurring_program_occurrences(scheduled_date, status), source_appointment:appointments(id, start_at, title)'
+const ORDER_LIST_COLS = 'id, client_id, product_name, amount, order_date, status, notes, is_lrp, order_type, cancelled_at, products, recurring_program_id, recurring_occurrence_date, recurring_occurrence_id, appointment_id, auto_renewal, client:clients(full_name), recurring_program:recurring_programs(label), recurring_occurrence:recurring_program_occurrences(scheduled_date, status), source_appointment:appointments(id, start_at, title)'
 
 export async function fetchOrders(filters: OrderFilters = {}): Promise<OrderListItem[]> {
   let query = supabase

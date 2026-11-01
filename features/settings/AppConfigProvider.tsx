@@ -32,6 +32,8 @@ const DEFAULT_PROFILE: UserBusinessProfile = {
   custom_lrp_name: null,
   active_modules: ['products', 'renewals_lrp', 'downline', 'goals', 'calendar_sync', 'auto_first_order', 'auto_order', 'auto_appointment', 'auto_no_contact'],
   automation_delays: {},
+  office_address: null,
+  default_meeting_url: null,
   created_at: '', updated_at: '',
 }
 
@@ -62,6 +64,7 @@ type AppConfigCtx = {
   toggleModule: (key: ModuleKey, active: boolean) => Promise<void>
   setAutomationDelay: (ruleId: string, days: number) => Promise<void>
   saveLrpName: (name: string | null) => Promise<void>
+  saveMeetingDefaults: (patch: { office_address?: string | null; default_meeting_url?: string | null }) => Promise<void>
 
   // ── Status label writes ────────────────────────────────────────────────────
   saveLabel: (key: LabelKey, value: string) => Promise<void>
@@ -86,6 +89,7 @@ const AppConfigContext = createContext<AppConfigCtx>({
   toggleModule:      async () => {},
   setAutomationDelay: async () => {},
   saveLrpName:       async () => {},
+  saveMeetingDefaults: async () => {},
   saveLabel:         async () => {},
   applyActivityPreset: async () => {},
   resetLabels:       async () => {},
@@ -176,6 +180,14 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     } catch (e) { console.error('[saveLrpName]', e) }
   }, [userId, profile])
 
+  const saveMeetingDefaults = useCallback(async (patch: { office_address?: string | null; default_meeting_url?: string | null }) => {
+    if (!userId) return
+    try {
+      const updated = await upsertBusinessProfile(userId, { ...profile, ...patch })
+      setProfile(updated)
+    } catch (e) { console.error('[saveMeetingDefaults]', e) }
+  }, [userId, profile])
+
   const toggleModule = useCallback(async (key: ModuleKey, active: boolean) => {
     if (!userId) return
     try {
@@ -233,7 +245,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     <AppConfigContext.Provider value={{
       profile, labels, loading,
       isModuleActive, getStatusLabel, getRoleLabel, getPipelineStageLabel, getAutomationDelay, getLrpName,
-      saveActivityType, toggleModule, setAutomationDelay, saveLrpName,
+      saveActivityType, toggleModule, setAutomationDelay, saveLrpName, saveMeetingDefaults,
       saveLabel, applyActivityPreset, resetLabels,
       reload: load,
     }}>

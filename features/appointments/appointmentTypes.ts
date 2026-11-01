@@ -1,3 +1,4 @@
+import type { MeetingMode } from './meetingMode'
 export type AppointmentType =
   | 'discovery_call'
   | 'product_presentation'
@@ -243,6 +244,8 @@ export interface Appointment {
   timezone: string
   location: string | null
   meeting_url: string | null
+  // MEETING-MODE-1 — en personne / téléphone / visio / WhatsApp (null = non précisé).
+  meeting_mode: MeetingMode | null
   provider: string
   cancelled_at: string | null
   cancellation_reason: string | null
@@ -344,9 +347,10 @@ export interface AppointmentWithContext extends Appointment {
 // couleur de rôle que Contacts (getPrimaryRole/getRoleColors, shared/theme/roleColors.ts) —
 // pipeline_stage et is_vip ne sont volontairement pas chargés ici, non nécessaires à l'accent.
 export interface CalendarAppointment extends Pick<Appointment,
-  'id' | 'user_id' | 'client_id' | 'title' | 'appointment_type' | 'status' | 'start_at' | 'end_at' | 'provider'
+  'id' | 'user_id' | 'client_id' | 'title' | 'appointment_type' | 'status' | 'start_at' | 'end_at' | 'provider' |
+  'meeting_mode' | 'location' | 'meeting_url'
 > {
-  client: { id: string; full_name: string; status: string; contact_role: ContactRole[] } | null
+  client: { id: string; full_name: string; status: string; contact_role: ContactRole[]; phone?: string | null; timezone?: string | null } | null
 }
 
 export interface CreateAppointmentPayload {
@@ -358,6 +362,7 @@ export interface CreateAppointmentPayload {
   timezone?: string
   location?: string
   meeting_url?: string
+  meeting_mode?: MeetingMode
   // Lot 1.2 — RDV créé comme suite explicite d'un autre RDV.
   followup_of_appointment_id?: string
   notes?: {
@@ -386,8 +391,9 @@ export interface UpdateAppointmentPayload {
   start_at?: string
   end_at?: string
   timezone?: string
-  location?: string
-  meeting_url?: string
+  location?: string | null
+  meeting_url?: string | null
+  meeting_mode?: MeetingMode | null
   cancelled_at?: string
   cancellation_reason?: string
   // Rattachement d'un contact à un RDV existant (créé initialement sans contact) — voir

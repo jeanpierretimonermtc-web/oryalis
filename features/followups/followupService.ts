@@ -4,7 +4,7 @@ import { createInteraction, getInteractionBySourceFollowup } from '@/features/in
 import type { InteractionInput } from '@/features/interactions/interactionService'
 
 export type FollowupInput =
-  Omit<Followup, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'auto_generated' | 'priority_score' | 'pipeline_stage' | 'prospect_temperature' | 'product_context' | 'appointment_id' | 'automation_rule_id' | 'cancelled_at' | 'closure_action_key' | 'order_id' | 'source_interaction_id'>
+  Omit<Followup, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'auto_generated' | 'priority_score' | 'pipeline_stage' | 'prospect_temperature' | 'product_context' | 'appointment_id' | 'automation_rule_id' | 'cancelled_at' | 'closure_action_key' | 'order_id' | 'source_interaction_id' | 'care_journey_id' | 'care_step_key' | 'message_body'>
   & {
     auto_generated?: boolean
     priority_score?: number | null
@@ -19,6 +19,9 @@ export type FollowupInput =
     order_id?: Followup['order_id']
     // ACTION-OUTCOME-1 / P1.2 — traçabilité optionnelle vers l'interaction d'origine.
     source_interaction_id?: Followup['source_interaction_id']
+    care_journey_id?: Followup['care_journey_id']
+    care_step_key?: Followup['care_step_key']
+    message_body?: Followup['message_body']
   }
 
 export async function cancelFollowup(id: string): Promise<void> {

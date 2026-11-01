@@ -13,11 +13,13 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 import { useMlmMetrics } from '@/features/catalogs/useMlmMetrics'
-import { createPersonalMetricDefinition, DuplicateMetricCodeError, ScopeRequiresCatalogError, CatalogNotAccessibleError } from '@/features/catalogs/mlmMetricService'
+import { createPersonalMetricDefinition, deletePersonalMetricDefinition, DuplicateMetricCodeError, ScopeRequiresCatalogError, CatalogNotAccessibleError } from '@/features/catalogs/mlmMetricService'
 import type { MlmMetricDefinitionOverview } from '@/features/catalogs/mlmMetricService'
 import { getCatalogs } from '@/features/catalogs/catalogService'
 import type { Catalog, MlmMetricScope } from '@/shared/lib/types'
 import { MlmMetricProductsModal } from '@/features/catalogs/MlmMetricProductsModal'
+import { MLM_UNITS, toMlmUnit } from '@/features/catalogs/mlmUnits'
+import type { MlmUnit } from '@/features/catalogs/mlmUnits'
 import { Button } from '@/shared/components/ui/Button'
 import { EmptyState } from '@/shared/components/ui/EmptyState'
 
@@ -26,15 +28,19 @@ import { EmptyState } from '@/shared/components/ui/EmptyState'
 // un seul nom pour une officielle, rien pour une personnelle scope='all' (implicite : tous). Le
 // type de valeur ("Valeur produit numérique") est affiché pour TOUTES les métriques (§3/§30/§31),
 // en information secondaire, jamais concurrente du nom.
-function MetricRow({ definition, onPress, styles, t }: {
+function MetricRow({ definition, onPress, onDelete, styles, t }: {
   definition: MlmMetricDefinitionOverview
   onPress: () => void
+  // MLM-METRIC-DELETE-1 — valeurs personnelles uniquement ; bouton frère (jamais imbriqué dans la
+  // zone cliquable "Modifier").
+  onDelete?: () => void
   styles: ReturnType<typeof makeStyles>
   t: (key: string, opts?: Record<string, unknown>) => string
 }) {
   const isOfficial = definition.origin === 'official'
   return (
-    <TouchableOpacity style={styles.metricRow} onPress={onPress} activeOpacity={0.75}>
+    <View style={styles.metricRowWrap}>
+    <TouchableOpacity style={[styles.metricRow, { flex: 1 }]} onPress={onPress} activeOpacity={0.75}>
       <View style={styles.metricInfo}>
         <Text style={styles.metricName}>{definition.display_name}</Text>
         <View style={styles.metricMetaRow}>
@@ -51,7 +57,7 @@ function MetricRow({ definition, onPress, styles, t }: {
             </View>
           ) : null}
         </View>
-        <Text style={styles.valueTypeText}>{t('mlm_values.value_type_value')}</Text>
+        <Text style={styles.valueTypeText}>{t(`mlm_values.unit_${toMlmUnit(definition.unit)}`)}</Text>
         {definition.catalogNames.length > 0 ? (
           <Text style={styles.catalogNameText}>{definition.catalogNames.join(' · ')}</Text>
         ) : !isOfficial ? (
@@ -67,6 +73,17 @@ function MetricRow({ definition, onPress, styles, t }: {
         <View style={styles.editBtn}><Text style={styles.editBtnText}>{t('mlm_values.edit_button')}</Text></View>
       ) : null}
     </TouchableOpacity>
+    {!isOfficial && onDelete ? (
+      <TouchableOpacity
+        style={styles.deleteBtn}
+        onPress={onDelete}
+        accessibilityLabel={`${t('mlm_values.delete_button')} ${definition.display_name}`}
+        activeOpacity={0.75}
+      >
+        <Text style={styles.deleteBtnText}>{t('mlm_values.delete_button')}</Text>
+      </TouchableOpacity>
+    ) : null}
+    </View>
   )
 }
 
@@ -84,6 +101,7 @@ function CreateMlmMetricModal({ userId, onClose, onCreated }: { userId: string; 
   // jamais deux implémentations qui pourraient diverger).
   const [selectedCatalogIds, setSelectedCatalogIds] = useState<Set<string>>(new Set())
   const [active, setActive] = useState(true)
+  const [unit, setUnit] = useState<MlmUnit>('points')
   const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [catalogsLoaded, setCatalogsLoaded] = useState(false)
@@ -119,6 +137,7 @@ function CreateMlmMetricModal({ userId, onClose, onCreated }: { userId: string; 
         scope,
         catalogIds: scope === 'selected' ? [...selectedCatalogIds] : undefined,
         active,
+        unit: unit === 'number' ? null : unit,
       })
       onCreated()
       onClose()
@@ -160,11 +179,23 @@ function CreateMlmMetricModal({ userId, onClose, onCreated }: { userId: string; 
             placeholderTextColor={colors.textTertiary}
           />
 
-          {/* ORDER-BUSINESS-3.5.2 §5/§6/§7 — le TYPE n'est jamais choisi par l'utilisateur : il
-              n'existe qu'UN type fonctionnel en V1 (source product metric), affiché en lecture
-              seule pour éviter toute confusion avec un futur pourcentage/commission. */}
+          {/* MLM-UNIT-1 — type choisi par l'utilisateur (points, %, €, nombre) : n'agit que sur
+              l'affichage des valeurs, jamais sur un calcul de commission. */}
           <Text style={styles.fieldLabel}>{t('mlm_values.value_type_label')}</Text>
-          <Text style={styles.valueTypeReadOnly}>{t('mlm_values.value_type_value')}</Text>
+          <View style={styles.unitRow}>
+            {MLM_UNITS.map(u => (
+              <TouchableOpacity
+                key={u}
+                style={[styles.unitChip, unit === u && styles.unitChipActive]}
+                onPress={() => setUnit(u)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: unit === u }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.unitChipText, unit === u && styles.unitChipTextActive]}>{t(`mlm_values.unit_${u}`)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <Text style={styles.scopeHint}>{t('mlm_values.value_type_help')}</Text>
           <Text style={styles.valueTypeExamples}>{t('mlm_values.value_type_examples')}</Text>
           <Text style={styles.valueTypeExamples}>{t('mlm_values.value_type_disclaimer')}</Text>
@@ -227,6 +258,24 @@ export default function MlmValuesSettingsScreen() {
   const { officialMetrics, personalMetrics, loading, reload } = useMlmMetrics(userId)
   const [showCreate, setShowCreate] = useState(false)
   const [detailMetric, setDetailMetric] = useState<MlmMetricDefinitionOverview | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<MlmMetricDefinitionOverview | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  async function handleDelete(metric: MlmMetricDefinitionOverview) {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deletePersonalMetricDefinition(metric.id)
+      setPendingDelete(null)
+      reload()
+    } catch (e) {
+      console.error('[mlmValues.delete]', e)
+      setDeleteError(t('mlm_values.delete_error'))
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <>
@@ -260,7 +309,31 @@ export default function MlmValuesSettingsScreen() {
               <View style={styles.card}>
                 {personalMetrics.map((m, i) => (
                   <View key={m.id} style={i > 0 ? styles.rowBorder : undefined}>
-                    <MetricRow definition={m} onPress={() => setDetailMetric(m)} styles={styles} t={t} />
+                    <MetricRow
+                      definition={m}
+                      onPress={() => setDetailMetric(m)}
+                      onDelete={() => { setDeleteError(null); setPendingDelete(m) }}
+                      styles={styles}
+                      t={t}
+                    />
+                    {/* Confirmation obligatoire (clic par erreur), jamais de suppression directe. */}
+                    {pendingDelete?.id === m.id ? (
+                      <View style={styles.confirmBox}>
+                        <Text style={styles.confirmTitle}>{t('mlm_values.delete_confirm_title', { name: m.display_name })}</Text>
+                        <Text style={styles.confirmText}>{t('mlm_values.delete_confirm_text', { count: m.configuredProductCount })}</Text>
+                        {deleteError ? <Text style={styles.confirmError}>{deleteError}</Text> : null}
+                        <View style={styles.confirmBtns}>
+                          <TouchableOpacity style={styles.confirmCancel} onPress={() => setPendingDelete(null)} disabled={deleting} activeOpacity={0.8}>
+                            <Text style={styles.confirmCancelText}>{t('common.cancel')}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={[styles.confirmDelete, deleting && { opacity: 0.6 }]} onPress={() => handleDelete(m)} disabled={deleting} activeOpacity={0.85}>
+                            {deleting
+                              ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                              : <Text style={styles.confirmDeleteText}>{t('mlm_values.delete_confirm_cta')}</Text>}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : null}
                   </View>
                 ))}
               </View>
@@ -320,6 +393,23 @@ function makeStyles(colors: ThemeColors) {
 
     editBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.bgDim },
     editBtnText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
+    unitRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
+    unitChip: { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+    unitChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+    unitChipText: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+    unitChipTextActive: { color: colors.primary, fontFamily: fonts.semibold },
+    metricRowWrap: { flexDirection: 'row', alignItems: 'center', paddingRight: 14 },
+    deleteBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.dangerLight },
+    deleteBtnText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.danger },
+    confirmBox: { marginHorizontal: 14, marginBottom: 12, padding: 12, gap: 8, borderRadius: 12, borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.dangerLight },
+    confirmTitle: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+    confirmText: { fontSize: 13, lineHeight: 19, fontFamily: fonts.body, color: colors.textSecondary },
+    confirmError: { fontSize: 13, fontFamily: fonts.medium, color: colors.danger },
+    confirmBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
+    confirmCancel: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+    confirmCancelText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
+    confirmDelete: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: colors.danger, minWidth: 100, alignItems: 'center' },
+    confirmDeleteText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.onPrimary },
 
     // Modale de création
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

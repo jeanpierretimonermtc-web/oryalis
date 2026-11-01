@@ -150,6 +150,23 @@ export async function createCustomCatalog(
   return data as Catalog
 }
 
+// CATALOG-DELETE-1 — suppression d'un catalogue PERSONNEL uniquement (type='custom' filtré ici en
+// plus de la RLS, qui protège déjà les catalogues officiels). Ses produits partent en cascade ;
+// l'historique (commandes, lignes de commande, recommandations, contextes de RDV) garde les noms
+// de produits, seules les références passent à NULL (ON DELETE SET NULL en base).
+export async function deleteCustomCatalog(userId: string, catalogId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('catalogs')
+    .delete()
+    .eq('id', catalogId)
+    .eq('type', 'custom')
+    .select('id')
+  if (error) throw error
+  if (!data || data.length === 0) throw new Error('catalog_not_deletable')
+  catalogsCache.delete(userId)
+  productsCache.delete(`${userId}:${catalogId}`)
+}
+
 // RDV-PRODUCTS-1 / Lot E — champs commerciaux (prix public/distributeur, PV), jusqu'ici
 // uniquement supportés par les catalogues officiels seedés par script. Un seul type d'entrée
 // pour la création ET la modification (§10-11 du brief) : mêmes champs, même forme, jamais deux

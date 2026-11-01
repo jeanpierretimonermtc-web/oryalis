@@ -10,6 +10,11 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { createAppointment, updateAppointment, fetchAppointmentById } from '@/features/appointments/appointmentService'
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
 import { getClient, searchClientsForPicker, type ClientPickerItem } from '@/features/clients/clientService'
+import { MeetingModeField } from '@/features/appointments/MeetingModeField'
+import { isoToLocalParts } from '@/shared/lib/dateFormat'
+import { RemoteTimeHint } from '@/features/clients/RemoteTimeHint'
+import { useAppConfig } from '@/features/settings/AppConfigProvider'
+import type { MeetingMode } from '@/features/appointments/meetingMode'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
 import { CalendarPickerModal } from '@/shared/components/ui/CalendarPickerModal'
@@ -229,6 +234,8 @@ export default function NewAppointmentScreen() {
   })
   const [location,      setLocation]      = useState('')
   const [meetingUrl,    setMeetingUrl]    = useState('')
+  const [meetingMode,   setMeetingMode]   = useState<MeetingMode | null>(null)
+  const { profile: businessProfile, saveMeetingDefaults } = useAppConfig()
   const [clientNotes,   setClientNotes]   = useState('')
   const [internalNotes, setInternalNotes] = useState('')
 
@@ -252,12 +259,15 @@ export default function NewAppointmentScreen() {
       if (!appt) { setLoadingAppt(false); return }
       setTitle(appt.title)
       setApptType(appt.appointment_type)
-      const [sd, stRaw] = appt.start_at.split('T')
-      const [ed, etRaw] = appt.end_at.split('T')
-      setStartDate(sd); setStartTime(stRaw.slice(0, 5))
-      setEndDate(ed); setEndTime(etRaw.slice(0, 5))
+      // Heure LOCALE (jamais la chaîne UTC brute, décalée d'1 h l'hiver / 2 h l'été en France) :
+      // l'enregistrement reconvertit l'heure locale en UTC (toISO), l'aller-retour reste exact.
+      const startLocal = isoToLocalParts(appt.start_at)
+      const endLocal = isoToLocalParts(appt.end_at)
+      setStartDate(startLocal.date); setStartTime(startLocal.time)
+      setEndDate(endLocal.date); setEndTime(endLocal.time)
       setLocation(appt.location ?? '')
       setMeetingUrl(appt.meeting_url ?? '')
+      setMeetingMode(appt.meeting_mode ?? null)
       if (appt.client_id) {
         await getClient(appt.client_id).then(setSelectedClient).catch(() => {})
       }
@@ -306,8 +316,10 @@ export default function NewAppointmentScreen() {
           appointment_type: apptType,
           start_at,
           end_at,
-          location:    location.trim() || undefined,
-          meeting_url: meetingUrl.trim() || undefined,
+          // MEETING-MODE-1 — seul le complément du mode choisi est gardé.
+          meeting_mode: meetingMode,
+          location:     meetingMode === 'in_person' ? location.trim() || null : null,
+          meeting_url:  meetingMode === 'video' ? meetingUrl.trim() || null : null,
         })
       } else {
         await createAppointment({
@@ -316,8 +328,9 @@ export default function NewAppointmentScreen() {
           start_at,
           end_at,
           client_id:   selectedClient?.id,
-          location:    location.trim() || undefined,
-          meeting_url: meetingUrl.trim() || undefined,
+          meeting_mode: meetingMode ?? undefined,
+          location:    meetingMode === 'in_person' ? location.trim() || undefined : undefined,
+          meeting_url: meetingMode === 'video' ? meetingUrl.trim() || undefined : undefined,
           notes: (clientNotes.trim() || internalNotes.trim())
             ? { client_notes: clientNotes.trim() || undefined, internal_notes: internalNotes.trim() || undefined }
             : undefined,
@@ -447,13 +460,30 @@ export default function NewAppointmentScreen() {
             </View>
           </Field>
 
-          <Field label={`${t('appointments.field_location')} (${t('common.optional')})`}>
-            <TextInput style={[styles.textField, { color: colors.text, borderColor: colors.border }]} value={location} onChangeText={setLocation} placeholder="Paris, Zoom…" placeholderTextColor={colors.textTertiary} />
-          </Field>
+          {selectedClient?.timezone && startDate && startTime ? (
+            <RemoteTimeHint
+              start={new Date(toISO(startDate, startTime))}
+              end={endDate && endTime ? new Date(toISO(endDate, endTime)) : undefined}
+              contactTz={selectedClient.timezone}
+              contactName={selectedClient.first_name || selectedClient.full_name}
+            />
+          ) : null}
 
-          <Field label={`${t('appointments.field_meeting_url')} (${t('common.optional')})`}>
-            <TextInput style={[styles.textField, { color: colors.text, borderColor: colors.border }]} value={meetingUrl} onChangeText={setMeetingUrl} placeholder="https://zoom.us/…" placeholderTextColor={colors.textTertiary} keyboardType="url" autoCapitalize="none" />
-          </Field>
+          <MeetingModeField
+            mode={meetingMode}
+            onModeChange={setMeetingMode}
+            location={location}
+            onLocationChange={setLocation}
+            meetingUrl={meetingUrl}
+            onMeetingUrlChange={setMeetingUrl}
+            clientFirstName={selectedClient?.first_name ?? selectedClient?.full_name?.split(' ')[0] ?? null}
+            clientAddress={selectedClient?.address ?? null}
+            clientPhone={selectedClient?.phone ?? null}
+            officeAddress={businessProfile.office_address}
+            defaultMeetingUrl={businessProfile.default_meeting_url}
+            onSaveOfficeAddress={address => saveMeetingDefaults({ office_address: address })}
+            onSaveDefaultMeetingUrl={url => saveMeetingDefaults({ default_meeting_url: url })}
+          />
         </SectionCard>
 
         {!isEdit && (

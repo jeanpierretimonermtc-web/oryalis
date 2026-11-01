@@ -17,6 +17,7 @@ import { supabase } from '@/shared/lib/supabase'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
+import { SOFT_CARD_SHADOW } from '@/shared/theme/elevation'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
@@ -167,6 +168,7 @@ export default function SettingsMenuScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.pageHeader}>
+          <Text style={styles.pageEyebrow}>{t('settings.header_eyebrow')}</Text>
           <Text style={styles.pageTitle}>{t('settings.title')}</Text>
           <Text style={styles.pageSubtitle}>{t('settings.subtitle')}</Text>
         </View>
@@ -358,11 +360,12 @@ export default function SettingsMenuScreen() {
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  container: { flex: 1, backgroundColor: colors.surface },
+  container: { flex: 1, backgroundColor: colors.bg },
   content: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 40, maxWidth: 1180, alignSelf: 'center', width: '100%' },
 
   pageHeader: { marginBottom: 18, gap: 4 },
-  pageTitle: { fontSize: 28, fontFamily: fonts.display, color: colors.text },
+  pageEyebrow: { fontSize: 11, fontFamily: fonts.bold, color: colors.primary, textTransform: 'uppercase', letterSpacing: 1.2 },
+  pageTitle: { fontSize: 30, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.6, lineHeight: 36 },
   pageSubtitle: { fontSize: 14, fontFamily: fonts.body, color: colors.textSecondary },
 
   shell: { gap: 14 },
@@ -375,10 +378,9 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
     overflow: 'hidden',
-    boxShadow: [{ offsetX: 0, offsetY: 2, blurRadius: 8, color: 'rgba(0, 0, 0, 0.04)' }],
-    elevation: 2,
+    ...SOFT_CARD_SHADOW,
   },
   heroBrandStrip: { flexDirection: 'row', height: 4 },
   heroBrandSeg:   { flex: 1 },
@@ -407,7 +409,8 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
+    ...SOFT_CARD_SHADOW,
     padding: 16,
     gap: 14,
   },
@@ -425,7 +428,8 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
+    ...SOFT_CARD_SHADOW,
     padding: 16,
     gap: 8,
   },
@@ -434,7 +438,7 @@ function makeStyles(colors: ThemeColors) {
   previewBody: { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 19 },
 
   statusGrid: { flexDirection: 'row', gap: 10 },
-  statusCard: { flex: 1, minWidth: 0, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 8 },
+  statusCard: { flex: 1, minWidth: 0, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.cardBorder, ...SOFT_CARD_SHADOW, padding: 14, gap: 8 },
   statusIcon: { width: 28, height: 28, borderRadius: 9, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   statusValue: { fontSize: 17, fontFamily: fonts.bold, color: colors.text },
   statusLabel: { fontSize: 11, fontFamily: fonts.medium, color: colors.textTertiary },
@@ -444,9 +448,8 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: colors.border,
-    boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 5, color: 'rgba(0, 0, 0, 0.03)' }],
-    elevation: 1,
+    borderColor: colors.cardBorder,
+    ...SOFT_CARD_SHADOW,
   },
   groupLabelRow: {
     flexDirection: 'row',

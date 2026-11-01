@@ -144,6 +144,8 @@ export async function computeAndSaveAlerts(userId: string): Promise<void> {
       .select('id, client_id, label, status, next_occurrence_date, end_mode, end_date, client:clients(full_name, archived_at)')
       .eq('user_id', userId)
       .eq('status', 'active')
+      // AUTO-RENEWAL-1 — un renouvellement géré par l'entreprise ne demande aucune action.
+      .eq('renewal_mode', 'manual')
       .lte('next_occurrence_date', fiveDaysLater)
       .limit(10)
 

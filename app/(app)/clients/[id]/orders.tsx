@@ -16,6 +16,7 @@ import { linkOrderToOccurrenceForConfirmation } from '@/features/clients/recurri
 import type { RecurringProgram } from '@/shared/lib/types'
 import { OpenActionLink } from '@/shared/components/ui/OpenActionLink'
 import { getSuggestedRules, renderRuleTitle, renderRuleDescription } from '@/features/automations/automationService'
+import { hasActiveCareJourney, CARE_JOURNEY_SUPERSEDED_RULES } from '@/features/care/careJourneyService'
 import type { AutomationPlan } from '@/features/automations/automationService'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { Input } from '@/shared/components/ui/Input'
@@ -25,6 +26,7 @@ import { Button } from '@/shared/components/ui/Button'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
+import { SOFT_CARD_SHADOW } from '@/shared/theme/elevation'
 import { formatDate } from '@/shared/lib/dateFormat'
 import type { OrderType, ModuleKey, OrderListItem, OrderItem } from '@/shared/lib/types'
 
@@ -177,8 +179,15 @@ export default function ClientOrdersScreen() {
       if (result) {
         const rules = getSuggestedRules(result.isFirstOrder).filter(r => isModuleActive(r.moduleKey as ModuleKey))
         if (rules.length > 0) {
+          // CARE-JOURNEY-1 — accompagnement actif : J+15/J+30 décochées par défaut (recochables).
+          const careActive = await hasActiveCareJourney(id).catch(() => false)
           const plan: Record<string, { create: boolean; delayDays: number }> = {}
-          rules.forEach(r => { plan[r.id] = { create: true, delayDays: getAutomationDelay(r.id, r.delayDays) } })
+          rules.forEach(r => {
+            plan[r.id] = {
+              create: !(careActive && CARE_JOURNEY_SUPERSEDED_RULES.includes(r.id)),
+              delayDays: getAutomationDelay(r.id, r.delayDays),
+            }
+          })
           setFollowupPlan(plan)
           setPendingOrder({ orderId: result.order.id, clientId: id, isFirstOrder: result.isFirstOrder, clientFirstName: result.clientFirstName })
         }
@@ -395,7 +404,8 @@ export default function ClientOrdersScreen() {
                           style={styles.deleteBtn}
                           onPress={() => {
                             if (confirmAction.type === 'cancel') cancel(order.id)
-                            else remove(order.id)
+                            // Après suppression : retour sur la fiche du contact.
+                            else remove(order.id).then(ok => { if (ok) router.dismissTo(`/(app)/clients/${id}` as any) })
                             setConfirmAction(null)
                           }}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -531,21 +541,22 @@ export default function ClientOrdersScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgDim },
+  container: { flex: 1, backgroundColor: colors.bg },
   content:   { padding: 16, gap: 12, maxWidth: 720, alignSelf: 'center', width: '100%' },
 
   kpiCard: {
     backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: 18,
     padding: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
+    ...SOFT_CARD_SHADOW,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   kpiLabel: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
-  kpiValue: { fontSize: 22, fontFamily: fonts.bold, color: colors.primary },
+  kpiValue: { fontSize: 24, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.4 },
 
   programErrorBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, backgroundColor: colors.warningLight, borderRadius: 12, padding: 12 },
   programErrorText: { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.warning },
@@ -564,11 +575,12 @@ function makeStyles(colors: ThemeColors) {
 
   form: {
     backgroundColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 16,
     gap: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
+    ...SOFT_CARD_SHADOW,
   },
   formTitle:   { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
   switchRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
@@ -588,10 +600,11 @@ function makeStyles(colors: ThemeColors) {
 
   card: {
     backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.cardBorder,
+    ...SOFT_CARD_SHADOW,
     gap: 6,
   },
   cardCancelled: { opacity: 0.55 },

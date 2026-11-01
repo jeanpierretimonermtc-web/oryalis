@@ -75,6 +75,8 @@ features/
   modules/                 gestion de l'activation des modules par plan
   notifications/           notifications push relances
   settings/                paramètres profil, activité, intégrations
+  brands/                  multi-marques : marques, liens contact↔marque, réseau et libellés par marque
+  care/                    accompagnements J+N (parcours, favoris, modèles)
 
   ⚠️ Cette liste features/ a été revérifiée le 2026-08-16 (24 sous-dossiers réels contre 9 documentés
   auparavant). Si tu ajoutes un module, mets aussi à jour cette liste dans le même commit.
@@ -105,7 +107,7 @@ assets/
   splash.png
   splash-icon.png
 
-supabase/migrations/       SQL de référence datée (29 fichiers, non exécuté via CLI) — convention à préférer
+supabase/migrations/       SQL de référence datée (non exécuté via CLI) — convention à préférer
 supabase/functions/        Edge Functions Deno : stripe-webhook, revenuecat-webhook, create-checkout-session,
                             create-billing-portal, record-security-login, _shared/ (stripe.ts, http.ts)
 scripts/legacy-migrations/ 52 scripts Node.js + pg historiques (migrate4 → migrate56 + migrate_agenda*),
@@ -258,9 +260,23 @@ admin_audit_log · user_roles                       (console owner / rôles)
 security_notifications · security_login_events · support_access_requests  (sécurité / support)
 ```
 
-⚠️ `features/network/uplineService.ts` interroge une table `upline_nodes` qui **n'existe pas** dans la DB
-live (confirmé le 2026-08-16) — le module réseau/MLM est cassé en prod tant que cette table n'est pas créée
-ou que le service n'est pas corrigé.
+Ajouts du 2026-10-28 → 2026-11-01 (migrations exécutées en prod, fichiers dans `supabase/migrations/`) :
+
+```
+care_journeys · care_templates                     (accompagnements J+N, favoris)
+brands · client_brands                             (multi-marques ; client_brands porte aussi
+                                                    member_number, sponsor_client_id, network_role)
+upline_nodes                                       (ligne ascendante, par marque via brand_id)
+```
+
+Colonnes ajoutées notables : `clients.expectation_*`, `clients.contact_preference`,
+`clients.next_exchange_questions`, `clients.timezone` (IANA) ; `recurring_programs.renewal_mode`,
+`brand_id`, `loyalty_percent`, `notes` ; `brands.program_name`, `brands.role_labels` ;
+`appointments.meeting_mode` ; `user_business_profiles.office_address`, `default_meeting_url`.
+Réseau par marque : les rôles réseau de `clients.contact_role` sont synchronisés en base depuis
+`client_brands.network_role` (trigger `client_brands_sync_roles_trigger`) dès qu'un contact a une marque.
+
+`upline_nodes` existe désormais en prod (migration `20261031_upline_nodes.sql`, exécutée le 2026-10-31).
 
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
