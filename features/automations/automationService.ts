@@ -1,6 +1,7 @@
 import { supabase } from '@/shared/lib/supabase'
 import type { NextActionType } from '@/shared/lib/types'
 import { hasActiveCareJourney, CARE_JOURNEY_SUPERSEDED_RULES } from '@/features/care/careJourneyService'
+import { fetchActiveProgramForClient } from '@/features/clients/recurringProgramService'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,14 @@ export const AUTOMATION_RULES: AutomationRule[] = [
     title:       'Retours produits {prénom}',
     actionType:  'whatsapp',
     description: 'Recueillir les retours après utilisation',
+  },
+  // RUNOUT-1 — « presque fini » : quelques jours avant la fin estimée du produit (délai
+  // réglable dans Automatisations) ; ignorée si le client a déjà un abonnement actif.
+  {
+    id: 'ord_runout', trigger: 'order', moduleKey: 'auto_order', delayDays: 25,
+    title:       'Bientôt à court {prénom} — on prévoit la suite ?',
+    actionType:  'whatsapp',
+    description: 'Le produit arrive bientôt à sa fin : proposer de recommander avant la rupture',
   },
   {
     id: 'ord_j30', trigger: 'order', moduleKey: 'auto_order', delayDays: 30,
@@ -232,6 +241,11 @@ export async function applyOrderAutomation(
     // même semaine. Un plan explicite (choix de l'utilisateur dans la modale) fait foi.
     if (!plan && await hasActiveCareJourney(clientId)) {
       rules = rules.filter(r => !CARE_JOURNEY_SUPERSEDED_RULES.includes(r.id))
+    }
+    // RUNOUT-1 — abonnement actif : le renouvellement est déjà prévu, pas de « presque fini »
+    // automatique (un plan explicite de l'utilisateur fait foi).
+    if (!plan && rules.some(r => r.id === 'ord_runout') && await fetchActiveProgramForClient(clientId)) {
+      rules = rules.filter(r => r.id !== 'ord_runout')
     }
     for (const rule of rules) {
       const planItem = plan?.find(p => p.ruleId === rule.id)

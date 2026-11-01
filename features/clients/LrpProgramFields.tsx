@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { View, Text, TouchableOpacity, TextInput, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
-import type { LrpFrequencyUnit, RecurringProgram, RecurringProgramEndMode } from '@/shared/lib/types'
+import type { LrpFrequencyUnit, RecurringProgram, RecurringProgramEndMode, RecurringRenewalMode } from '@/shared/lib/types'
 import { LRP_FREQUENCY_PRESETS, getLrpFrequencyLabel, initialLrpProgramValue } from './lrpProgramService'
 import type { LrpProgramValue } from './lrpProgramService'
 import { calculateNextLrpDate } from './clientService'
@@ -154,6 +154,29 @@ export function LrpProgramFields({ candidatePrograms, orderDate, value, onChange
           />
           <Text style={styles.labelHint}>{t('lrp.occurrence_mode_complementary_hint')}</Text>
         </>
+      ) : null}
+
+      {/* RENEWAL-AT-ORDER-1 — nouveau programme : qui renouvelle, choisi dès la commande. */}
+      {!selectedProgram ? (
+        <View style={styles.fieldBlock}>
+          <Text style={styles.fieldLabel}>{t('recurring_program.renewal_title')}</Text>
+          <View style={styles.chipRow}>
+            {(['company_auto', 'manual'] as RecurringRenewalMode[]).map(mode => {
+              const active = (value.renewalMode ?? 'manual') === mode
+              return (
+                <TouchableOpacity
+                  key={mode}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => onChange({ ...value, renewalMode: mode })}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{t(`recurring_program.renewal_${mode}`)}</Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+          <Text style={styles.labelHint}>{t(`recurring_program.renewal_${value.renewalMode ?? 'manual'}_hint`)}</Text>
+        </View>
       ) : null}
 
       {selectedProgram && !value.consumesNewOccurrence ? null : (

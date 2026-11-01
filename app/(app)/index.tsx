@@ -30,6 +30,8 @@ import { formatMlmValue } from '@/features/catalogs/mlmTrackingService'
 import { useBrands } from '@/features/brands/useBrands'
 import { BrandAvatar } from '@/features/brands/BrandPill'
 import { RemoteTimeBadge } from '@/features/clients/RemoteTimeBadge'
+import { WorldClock } from '@/features/dashboard/WorldClock'
+import { AtRiskSection } from '@/features/clients/AtRiskSection'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
 import { useUpcomingAppointments } from '@/features/appointments/useAppointments'
 import { useOverdueFollowupCount } from '@/features/followups/useFollowups'
@@ -487,6 +489,7 @@ export default function DashboardScreen() {
   // "Priorités du jour" : les 6 premières en cartes (dédupliquées), le reste en lignes compactes
   // dans la même liste — jamais le même élément deux fois.
   const topPriorities = useMemo(() => buildTopPriorities(dailyActions, 6), [dailyActions])
+  const todayClientIds = useMemo(() => dailyActions.map(a => a.clientId).filter((v): v is string => !!v), [dailyActions])
   const remainingActions = useMemo(() => {
     const shown = new Set(topPriorities.map(i => i.id))
     return dailyActions.filter(item => !shown.has(item.id))
@@ -597,6 +600,9 @@ export default function DashboardScreen() {
             />
           </View>
         </View>
+
+        {/* WORLD-CLOCK-1 — mon heure + celle de mes contacts à l'étranger (contacts du jour en premier). */}
+        <WorldClock priorityClientIds={todayClientIds} />
 
         {/* ── DASH-URGENCY-1 — compteurs d'urgence (contacts), cliquables vers la liste
             Contacts filtrée sur exactement la même fenêtre. Les compteurs de volume restent
@@ -716,6 +722,9 @@ export default function DashboardScreen() {
             />
           </View>
         )}
+
+        {/* AT-RISK-1 — clients qui décrochent (pas de recommande, abonnement arrêté, silence). */}
+        <AtRiskSection />
 
         {/* ── ORDER-BUSINESS-3.6 §27/§28/§29 — Suivi MLM (mois en cours, jusqu'à 3 métriques
             à net non nul) ─────────────────────────────── */}

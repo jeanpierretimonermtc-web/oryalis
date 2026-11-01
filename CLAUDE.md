@@ -76,7 +76,8 @@ features/
   notifications/           notifications push relances
   settings/                paramètres profil, activité, intégrations
   brands/                  multi-marques : marques, liens contact↔marque, réseau et libellés par marque
-  care/                    accompagnements J+N (parcours, favoris, modèles)
+  care/                    accompagnements J+N (parcours, favoris, modèles, accueil partenaire)
+  leads/                   page publique prospect (app/p/[slug].tsx) : une générale + une par marque
 
   ⚠️ Cette liste features/ a été revérifiée le 2026-08-16 (24 sous-dossiers réels contre 9 documentés
   auparavant). Si tu ajoutes un module, mets aussi à jour cette liste dans le même commit.
@@ -267,6 +268,8 @@ care_journeys · care_templates                     (accompagnements J+N, favori
 brands · client_brands                             (multi-marques ; client_brands porte aussi
                                                     member_number, sponsor_client_id, network_role)
 upline_nodes                                       (ligne ascendante, par marque via brand_id)
+lead_forms · lead_submissions                      (page prospect ; accès visiteur uniquement via
+                                                    get_public_lead_form / submit_public_lead)
 ```
 
 Colonnes ajoutées notables : `clients.expectation_*`, `clients.contact_preference`,

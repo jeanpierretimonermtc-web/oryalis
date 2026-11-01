@@ -4022,8 +4022,7 @@ export default function AppointmentDetailScreen() {
       // RÉCAP-4 §6 — locale/date déjà résolues ici (formatDate + locale du composant), jamais
       // recalculées côté MessageModal qui ignore tout du RDV.
       emailSubject={t('appointments.recap_email_subject', { date: formatDate(appointment.start_at, locale) })}
-      // RÉCAP-4.1 — seul ce point d'entrée active le canal E-mail (opt-in explicite) ; les 3
-      // autres usages de MessageModal ne passent pas cette prop et n'affichent jamais E-mail.
+      // RÉCAP-4.1 / EMAIL-EVERYWHERE-1 — canal E-mail activé (comme sur les autres fenêtres).
       enableEmail
       // RÉCAP-5C — idem : seul ce point d'entrée journalise un partage. Les 3 autres usages de
       // MessageModal ne passent pas ce callback, donc n'écrivent jamais dans

@@ -93,7 +93,18 @@ export default function OrdersScreen() {
       <AdvisorGate feature={t('subscription.features.orders')}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        <ScreenHeader flush eyebrow={t('orders.header_eyebrow')} title={t('orders.title')} subtitle={t('orders.header_subtitle')} />
+        <ScreenHeader
+          flush
+          eyebrow={t('orders.header_eyebrow')}
+          title={t('orders.title')}
+          subtitle={t('orders.header_subtitle')}
+          right={
+            // ORDER-IMPORT-1 — importer un historique depuis l'export CSV d'une marque.
+            <TouchableOpacity style={styles.importBtn} onPress={() => router.push('/(app)/orders/import' as any)} activeOpacity={0.8}>
+              <Text style={styles.importBtnText}>⬆️ {t('order_import.open')}</Text>
+            </TouchableOpacity>
+          }
+        />
 
         {/* ── Filtre mois ────────────────────────────────────────── */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthRow}>
@@ -270,6 +281,10 @@ function makeStyles(colors: ThemeColors) {
   content:   { padding: 16, gap: 12, maxWidth: 800, alignSelf: 'center', width: '100%' },
 
   monthRow: { gap: 8, paddingBottom: 4 },
+
+  importBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+
+  importBtnText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
   monthChip: {
     paddingHorizontal: 14,
     paddingVertical: 8,

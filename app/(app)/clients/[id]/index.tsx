@@ -2816,6 +2816,8 @@ export default function ClientDetailScreen() {
         client={client ?? null}
         advisorName={session?.user?.user_metadata?.full_name ?? session?.user?.email ?? ''}
         lastProduct={recommendations[0]?.product_name}
+        // EMAIL-EVERYWHERE-1 — le canal E-mail est proposé partout où le contact a une adresse.
+        enableEmail
       />
 
       <MessageModal
@@ -2825,9 +2827,9 @@ export default function ClientDetailScreen() {
         advisorName={session?.user?.user_metadata?.full_name ?? session?.user?.email ?? ''}
         initialTemplate={shareProfileTemplate}
         // PROFILE-SHARE-1 §14/§15 — seul ce point d'entrée devient éditable avec un titre dédié ;
-        // les autres usages de MessageModal (message générique, réseau) sont inchangés. E-mail
-        // non activé ici (§21) : enableEmail n'était pas déjà utilisé sur ce flux, hors périmètre.
+        // les autres usages de MessageModal (message générique, réseau) sont inchangés.
         editable
+        enableEmail
         title={t('messages.title_prepare_summary')}
         beforeMessageContent={shareProfileSelector}
       />

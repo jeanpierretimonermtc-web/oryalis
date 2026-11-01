@@ -24,6 +24,8 @@ export interface CareTemplateStep {
 export interface CareTemplate {
   key: string
   steps: CareTemplateStep[]
+  // PARTNER-ONBOARDING-1 — à qui s'adresse le parcours (défaut : clients).
+  audience?: 'customer' | 'partner'
 }
 
 export const CARE_TEMPLATES: CareTemplate[] = [
@@ -42,6 +44,19 @@ export const CARE_TEMPLATES: CareTemplate[] = [
       { key: 'd7',  offsetDays: 7,  channel: 'whatsapp' },
       { key: 'd15', offsetDays: 15, channel: 'whatsapp' },
       { key: 'd30', offsetDays: 30, channel: 'whatsapp' },
+    ],
+  },
+  {
+    // PARTNER-ONBOARDING-1 — accueil d'une nouvelle recrue : bienvenue, outils, premiers
+    // contacts, premier client, bilan du premier mois.
+    key: 'partner_onboarding',
+    audience: 'partner',
+    steps: [
+      { key: 'd1',  offsetDays: 1,  channel: 'whatsapp' },
+      { key: 'd3',  offsetDays: 3,  channel: 'call' },
+      { key: 'd7',  offsetDays: 7,  channel: 'whatsapp' },
+      { key: 'd14', offsetDays: 14, channel: 'call' },
+      { key: 'd30', offsetDays: 30, channel: 'call' },
     ],
   },
 ]

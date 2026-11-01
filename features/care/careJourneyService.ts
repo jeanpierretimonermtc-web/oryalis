@@ -43,6 +43,21 @@ export async function createCareFavorite(userId: string, name: string, steps: Ca
   return data as CareFavorite
 }
 
+// CARE-FAV-EDIT-1 — renommer un favori et/ou remplacer ses étapes par celles affichées.
+export async function updateCareFavorite(id: string, name: string, steps: CareFavoriteStep[]): Promise<CareFavorite> {
+  const { data, error } = await supabase
+    .from('care_templates')
+    .update({ name: name.trim(), steps, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('id, name, steps, created_at')
+    .single()
+  if (error) {
+    if (error.code === '23505') throw new Error('care_favorite_exists')
+    throw error
+  }
+  return data as CareFavorite
+}
+
 export async function deleteCareFavorite(id: string): Promise<void> {
   const { error } = await supabase.from('care_templates').delete().eq('id', id)
   if (error) throw error

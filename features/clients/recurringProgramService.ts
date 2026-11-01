@@ -92,6 +92,8 @@ export async function createProgram(userId: string, input: RecurringProgramInput
       end_date: input.end_date ?? null,
       next_occurrence_date: input.next_occurrence_date ?? null,
       closure_action_key: input.closure_action_key ?? null,
+      // RENEWAL-AT-ORDER-1 — choisi dans la fenêtre de commande ; sinon défaut base ('manual').
+      ...(input.renewal_mode ? { renewal_mode: input.renewal_mode } : {}),
     })
     .select()
     .single()

@@ -9,6 +9,8 @@ import { supabase } from '@/shared/lib/supabase'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { settingsScreenOptions } from '@/features/settings/SettingsBackButton'
 import { useProfilePlan } from '@/features/settings/useProfilePlan'
+import { useClockStyle, setClockStyle } from '@/features/dashboard/clockPreference'
+import type { ClockStyle } from '@/features/dashboard/clockPreference'
 
 const PLAN_CONFIG: Record<string, { label: string; descKey: string }> = {
   free:    { label: 'Gratuit', descKey: 'settings.plan_free_desc'    },
@@ -24,6 +26,7 @@ export default function DisplaySettingsScreen() {
   const { colors, mode, toggleTheme } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { plan } = useProfilePlan()
+  const clockStyle = useClockStyle()
 
   const planCfg = PLAN_CONFIG[plan] ?? PLAN_CONFIG.free
   const isPaid = ['pro', 'cabinet', 'advisor', 'leader', 'enterprise'].includes(plan)
@@ -43,6 +46,29 @@ export default function DisplaySettingsScreen() {
             </View>
             <Switch value={mode === 'dark'} onValueChange={toggleTheme}
               trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.card} />
+          </View>
+          {/* WORLD-CLOCK-1 — horloge de l'accueil : numérique, à aiguilles ou masquée. */}
+          <View style={styles.clockRow}>
+            <View style={styles.switchInfo}>
+              <Text style={styles.switchLabel}>{t('settings.clock_label')}</Text>
+              <Text style={styles.switchDesc}>{t('settings.clock_desc')}</Text>
+            </View>
+            <View style={styles.clockChips}>
+              {(['digital', 'analog', 'hidden'] as ClockStyle[]).map(style => {
+                const active = clockStyle === style
+                return (
+                  <TouchableOpacity
+                    key={style}
+                    style={[styles.clockChip, active && styles.clockChipActive]}
+                    onPress={() => setClockStyle(style)}
+                    activeOpacity={0.75}
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.clockChipText, active && styles.clockChipTextActive]}>{t(`settings.clock_${style}`)}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
           </View>
         </View>
 
@@ -97,6 +123,12 @@ function makeStyles(colors: ThemeColors) {
   sectionLabel: { fontSize: 11, fontFamily: fonts.bold, color: colors.textTertiary, letterSpacing: 0.6, paddingHorizontal: 2, paddingTop: 6 },
   card: { backgroundColor: colors.card, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  clockRow: { gap: 10, paddingTop: 14, marginTop: 14, borderTopWidth: 1, borderTopColor: colors.border },
+  clockChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  clockChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  clockChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+  clockChipText: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+  clockChipTextActive: { color: colors.primary, fontFamily: fonts.semibold },
   switchInfo: { flex: 1, gap: 2 },
   switchLabel: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
   switchDesc: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 17 },

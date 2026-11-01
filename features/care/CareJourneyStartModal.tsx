@@ -12,7 +12,7 @@ import {
   todayLocalStr, addDaysStr, daysBetweenStr, nextBirthdayStr, renderCareMessage, unrenderCareMessage,
 } from './careTemplates'
 import type { CareChannel, CareExtraKey } from './careTemplates'
-import { startCareJourney, fetchCareFavorites, createCareFavorite, deleteCareFavorite } from './careJourneyService'
+import { startCareJourney, fetchCareFavorites, createCareFavorite, updateCareFavorite, deleteCareFavorite } from './careJourneyService'
 import type { CareFavorite } from './careJourneyService'
 
 interface DraftStep {
@@ -32,7 +32,7 @@ type Source = { kind: 'builtin'; key: string } | { kind: 'favorite'; favorite: C
 interface Props {
   visible: boolean
   onClose: () => void
-  client: Pick<Client, 'id' | 'first_name' | 'full_name' | 'birth_date'>
+  client: Pick<Client, 'id' | 'first_name' | 'full_name' | 'birth_date'> & Partial<Pick<Client, 'contact_role'>>
   userId: string
   advisorName: string
   onStarted: () => void
@@ -51,7 +51,13 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
   const uidRef = useRef(0)
   const nextUid = () => `s${++uidRef.current}`
 
-  const [source, setSource] = useState<Source>({ kind: 'builtin', key: CARE_TEMPLATES[0].key })
+  // PARTNER-ONBOARDING-1 — partenaire : le parcours d'accueil partenaire est proposé en premier.
+  const isPartner = (client.contact_role ?? []).some(r => r === 'distributor' || r === 'leader' || r === 'team_member')
+  const orderedTemplates = useMemo(
+    () => [...CARE_TEMPLATES].sort((a, b) => Number((b.audience === 'partner') === isPartner) - Number((a.audience === 'partner') === isPartner)),
+    [isPartner],
+  )
+  const [source, setSource] = useState<Source>({ kind: 'builtin', key: orderedTemplates[0].key })
   const [startDate, setStartDate] = useState(today)
   const [steps, setSteps] = useState<DraftStep[]>([])
   const [favorites, setFavorites] = useState<CareFavorite[]>([])
@@ -59,6 +65,8 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
   const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [favoriteOpen, setFavoriteOpen] = useState(false)
+  // CARE-FAV-EDIT-1 — 'create' : nouveau favori ; 'update' : met à jour le favori sélectionné.
+  const [favoriteMode, setFavoriteMode] = useState<'create' | 'update'>('create')
   const [favoriteName, setFavoriteName] = useState('')
   const [favoriteSaving, setFavoriteSaving] = useState(false)
   const [favoriteMsg, setFavoriteMsg] = useState('')
@@ -116,7 +124,7 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
   // Ouverture : modèle par défaut + chargement des favoris.
   useEffect(() => {
     if (!visible) return
-    const initial: Source = { kind: 'builtin', key: CARE_TEMPLATES[0].key }
+    const initial: Source = { kind: 'builtin', key: orderedTemplates[0].key }
     const start = todayLocalStr()
     setSource(initial)
     setStartDate(start)
@@ -201,12 +209,15 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
     setFavoriteSaving(true)
     setFavoriteMsg('')
     try {
-      const created = await createCareFavorite(userId, name, favSteps)
-      setFavorites(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
-      setSource({ kind: 'favorite', favorite: created })
+      const updating = favoriteMode === 'update' && source.kind === 'favorite'
+      const saved = updating
+        ? await updateCareFavorite(source.favorite.id, name, favSteps)
+        : await createCareFavorite(userId, name, favSteps)
+      setFavorites(prev => [...prev.filter(f => f.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name)))
+      setSource({ kind: 'favorite', favorite: saved })
       setFavoriteOpen(false)
       setFavoriteName('')
-      setFavoriteMsg(t('care.favorite_saved', { name: created.name }))
+      setFavoriteMsg(t(updating ? 'care.favorite_updated' : 'care.favorite_saved', { name: saved.name }))
     } catch (e) {
       console.error('[care.favorite.save]', e)
       setFavoriteMsg(e instanceof Error && e.message === 'care_favorite_exists' ? t('care.favorite_exists') : t('care.error'))
@@ -215,11 +226,19 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
     }
   }
 
+  // Les étapes du favori sont déjà dans l'éditeur (modifiables) : on rouvre juste le nom.
+  function startEditFavorite(favorite: CareFavorite) {
+    setFavoriteMode('update')
+    setFavoriteName(favorite.name)
+    setFavoriteOpen(true)
+    setFavoriteMsg('')
+  }
+
   async function handleDeleteFavorite(favorite: CareFavorite) {
     try {
       await deleteCareFavorite(favorite.id)
       setFavorites(prev => prev.filter(f => f.id !== favorite.id))
-      if (source.kind === 'favorite' && source.favorite.id === favorite.id) chooseSource({ kind: 'builtin', key: CARE_TEMPLATES[0].key })
+      if (source.kind === 'favorite' && source.favorite.id === favorite.id) chooseSource({ kind: 'builtin', key: orderedTemplates[0].key })
       setPendingDelete(null)
     } catch (e) {
       console.error('[care.favorite.delete]', e)
@@ -380,6 +399,14 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
                           <Text style={[styles.templateName, selected && styles.templateNameOn]} numberOfLines={1}>⭐ {fav.name}</Text>
                           <Text style={styles.templateDesc}>{t('care.favorite_steps_count', { count: fav.steps.length })}</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => { chooseSource(src); startEditFavorite(fav) }}
+                          style={styles.removeBtn}
+                          accessibilityLabel={`${t('care.edit_favorite')} ${fav.name}`}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.removeBtnText}>✏️</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity onPress={() => setPendingDelete(fav)} style={styles.removeBtn} accessibilityLabel={`${t('care.delete_favorite')} ${fav.name}`} activeOpacity={0.7}>
                           <Text style={styles.removeBtnText}>✕</Text>
                         </TouchableOpacity>
@@ -405,12 +432,12 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
 
             <Text style={styles.fieldLabel}>{favorites.length > 0 ? t('care.builtin_label') : t('care.template_label')}</Text>
             <View style={styles.templateRow}>
-              {CARE_TEMPLATES.map(tpl => {
+              {orderedTemplates.map(tpl => {
                 const src: Source = { kind: 'builtin', key: tpl.key }
                 const selected = isSelected(src)
                 return (
                   <TouchableOpacity key={tpl.key} style={[styles.templateChip, selected && styles.templateChipOn]} onPress={() => chooseSource(src)} activeOpacity={0.7}>
-                    <Text style={[styles.templateName, selected && styles.templateNameOn]}>🌱 {t(`care.templates.${tpl.key}.name`)}</Text>
+                    <Text style={[styles.templateName, selected && styles.templateNameOn]}>{tpl.audience === 'partner' ? '🤝' : '🌱'} {t(`care.templates.${tpl.key}.name`)}</Text>
                     <Text style={styles.templateDesc}>{t(`care.templates.${tpl.key}.description`)}</Text>
                   </TouchableOpacity>
                 )
@@ -436,7 +463,9 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
             <View style={styles.favoriteBox}>
               {favoriteOpen ? (
                 <>
-                  <Text style={styles.fieldLabel}>{t('care.favorite_name_label')}</Text>
+                  <Text style={styles.fieldLabel}>
+                    {favoriteMode === 'update' ? t('care.edit_favorite_title') : t('care.favorite_name_label')}
+                  </Text>
                   <TextInput
                     style={styles.nameInput}
                     value={favoriteName}
@@ -446,20 +475,29 @@ export function CareJourneyStartModal({ visible, onClose, client, userId, adviso
                     maxLength={80}
                     accessibilityLabel={t('care.favorite_name_label')}
                   />
-                  <Text style={styles.pastText}>{t('care.favorite_hint')}</Text>
+                  <Text style={styles.pastText}>{favoriteMode === 'update' ? t('care.edit_favorite_hint') : t('care.favorite_hint')}</Text>
                   <View style={styles.inlineBtns}>
                     <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => { setFavoriteOpen(false); setFavoriteMsg('') }} disabled={favoriteSaving} activeOpacity={0.8}>
                       <Text style={styles.secondaryBtnText}>{t('care.cancel')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.primaryBtnSm, favoriteSaving && { opacity: 0.6 }]} onPress={handleSaveFavorite} disabled={favoriteSaving} activeOpacity={0.85}>
-                      {favoriteSaving ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Text style={styles.primaryBtnText}>⭐ {t('care.save_favorite')}</Text>}
+                      {favoriteSaving
+                        ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                        : <Text style={styles.primaryBtnText}>{favoriteMode === 'update' ? `💾 ${t('care.update_favorite')}` : `⭐ ${t('care.save_favorite')}`}</Text>}
                     </TouchableOpacity>
                   </View>
                 </>
               ) : (
-                <TouchableOpacity onPress={() => { setFavoriteOpen(true); setFavoriteMsg('') }} activeOpacity={0.7}>
-                  <Text style={styles.linkText}>⭐ {t('care.save_as_favorite')}</Text>
-                </TouchableOpacity>
+                <View style={styles.favoriteLinks}>
+                  {source.kind === 'favorite' ? (
+                    <TouchableOpacity onPress={() => startEditFavorite(source.favorite)} activeOpacity={0.7}>
+                      <Text style={styles.linkText}>✏️ {t('care.edit_this_favorite', { name: source.favorite.name })}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <TouchableOpacity onPress={() => { setFavoriteMode('create'); setFavoriteName(''); setFavoriteOpen(true); setFavoriteMsg('') }} activeOpacity={0.7}>
+                    <Text style={styles.linkText}>⭐ {t(source.kind === 'favorite' ? 'care.save_as_new_favorite' : 'care.save_as_favorite')}</Text>
+                  </TouchableOpacity>
+                </View>
               )}
               {favoriteMsg ? <Text style={styles.favoriteMsg}>{favoriteMsg}</Text> : null}
             </View>
@@ -541,6 +579,7 @@ function makeStyles(colors: ThemeColors) {
     addStepBtn: { alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border },
     addStepText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.primary },
     favoriteBox: { gap: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 14, marginTop: 4 },
+    favoriteLinks: { gap: 8 },
     nameInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontFamily: fonts.body, fontSize: 14, color: colors.text },
     favoriteMsg: { fontFamily: fonts.medium, fontSize: 12.5, color: colors.textSecondary },
     linkText: { fontFamily: fonts.semibold, fontSize: 13.5, color: colors.primary },

@@ -306,9 +306,11 @@ export default function AppLayout() {
             <Tabs.Screen name="settings-google"      options={{ href: null }} />
             <Tabs.Screen name="settings-catalogs"    options={{ href: null }} />
             <Tabs.Screen name="settings-display"     options={{ href: null }} />
+            <Tabs.Screen name="settings-lead-page"   options={{ href: null }} />
             <Tabs.Screen name="settings-owner"       options={{ href: null }} />
             <Tabs.Screen name="settings-support-access" options={{ href: null }} />
             <Tabs.Screen name="orders"       options={{ title: t('orders.title')       }} />
+            <Tabs.Screen name="orders/import" options={{ title: t('order_import.title'), href: null }} />
             <Tabs.Screen name="settings"     options={{ title: t('settings.title')     }} />
           </Tabs>
         </View>

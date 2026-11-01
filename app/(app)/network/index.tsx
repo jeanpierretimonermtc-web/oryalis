@@ -445,6 +445,7 @@ export default function NetworkScreen() {
         onClose={() => setMessageTarget(null)}
         client={messageTarget as unknown as Client}
         advisorName={advisorName}
+        enableEmail
       />
     </>
   )

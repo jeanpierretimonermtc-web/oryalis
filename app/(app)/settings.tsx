@@ -23,6 +23,8 @@ import { useGoogleCalendar } from '@/features/appointments/useGoogleCalendar'
 import { LineIcon } from '@/shared/components/ui/LineIcon'
 import type { LineIconName } from '@/shared/components/ui/LineIcon'
 import { getMyAppRole, type AppRole } from '@/features/admin/adminService'
+import { useClockStyle, setClockStyle } from '@/features/dashboard/clockPreference'
+import type { ClockStyle } from '@/features/dashboard/clockPreference'
 
 const SETTINGS_WIDE_BREAKPOINT = 900
 
@@ -76,6 +78,7 @@ export default function SettingsMenuScreen() {
   const { t } = useTranslation()
   const { session } = useAuth()
   const { colors, mode, toggleTheme } = useTheme()
+  const clockStyle = useClockStyle()
   const { width } = useWindowDimensions()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { profile: businessProfile, isModuleActive } = useAppConfig()
@@ -301,6 +304,9 @@ export default function SettingsMenuScreen() {
               <View style={styles.sep} />
               <NavRow icon="catalogs" title={t('settings.section_mlm_values')} desc={t('settings.mlm_values_desc')} onPress={nav('/(app)/settings-mlm-values')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
+              {/* LEAD-PAGE-1 — page publique de prospect. */}
+              <NavRow icon="contact" title={t('lead_page.title')} desc={t('lead_page.nav_desc')} onPress={nav('/(app)/settings-lead-page')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
+              <View style={styles.sep} />
               <NavRow icon="import" title={t('settings.nav_import')} desc={t('settings.import_short_desc')} onPress={nav('/(app)/import')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
               <NavRow icon="import" title={t('settings.export_contacts')} desc={t('settings.export_contacts_desc')} onPress={nav('/(app)/export')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
@@ -329,6 +335,31 @@ export default function SettingsMenuScreen() {
                 </View>
                 <Switch value={mode === 'dark'} onValueChange={toggleTheme}
                   trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.card} />
+              </View>
+              <View style={styles.sep} />
+              {/* WORLD-CLOCK-1 — horloge de l'accueil : numérique, à aiguilles ou masquée. */}
+              <View style={[styles.navRow, styles.clockRow]}>
+                <View style={styles.navIconWrap}><Text style={{ fontSize: 16 }}>🕒</Text></View>
+                <View style={styles.navBody}>
+                  <Text style={styles.navTitle}>{t('settings.clock_label')}</Text>
+                  <Text style={styles.navDesc}>{t('settings.clock_desc')}</Text>
+                  <View style={styles.clockChips}>
+                    {(['digital', 'analog', 'hidden'] as ClockStyle[]).map(style => {
+                      const active = clockStyle === style
+                      return (
+                        <TouchableOpacity
+                          key={style}
+                          style={[styles.clockChip, active && styles.clockChipActive]}
+                          onPress={() => setClockStyle(style)}
+                          activeOpacity={0.75}
+                          accessibilityState={{ selected: active }}
+                        >
+                          <Text style={[styles.clockChipText, active && styles.clockChipTextActive]}>{t(`settings.clock_${style}`)}</Text>
+                        </TouchableOpacity>
+                      )
+                    })}
+                  </View>
+                </View>
               </View>
               <View style={styles.sep} />
               <NavRow icon="subscription" title={t('settings.subscription')} desc={planLabel} onPress={nav('/(app)/settings-display')} styles={styles} colors={colors} />
@@ -469,6 +500,12 @@ function makeStyles(colors: ThemeColors) {
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 62 },
 
   navRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  clockRow: { alignItems: 'flex-start' },
+  clockChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  clockChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  clockChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+  clockChipText: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+  clockChipTextActive: { color: colors.primary, fontFamily: fonts.semibold },
   navIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.bgDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   navBody: { flex: 1, gap: 2, minWidth: 0 },
   navTitle: { fontSize: 15, fontFamily: fonts.semibold, color: colors.text },

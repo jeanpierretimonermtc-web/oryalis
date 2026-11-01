@@ -344,7 +344,8 @@
     "tz_guard_anyway": "{{action}} anyway",
     "tz_followup_title": "{{action}} {{name}} (9am their time)",
     "tz_followup_content": "Postponed to respect the contact’s local time ({{city}}).",
-    "tz_message_warning": "It is {{time}} for {{name}} ({{city}}): they may only see your message when they wake up."
+    "tz_message_warning": "It is {{time}} for {{name}} ({{city}}): they may only see your message when they wake up.",
+    "quick_filter_at_risk": "⚠️ At risk"
   },
   "appointments": {
     "title": "Appointments",
@@ -1332,7 +1333,9 @@
     "activity_care_hint": "in progress",
     "pipeline_total_one": "{{count}} contact",
     "pipeline_total_other": "{{count}} contacts",
-    "mlm_no_brand": "Off-catalog products"
+    "mlm_no_brand": "Off-catalog products",
+    "clock_me": "Me · {{city}}",
+    "clock_hint": "Add a time zone to a contact abroad to see their time here."
   },
   "common": {
     "save": "Save",
@@ -1634,7 +1637,12 @@
     "preset_current": "Current selection: {{name}}",
     "preset_custom": "Custom labels",
     "labels_tab_general": "General",
-    "labels_brand_hint": "Wording used for {{brand}}: contact page, list, search and network."
+    "labels_brand_hint": "Wording used for {{brand}}: contact page, list, search and network.",
+    "clock_label": "Home clock",
+    "clock_desc": "Your time and your contacts’ time abroad.",
+    "clock_digital": "🔢 Digital",
+    "clock_analog": "🕰️ Analog",
+    "clock_hidden": "Hidden"
   },
   "subscription": {
     "title": "Oryalis subscription",
@@ -2098,6 +2106,32 @@
             "message": "Hi {prénom}, it's been a month since you started! Let's have a quick check-in to see what works best for you."
           }
         }
+      },
+      "partner_onboarding": {
+        "name": "Partner welcome, 30 days",
+        "description": "For a new recruit: welcome, tools, first contacts, first customer, review.",
+        "steps": {
+          "d1": {
+            "label": "D+1 · Welcome",
+            "message": "Welcome to the team {prénom}! I’m happy to support you. I’ll call you in two days to show you the tools — reach out anytime before that."
+          },
+          "d3": {
+            "label": "D+3 · Getting started with the tools",
+            "message": "Hi {prénom}, as planned: shall we go over your account, your online shop and the basics to get started?"
+          },
+          "d7": {
+            "label": "D+7 · Your contact list",
+            "message": "Hello {prénom}! Have you started your list of people to talk to about the products? We can go through it together and pick your first 5 contacts."
+          },
+          "d14": {
+            "label": "D+14 · First customer",
+            "message": "Hi {prénom}, how are your first conversations going? Let’s review your first customer or first presentation."
+          },
+          "d30": {
+            "label": "D+30 · Review and goals",
+            "message": "Well done {prénom}, one month already! Shall we book a moment to review and set your goals for next month?"
+          }
+        }
       }
     },
     "extras": {
@@ -2133,7 +2167,15 @@
     "favorite_saved": "Favourite \"{{name}}\" saved.",
     "favorite_exists": "A favourite already has this name.",
     "builtin_label": "Suggested templates",
-    "mark_done": "Mark this step as done"
+    "mark_done": "Mark this step as done",
+    "edit_favorite": "Edit favorite",
+    "edit_favorite_title": "Favorite name",
+    "edit_favorite_hint": "Edit the steps above (days, channels, messages), then update: the favorite takes exactly what is shown.",
+    "update_favorite": "Update",
+    "edit_this_favorite": "Edit “{{name}}”",
+    "save_as_new_favorite": "Save as a new favorite",
+    "favorite_updated": "Favorite “{{name}}” updated.",
+    "partner_templates_label": "For a partner"
   },
   "brands": {
     "my_brands": "My brands",
@@ -2205,5 +2247,119 @@
     "role_key_partner": "Partner",
     "role_key_leader": "Leader",
     "roles_by_brand_hint": "Network roles are set per brand in “Brands”."
+  },
+  "risk": {
+    "title": "Customers at risk",
+    "subtitle": "They are drifting away: a quick message now helps keep them.",
+    "no_reorder": "No order for {{days}} days",
+    "program_paused": "Subscription paused {{days}} days ago",
+    "program_cancelled": "Subscription cancelled {{days}} days ago",
+    "no_contact": "No contact for {{days}} days",
+    "show_more": "Show {{count}} more",
+    "show_less": "Show less",
+    "filter": "At risk"
+  },
+  "order_import": {
+    "open": "Import",
+    "title": "Import orders",
+    "intro": "Bring in your history from your brand back-office CSV export (doTERRA, Zinzino…). No automatic follow-up is created: these are past orders.",
+    "step_file": "The file",
+    "pick_file": "Choose a CSV file",
+    "paste": "Paste content",
+    "paste_placeholder": "Paste the file content here (with the header row)",
+    "use_pasted": "Use this text",
+    "pasted_text": "pasted text",
+    "file_loaded": "{{name}}: {{count}} rows",
+    "file_hint": "From Excel or Google Sheets: File → Save as / Download → CSV.",
+    "error_empty": "Empty or unreadable file: check it has a header row and data.",
+    "error_read": "Could not read this file.",
+    "error_generic": "Something went wrong. Please try again.",
+    "step_columns": "The columns",
+    "field_date": "Order date",
+    "field_name": "Customer name",
+    "field_email": "Email",
+    "field_phone": "Phone",
+    "field_amount": "Amount",
+    "field_product": "Products",
+    "field_order_number": "Order number",
+    "default_product_label": "Label when no product",
+    "default_product": "Imported order",
+    "contact_hint": "The customer is matched by email, then phone, then name. Duplicates (same order number, or same day and amount) are skipped.",
+    "analyze": "Analyze",
+    "step_preview": "Preview",
+    "status_matched": "Customer found",
+    "status_new_contact": "New contact",
+    "status_duplicate": "Already imported",
+    "status_invalid": "Incomplete",
+    "create_contacts": "Create the {{count}} missing contacts (as customers)",
+    "no_date": "no date",
+    "more_rows": "… and {{count}} more rows",
+    "import_btn": "Import {{count}} orders",
+    "importing": "Importing… {{progress}}%",
+    "no_followups_hint": "Orders are added to history and figures (revenue, tracking). No follow-up is created.",
+    "done_title": "Import complete",
+    "done_imported": "{{count}} orders imported",
+    "done_contacts": "{{count}} contacts created",
+    "done_skipped": "{{count}} rows skipped (duplicates, incomplete or contacts not created)",
+    "done_failed": "{{count}} rows failed",
+    "see_orders": "See orders",
+    "another": "Import another file"
+  },
+  "lead_page": {
+    "title": "My prospect page",
+    "nav_desc": "A link to share: each sign-up becomes a contact",
+    "explain": "Share this link in your bio, on social media or by message. Everyone who fills in the form lands in your contacts (prospect) with a “call back today” follow-up.",
+    "your_link": "Your link",
+    "copy": "Copy link",
+    "copied": "Link copied",
+    "open": "View page",
+    "inactive_hint": "Page disabled: visitors see “page not found”.",
+    "active": "Page active",
+    "slug_label": "Page address",
+    "slug_hint": "Lowercase letters, numbers and dashes (3 to 41 characters).",
+    "slug_invalid": "Invalid address: lowercase letters, numbers and dashes, at least 3 characters.",
+    "slug_taken": "This address is already taken, choose another one.",
+    "title_label": "Title",
+    "title_required": "The title is required.",
+    "intro_label": "Introduction text",
+    "default_title": "Let’s take a moment together",
+    "default_intro": "Leave me your details: I’ll get back to you quickly to answer your questions and advise you.",
+    "saved": "Page saved.",
+    "error": "Could not save. Please try again.",
+    "received_title": "Sign-ups received",
+    "received_empty": "No sign-ups yet.",
+    "pending_hint": "{{count}} pending sign-up(s): the contact could not be created (free plan quota?).",
+    "open_contact": "Open contact",
+    "create_contact": "Create contact",
+    "create_error": "Could not create the contact (quota reached?).",
+    "tab_general": "General",
+    "default_title_brand": "Discover {{brand}} with me",
+    "brand_note_brand": "🏷 People who sign up on this page get the {{brand}} brand on their contact page.",
+    "brand_note_general_multi": "🌐 General page: sign-ups arrive without a brand (you are in Multi-brand mode). Also create one page per brand with the tabs above.",
+    "brand_note_single": "🏷 Sign-ups get your {{brand}} brand on their contact page (chosen in Settings → My brand).",
+    "brand_note_none": "Sign-ups arrive without a brand (Settings → My brand: Generic).",
+    "not_created_yet": "This page does not exist yet: fill in the fields below, then create it to get your link.",
+    "create_page": "Create page"
+  },
+  "public_lead": {
+    "with": "with {{name}}",
+    "name": "First and last name",
+    "email": "Email",
+    "phone": "Phone",
+    "contact_hint": "At least an email or a phone number.",
+    "message": "Your message (optional)",
+    "message_placeholder": "What you’re interested in, your questions…",
+    "consent": "I agree to be contacted by {{name}} about my request.",
+    "send": "Send",
+    "privacy": "Your details are only shared with your advisor, never with third parties.",
+    "error_name": "Please enter your first and last name.",
+    "error_contact": "Please enter an email or a phone number.",
+    "error_email": "This email address is not valid.",
+    "error_rate": "Too many requests right now, please try again later.",
+    "error_generic": "Sending failed, please try again.",
+    "sent_title": "Thank you, it’s sent!",
+    "sent_text": "{{name}} will get back to you very soon.",
+    "not_found_title": "Page not found",
+    "not_found_text": "This link does not exist or is no longer active."
   }
 }

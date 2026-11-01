@@ -9,7 +9,7 @@
 // (gelés, conservés uniquement pour compatibilité/historique). Le nom de ce fichier reste
 // "lrpProgramService" pour éviter un renommage sans valeur ajoutée sur des call sites déjà
 // nombreux — mais son contenu ne connaît plus aucun champ `clients.lrp_*`.
-import type { LrpFrequencyUnit, RecurringProgram, RecurringProgramEndMode } from '@/shared/lib/types'
+import type { LrpFrequencyUnit, RecurringProgram, RecurringProgramEndMode, RecurringRenewalMode } from '@/shared/lib/types'
 import { calculateNextLrpDate } from './clientService'
 import type { RecurringProgramPatch } from './recurringProgramService'
 
@@ -99,6 +99,9 @@ export interface LrpProgramValue {
   occurrenceDateToConsume: string | null
   // Échéance choisie manuellement — pertinent seulement si consumesNewOccurrence=false.
   complementaryOccurrenceDate: string
+  // RENEWAL-AT-ORDER-1 — qui renouvelle (nouveau programme uniquement ; un programme existant
+  // garde son mode, modifiable sur sa page). Absent = 'manual' (défaut en base).
+  renewalMode?: RecurringRenewalMode
 }
 
 type ExistingProgramSnapshot = Pick<RecurringProgram,
@@ -231,6 +234,9 @@ export function buildProgramActivationPatch(
     occurrence_limit: confirmation.endMode === 'occurrence_limit' ? confirmation.occurrenceLimit : null,
     end_date: confirmation.endMode === 'end_date' ? confirmation.endDate : null,
   }
+  // Mode de renouvellement posé seulement à la création (existingStartDate absent) : ne
+  // jamais écraser le choix déjà fait sur un programme existant.
+  if (!existingStartDate && confirmation.renewalMode) patch.renewal_mode = confirmation.renewalMode
   // LRP-5.1 §3/§16 — CORRIGE LRP-5 : plus AUCUN calcul/écriture de next_occurrence_date ici,
   // même pour un programme tout juste créé. linkOrderToOccurrenceForConfirmation
   // (recurringOccurrenceService.ts) gère désormais 100% des cas (échéance existante consommée

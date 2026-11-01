@@ -25,6 +25,7 @@ import { ContactsExamplePreview } from '@/features/clients/ContactsExamplePrevie
 import { useClientBrandMap } from '@/features/brands/useBrands'
 import type { BrandRoleEntry } from '@/features/brands/useBrands'
 import { brandRoleLabel } from '@/features/brands/brandRoleLabels'
+import { useAtRiskClients } from '@/features/clients/useAtRiskClients'
 
 function normalizeSearch(s: string): string {
   return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -66,9 +67,9 @@ function inSegment(c: ClientListItem, s: Segment, team: TeamInfo): boolean {
 
 // Filtres rapides, choix unique : chacun pilote les états existants (actionFilter/horizon) ou
 // un filtre ponctuel (prospects chauds, VIP) — jamais un second moteur de filtrage.
-type QuickFilter = 'all' | 'overdue' | 'todo' | 'none' | 'hot' | 'vip' | 'inactive' | 'duplicates'
-const QUICK_FILTERS: QuickFilter[] = ['all', 'overdue', 'todo', 'none', 'hot', 'vip', 'inactive', 'duplicates']
-type ExtraFilter = 'hot' | 'vip' | 'inactive' | 'duplicates' | null
+type QuickFilter = 'all' | 'overdue' | 'todo' | 'none' | 'hot' | 'at_risk' | 'vip' | 'inactive' | 'duplicates'
+const QUICK_FILTERS: QuickFilter[] = ['all', 'overdue', 'todo', 'none', 'hot', 'at_risk', 'vip', 'inactive', 'duplicates']
+type ExtraFilter = 'hot' | 'at_risk' | 'vip' | 'inactive' | 'duplicates' | null
 
 // ACTION-3.2 — filtre "ce qui nécessite mon attention", dérivé uniquement de next_action_at
 // (déjà calculé côté DB, voir clients.next_action_* / migration 20260712_contact_activity_
@@ -759,6 +760,10 @@ export default function ClientsScreen() {
 
   const noActionContacts = useMemo(() => displayed.filter(c => !c.next_action_at), [displayed])
   const hotContacts = useMemo(() => displayed.filter(c => hotClientIds.has(c.id)), [displayed, hotClientIds])
+  // AT-RISK-1 — même calcul que la section de l'accueil.
+  const { items: atRiskItems } = useAtRiskClients()
+  const atRiskIds = useMemo(() => new Set(atRiskItems.map(c => c.id)), [atRiskItems])
+  const atRiskContacts = useMemo(() => displayed.filter(c => atRiskIds.has(c.id)), [displayed, atRiskIds])
   const vipContacts = useMemo(() => displayed.filter(c => c.is_vip), [displayed])
   // Inactifs = rôle Inactif OU marqué inactif à la main dans la fiche (manually_inactive) —
   // jamais "Dormant", qui décrit seulement l'absence de contact récent avec un contact actif.
@@ -851,6 +856,7 @@ export default function ClientsScreen() {
   const actionFiltered = actionFilter === 'todo' ? todoFiltered
     : actionFilter === 'none' ? noActionContacts
     : extraFilter === 'hot' ? hotContacts
+    : extraFilter === 'at_risk' ? atRiskContacts
     : extraFilter === 'vip' ? vipContacts
     : extraFilter === 'inactive' ? inactiveContacts
     : extraFilter === 'duplicates' ? duplicateContacts
@@ -862,7 +868,7 @@ export default function ClientsScreen() {
     : extraFilter ?? 'all'
 
   function applyQuick(q: QuickFilter) {
-    setExtraFilter(q === 'hot' || q === 'vip' || q === 'inactive' || q === 'duplicates' ? q : null)
+    setExtraFilter(q === 'hot' || q === 'at_risk' || q === 'vip' || q === 'inactive' || q === 'duplicates' ? q : null)
     if (q === 'overdue') { setActionFilter('todo'); setHorizonFilter('overdue'); setSourceFilter('all') }
     else if (q === 'todo') { setActionFilter('todo'); if (isUrgencyWindow(horizonFilter)) setHorizonFilter('7d') }
     else if (q === 'none') setActionFilter('none')
@@ -875,6 +881,7 @@ export default function ClientsScreen() {
     todo: activeQuick === 'todo' ? todoFiltered.length : defaultTodoCount,
     none: noActionContacts.length,
     hot: hotContacts.length,
+    at_risk: atRiskContacts.length,
     vip: vipContacts.length,
     inactive: inactiveContacts.length,
     duplicates: duplicateContacts.length,

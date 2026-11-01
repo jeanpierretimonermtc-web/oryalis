@@ -344,7 +344,8 @@
     "tz_guard_anyway": "{{action}} quand même",
     "tz_followup_title": "{{action}} {{name}} (9h chez lui)",
     "tz_followup_content": "Reporté pour respecter l’heure locale du contact ({{city}}).",
-    "tz_message_warning": "Il est {{time}} chez {{name}} ({{city}}) : il ou elle verra peut-être ton message au réveil."
+    "tz_message_warning": "Il est {{time}} chez {{name}} ({{city}}) : il ou elle verra peut-être ton message au réveil.",
+    "quick_filter_at_risk": "⚠️ À risque"
   },
   "appointments": {
     "title": "Rendez-vous",
@@ -1332,7 +1333,9 @@
     "activity_care_hint": "en cours",
     "pipeline_total_one": "{{count}} contact",
     "pipeline_total_other": "{{count}} contacts",
-    "mlm_no_brand": "Produits hors catalogue"
+    "mlm_no_brand": "Produits hors catalogue",
+    "clock_me": "Moi · {{city}}",
+    "clock_hint": "Ajoute un fuseau horaire à un contact à l’étranger pour voir son heure ici."
   },
   "common": {
     "save": "Enregistrer",
@@ -1634,7 +1637,12 @@
     "preset_current": "Sélection actuelle : {{name}}",
     "preset_custom": "Libellés personnalisés",
     "labels_tab_general": "Général",
-    "labels_brand_hint": "Vocabulaire utilisé pour {{brand}} : fiche contact, liste, recherche et réseau."
+    "labels_brand_hint": "Vocabulaire utilisé pour {{brand}} : fiche contact, liste, recherche et réseau.",
+    "clock_label": "Horloge de l’accueil",
+    "clock_desc": "Ton heure et celle de tes contacts à l’étranger.",
+    "clock_digital": "🔢 Numérique",
+    "clock_analog": "🕰️ À aiguilles",
+    "clock_hidden": "Masquée"
   },
   "subscription": {
     "title": "Abonnement Oryalis",
@@ -2098,6 +2106,32 @@
             "message": "Bonjour {prénom}, un mois que vous avez démarré ! Je vous propose un petit point pour voir ce qui vous convient le mieux."
           }
         }
+      },
+      "partner_onboarding": {
+        "name": "Accueil partenaire 30 jours",
+        "description": "Pour une nouvelle recrue : bienvenue, outils, premiers contacts, premier client, bilan.",
+        "steps": {
+          "d1": {
+            "label": "J+1 · Bienvenue",
+            "message": "Bienvenue dans l’équipe {prénom} ! Je suis ravi(e) de t’accompagner. Je t’appelle dans deux jours pour te montrer les outils, d’ici là n’hésite pas si tu as une question."
+          },
+          "d3": {
+            "label": "J+3 · Prise en main des outils",
+            "message": "Salut {prénom}, comme prévu : on fait le point sur ton espace, ta boutique en ligne et les bases pour bien démarrer ?"
+          },
+          "d7": {
+            "label": "J+7 · Ta liste de contacts",
+            "message": "Hello {prénom} ! As-tu commencé ta liste des personnes à qui parler des produits ? On peut la regarder ensemble et choisir tes 5 premiers contacts."
+          },
+          "d14": {
+            "label": "J+14 · Premier client",
+            "message": "Bonjour {prénom}, comment se passent tes premiers échanges ? Faisons le point sur ton premier client ou ta première présentation."
+          },
+          "d30": {
+            "label": "J+30 · Bilan et objectifs",
+            "message": "Bravo {prénom}, déjà un mois ! On se cale un moment pour faire le bilan et fixer tes objectifs du mois prochain ?"
+          }
+        }
       }
     },
     "extras": {
@@ -2133,7 +2167,15 @@
     "favorite_saved": "Favori « {{name}} » enregistré.",
     "favorite_exists": "Un favori porte déjà ce nom.",
     "builtin_label": "Modèles proposés",
-    "mark_done": "Marquer l’étape comme faite"
+    "mark_done": "Marquer l’étape comme faite",
+    "edit_favorite": "Modifier le favori",
+    "edit_favorite_title": "Nom du favori",
+    "edit_favorite_hint": "Modifie les étapes ci-dessus (jours, canaux, messages), puis mets à jour : le favori reprend exactement ce qui est affiché.",
+    "update_favorite": "Mettre à jour",
+    "edit_this_favorite": "Modifier « {{name}} »",
+    "save_as_new_favorite": "Enregistrer comme nouveau favori",
+    "favorite_updated": "Favori « {{name}} » mis à jour.",
+    "partner_templates_label": "Pour un partenaire"
   },
   "brands": {
     "my_brands": "Mes marques",
@@ -2205,5 +2247,119 @@
     "role_key_partner": "Partenaire",
     "role_key_leader": "Leader",
     "roles_by_brand_hint": "Rôles réseau réglés par marque dans « Ses marques »."
+  },
+  "risk": {
+    "title": "Clients à risque",
+    "subtitle": "Ils décrochent : un petit message maintenant évite de les perdre.",
+    "no_reorder": "Pas de commande depuis {{days}} j",
+    "program_paused": "Abonnement mis en pause il y a {{days}} j",
+    "program_cancelled": "Abonnement annulé il y a {{days}} j",
+    "no_contact": "Sans nouvelles depuis {{days}} j",
+    "show_more": "Voir les {{count}} autres",
+    "show_less": "Réduire",
+    "filter": "À risque"
+  },
+  "order_import": {
+    "open": "Importer",
+    "title": "Importer des commandes",
+    "intro": "Récupère ton historique depuis l’export CSV du back-office de ta marque (doTERRA, Zinzino…). Aucune relance automatique n’est créée : ce sont des commandes passées.",
+    "step_file": "Le fichier",
+    "pick_file": "Choisir un fichier CSV",
+    "paste": "Coller le contenu",
+    "paste_placeholder": "Colle ici le contenu du fichier (avec la ligne d’en-têtes)",
+    "use_pasted": "Utiliser ce texte",
+    "pasted_text": "texte collé",
+    "file_loaded": "{{name}} : {{count}} lignes",
+    "file_hint": "Depuis Excel ou Google Sheets : Fichier → Enregistrer sous / Télécharger → CSV.",
+    "error_empty": "Fichier vide ou illisible : vérifie qu’il contient une ligne d’en-têtes et des données.",
+    "error_read": "Impossible de lire ce fichier.",
+    "error_generic": "Une erreur est survenue. Réessaie.",
+    "step_columns": "Les colonnes",
+    "field_date": "Date de commande",
+    "field_name": "Nom du client",
+    "field_email": "Email",
+    "field_phone": "Téléphone",
+    "field_amount": "Montant",
+    "field_product": "Produits",
+    "field_order_number": "N° de commande",
+    "default_product_label": "Libellé si aucun produit",
+    "default_product": "Commande importée",
+    "contact_hint": "Le client est retrouvé par email, puis téléphone, puis nom. Les doublons (même n° de commande, ou même jour et même montant) sont ignorés.",
+    "analyze": "Analyser",
+    "step_preview": "Aperçu",
+    "status_matched": "Client trouvé",
+    "status_new_contact": "Nouveau contact",
+    "status_duplicate": "Déjà importée",
+    "status_invalid": "Incomplète",
+    "create_contacts": "Créer les {{count}} contacts introuvables (comme clients)",
+    "no_date": "sans date",
+    "more_rows": "… et {{count}} autres lignes",
+    "import_btn": "Importer {{count}} commandes",
+    "importing": "Import en cours… {{progress}} %",
+    "no_followups_hint": "Les commandes sont ajoutées à l’historique et aux chiffres (CA, suivi). Aucune relance n’est créée.",
+    "done_title": "Import terminé",
+    "done_imported": "{{count}} commandes importées",
+    "done_contacts": "{{count}} contacts créés",
+    "done_skipped": "{{count}} lignes ignorées (doublons, incomplètes ou contacts non créés)",
+    "done_failed": "{{count}} lignes en erreur",
+    "see_orders": "Voir les commandes",
+    "another": "Importer un autre fichier"
+  },
+  "lead_page": {
+    "title": "Ma page prospect",
+    "nav_desc": "Un lien à partager : chaque inscription devient un contact",
+    "explain": "Partage ce lien dans ta bio, sur les réseaux ou par message. Chaque personne qui remplit le formulaire arrive dans tes contacts (prospect) avec une relance « à rappeler aujourd’hui ».",
+    "your_link": "Ton lien",
+    "copy": "Copier le lien",
+    "copied": "Lien copié",
+    "open": "Voir la page",
+    "inactive_hint": "Page désactivée : les visiteurs voient « page introuvable ».",
+    "active": "Page active",
+    "slug_label": "Adresse de la page",
+    "slug_hint": "Lettres minuscules, chiffres et tirets (3 à 41 caractères).",
+    "slug_invalid": "Adresse invalide : lettres minuscules, chiffres et tirets, 3 caractères minimum.",
+    "slug_taken": "Cette adresse est déjà prise, choisis-en une autre.",
+    "title_label": "Titre",
+    "title_required": "Le titre est obligatoire.",
+    "intro_label": "Texte de présentation",
+    "default_title": "Prenons un moment ensemble",
+    "default_intro": "Laisse-moi tes coordonnées : je te recontacte rapidement pour répondre à tes questions et te conseiller.",
+    "saved": "Page enregistrée.",
+    "error": "Enregistrement impossible. Réessaie.",
+    "received_title": "Inscriptions reçues",
+    "received_empty": "Aucune inscription pour l’instant.",
+    "pending_hint": "{{count}} inscription(s) en attente : le contact n’a pas pu être créé (quota du plan gratuit ?).",
+    "open_contact": "Voir le contact",
+    "create_contact": "Créer le contact",
+    "create_error": "Impossible de créer le contact (quota atteint ?).",
+    "tab_general": "Générale",
+    "default_title_brand": "Découvre {{brand}} avec moi",
+    "brand_note_brand": "🏷 Les inscrits via cette page arrivent avec la marque {{brand}} sur leur fiche.",
+    "brand_note_general_multi": "🌐 Page générale : les inscrits arrivent sans marque (tu es en Multi-marques). Crée aussi une page par marque avec les onglets ci-dessus.",
+    "brand_note_single": "🏷 Les inscrits arrivent avec ta marque {{brand}} sur leur fiche (choisie dans Paramètres → Ma marque).",
+    "brand_note_none": "Les inscrits arrivent sans marque (Paramètres → Ma marque : Générique).",
+    "not_created_yet": "Cette page n’existe pas encore : complète les champs ci-dessous puis crée-la pour obtenir ton lien.",
+    "create_page": "Créer la page"
+  },
+  "public_lead": {
+    "with": "avec {{name}}",
+    "name": "Prénom et nom",
+    "email": "Email",
+    "phone": "Téléphone",
+    "contact_hint": "Au moins un email ou un téléphone.",
+    "message": "Ton message (facultatif)",
+    "message_placeholder": "Ce qui t’intéresse, tes questions…",
+    "consent": "J’accepte d’être recontacté(e) par {{name}} au sujet de ma demande.",
+    "send": "Envoyer",
+    "privacy": "Tes coordonnées sont transmises uniquement à ton conseiller, jamais à des tiers.",
+    "error_name": "Indique ton prénom et ton nom.",
+    "error_contact": "Indique un email ou un téléphone.",
+    "error_email": "Cette adresse email n’est pas valide.",
+    "error_rate": "Trop de demandes en ce moment, réessaie un peu plus tard.",
+    "error_generic": "L’envoi n’a pas fonctionné, réessaie.",
+    "sent_title": "Merci, c’est envoyé !",
+    "sent_text": "{{name}} te recontacte très vite.",
+    "not_found_title": "Page introuvable",
+    "not_found_text": "Ce lien n’existe pas ou n’est plus actif."
   }
 }

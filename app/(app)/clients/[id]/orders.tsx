@@ -184,7 +184,9 @@ export default function ClientOrdersScreen() {
           const plan: Record<string, { create: boolean; delayDays: number }> = {}
           rules.forEach(r => {
             plan[r.id] = {
-              create: !(careActive && CARE_JOURNEY_SUPERSEDED_RULES.includes(r.id)),
+              // RUNOUT-1 — « presque fini » décochée si un abonnement actif prévoit déjà la suite.
+              create: !(careActive && CARE_JOURNEY_SUPERSEDED_RULES.includes(r.id))
+                && !(r.id === 'ord_runout' && activePrograms.length > 0),
               delayDays: getAutomationDelay(r.id, r.delayDays),
             }
           })

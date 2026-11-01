@@ -175,6 +175,41 @@ export async function deleteClient(id: string) {
   if (error) throw error
 }
 
+// Contact minimal (nom + coordonnées), tout le reste à sa valeur par défaut : utilisé par
+// l'import de commandes (clients) et la page prospect (prospects).
+export function buildMinimalClientInput(name: string, email: string | null, phone: string | null, role: 'customer' | 'prospect'): ClientInput {
+  const parts = name.trim().split(/\s+/)
+  return {
+    first_name: parts.length > 1 ? parts[0] : null,
+    full_name: name.trim(),
+    avatar_url: null, email, phone,
+    is_vip: false, manually_inactive: false,
+    inscription_date: new Date().toISOString().split('T')[0],
+    birth_date: null, profession: null, children: null, source: null, country: null, timezone: null,
+    client_type: null, interests: [], particularities: null, medical_treatment: false, medical_notes: null,
+    doterra_id: null, loyalty_notes: null, address: null, language: 'fr',
+    next_lrp_date: null, lrp_status: 'not_enrolled', lrp_loyalty_percent: null, lrp_start_date: null,
+    lrp_frequency_value: null, lrp_frequency_unit: null, tracking_consent_at: null, welcome_email_sent: false,
+    first_contact_date: null, first_purchase_date: null, acquisition_source: null,
+    next_action_date: null, next_action_type: null, referrals_count: 0, referral_count: 0, network_potential: null,
+    contact_role: [role], pipeline_stage: role === 'customer' ? 'customer' : 'new_lead', sponsor_id: null,
+  }
+}
+
+// WORLD-CLOCK-1 — contacts actifs ayant un fuseau horaire renseigné (horloge de l'accueil).
+export type ContactTimeZone = Pick<Client, 'id' | 'first_name' | 'full_name' | 'timezone'>
+
+export async function fetchContactTimeZones(userId: string): Promise<ContactTimeZone[]> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, first_name, full_name, timezone')
+    .eq('user_id', userId)
+    .is('archived_at', null)
+    .not('timezone', 'is', null)
+  if (error) throw error
+  return (data ?? []) as ContactTimeZone[]
+}
+
 export async function searchClients(userId: string, query: string, role?: ContactRole) {
   let q = supabase
     .from('clients')
