@@ -31,7 +31,7 @@ import { useAtRiskClients } from '@/features/clients/useAtRiskClients'
 function normalizeSearch(s: string): string {
   return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
-import { BrandPill } from '@/features/brands/BrandPill'
+import { BrandAvatar } from '@/features/brands/BrandPill'
 import { brandPalette } from '@/features/brands/brandColors'
 import type { Brand } from '@/shared/lib/types'
 
@@ -261,6 +261,18 @@ function RolePill({ role }: { role: ContactRole }) {
   )
 }
 
+// BRAND-MARKS-1 — logos des marques du contact à côté du nom ; en mode une seule marque, rien
+// (tous les contacts ont la même marque, le statut suffit).
+function BrandMarks({ brands }: { brands?: Brand[] }) {
+  const { profile } = useAppConfig()
+  if (!brands?.length || profile.activity_type !== 'multi') return null
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      {brands.map(b => <BrandAvatar key={b.id} brand={b} size={18} />)}
+    </View>
+  )
+}
+
 // BRAND-ROLES-1 — rôles d'un contact : les rôles réseau d'un contact rattaché à une marque
 // s'affichent par marque ("Conseillère · doTERRA"), avec le vocabulaire de cette marque.
 function RolePills({ client, brandRoles, linked }: { client: ClientListItem; brandRoles?: BrandRoleEntry[]; linked: boolean }) {
@@ -415,7 +427,10 @@ function ClientCard({
         <View style={styles.cardTop}>
           <ClientAvatar name={client.full_name} avatarUrl={client.avatar_url} contactRole={client.contact_role} email={client.email} />
           <View style={styles.cardTitle}>
-            <Text style={styles.cardName}>{client.full_name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Text style={styles.cardName}>{client.full_name}</Text>
+              <BrandMarks brands={brands} />
+            </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <HealthPill health={client} />
               {client.is_vip ? <VipTag /> : null}
@@ -423,11 +438,6 @@ function ClientCard({
                   fiche contact (clients/[id]/index.tsx) où le même correctif a été appliqué. */}
               <RolePills client={client} brandRoles={brandRoles} linked={brands.length > 0} />
             </View>
-            {brands.length > 0 ? (
-              <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
-                {brands.map(b => <BrandPill key={b.id} brand={b} size="sm" />)}
-              </View>
-            ) : null}
             {/* Distincte des pills de rôle ci-dessus (même libellé possible pour customer/
                 distributor — voir getPipelineStageLabel) : un libellé de contexte + un texte
                 simple, sans fond coloré, pour ne jamais se confondre visuellement avec un
@@ -544,9 +554,9 @@ function ClientRow({ client, brands = [], brandRoles, onMenuPress }: {
         <View style={styles.rowIdentity}>
           <View style={styles.rowNameLine}>
             <Text style={styles.rowName} numberOfLines={1}>{client.full_name}</Text>
+            <BrandMarks brands={brands} />
             {client.is_vip ? <VipTag /> : null}
             <RolePills client={client} brandRoles={brandRoles} linked={brands.length > 0} />
-            {brands.map(b => <BrandPill key={b.id} brand={b} size="sm" />)}
           </View>
         </View>
         <View style={styles.rowActionCol}>

@@ -69,6 +69,8 @@ import { initialLrpProgramValue } from '@/features/clients/lrpProgramService'
 import { fetchProgramsForClient } from '@/features/clients/recurringProgramService'
 import type { RecurringProgram } from '@/shared/lib/types'
 import type { LrpProgramValue } from '@/features/clients/lrpProgramService'
+import { BackButton } from '@/shared/components/ui/BackButton'
+import { useStackBack } from '@/shared/lib/useStackBack'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -280,9 +282,10 @@ export default function AppointmentDetailScreen() {
   const { getRoleLabel, getPipelineStageLabel, isModuleActive, getAutomationDelay, getLrpName, profile: businessProfile } = useAppConfig()
   const styles = useMemo(() => makeStyles(colors), [colors])
 
+  const stackBack = useStackBack('/(app)/appointments')
   function goBack() {
     if (returnTo) router.replace(decodeURIComponent(returnTo) as any)
-    else router.back()
+    else stackBack()
   }
 
   // Le libellé doit refléter la destination réelle : sans returnTo, on vient bien de
@@ -4510,9 +4513,9 @@ export default function AppointmentDetailScreen() {
             // simple Retour (qui empilerait B→C→D à rebours) : il ramène DIRECTEMENT au RDV de
             // travail (handleReturnToOrigin, un seul replace). Hors consultation, comportement
             // 100% inchangé (goBack/backLabel existants).
-            <TouchableOpacity onPress={isConsultingHistory ? handleReturnToOrigin : goBack} style={styles.headerBackBtn}>
-              <Text style={styles.headerBackText}>‹ {isConsultingHistory ? t('appointments.return_to_current') : backLabel}</Text>
-            </TouchableOpacity>
+            <View style={{ paddingLeft: 12, paddingRight: 8 }}>
+              <BackButton onPress={isConsultingHistory ? handleReturnToOrigin : goBack} label={isConsultingHistory ? t('appointments.return_to_current') : backLabel} />
+            </View>
           ),
           headerRight,
         }} />
@@ -4553,17 +4556,9 @@ export default function AppointmentDetailScreen() {
           // pas déborder l'en-tête natif (mode normal : flèche seule, comportement pixel-perfect
           // inchangé — le libellé n'apparaît que lorsqu'il y a réellement une action différente à
           // annoncer).
-          <TouchableOpacity
-            onPress={isConsultingHistory ? handleReturnToOrigin : goBack}
-            style={styles.headerBackBtnMobile}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            {isConsultingHistory ? (
-              <Text style={styles.headerBackTextMobile} numberOfLines={1}>‹ {t('appointments.return_to_current')}</Text>
-            ) : (
-              <Text style={styles.headerBackArrowMobile}>‹</Text>
-            )}
-          </TouchableOpacity>
+          <View style={{ paddingRight: 8 }}>
+            <BackButton onPress={isConsultingHistory ? handleReturnToOrigin : goBack} label={isConsultingHistory ? t('appointments.return_to_current') : undefined} />
+          </View>
         ),
         headerRight,
       }} />

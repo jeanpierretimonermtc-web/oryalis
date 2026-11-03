@@ -369,7 +369,17 @@
     "status_brand_hint": "Partenaire et leader se règlent marque par marque dans « Ses marques » (onglet Profil).",
     "status_brand_partner_hint": "Statut défini par ses marques : modifie-le dans « Ses marques » (onglet Profil).",
     "status_brand_rows_hint": "Le statut dans chaque marque est le même que dans « Ses marques » : le modifier ici ou là-bas revient au même.",
-    "debrief_action": "Débriefer"
+    "debrief_action": "Débriefer",
+    "history_yesterday": "Hier",
+    "history_days_ago_one": "Il y a {{count}} j",
+    "history_days_ago_other": "Il y a {{count}} j",
+    "history_months_ago_one": "Il y a {{count}} mois",
+    "history_months_ago_other": "Il y a {{count}} mois",
+    "history_status_now": "Devient {{status}}",
+    "history_upcoming_one": "À venir : {{count}} action prévue",
+    "history_upcoming_other": "À venir : {{count}} actions prévues",
+    "history_upcoming_cta": "Voir le Suivi",
+    "history_note_hint": "Note libre, ajoutée à l’historique du contact."
   },
   "appointments": {
     "title": "Rendez-vous",

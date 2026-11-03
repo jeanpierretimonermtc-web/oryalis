@@ -369,7 +369,17 @@
     "status_brand_hint": "Partner and leader are set per brand in “Brands” (Profile tab).",
     "status_brand_partner_hint": "Status defined by their brands: change it in “Brands” (Profile tab).",
     "status_brand_rows_hint": "The status in each brand is the same as in “Brands”: changing it here or there is the same thing.",
-    "debrief_action": "Debrief"
+    "debrief_action": "Debrief",
+    "history_yesterday": "Yesterday",
+    "history_days_ago_one": "{{count}} day ago",
+    "history_days_ago_other": "{{count}} days ago",
+    "history_months_ago_one": "{{count}} month ago",
+    "history_months_ago_other": "{{count}} months ago",
+    "history_status_now": "Became {{status}}",
+    "history_upcoming_one": "Upcoming: {{count}} planned action",
+    "history_upcoming_other": "Upcoming: {{count}} planned actions",
+    "history_upcoming_cta": "See Follow-up",
+    "history_note_hint": "Free note, added to the contact’s history."
   },
   "appointments": {
     "title": "Appointments",

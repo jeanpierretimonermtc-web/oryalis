@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, ScrollView, ActivityIndicator, Platform, useWindowDimensions } from 'react-native'
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router'
+import { BackButton } from '@/shared/components/ui/BackButton'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
@@ -35,6 +36,9 @@ const ACTION_ICONS: Record<NextActionType, string> = {
 // Regroupe relances, tâches liées à un RDV et interactions programmées dans
 // une seule liste chronologique — un utilisateur ne devrait pas avoir à
 // chercher dans 3 endroits différents "qu'est-ce qu'il me reste à faire".
+// Ligne "Terminées (N)" insérée dans la liste (repli des relances terminées).
+const DONE_HEADER = { id: '__done_header', source: 'followup', title: '', subtitle: null, dueDate: '', done: true, actionType: null } as UnifiedAction
+
 type UnifiedAction = {
   id: string
   source: 'followup' | 'task' | 'interaction'
@@ -82,7 +86,7 @@ export default function ClientFollowupsScreen() {
   // CONTACT-4.2 — focus = id exact de la ressource ciblée depuis "Autres actions" (fiche
   // Contact), jamais un titre/date/index. Optionnel : absent pour toute navigation normale
   // vers cette page (bouton "+", onglet Suivi, etc.), comportement alors inchangé.
-  const { id, focus } = useLocalSearchParams<{ id: string; focus?: string }>()
+  const { id, focus, returnTo } = useLocalSearchParams<{ id: string; focus?: string; returnTo?: string }>()
   const { session } = useAuth()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -209,20 +213,37 @@ export default function ClientFollowupsScreen() {
     )
   }, [followups, tasks, interactionsUpcoming])
 
+  // FOLLOWUP-FOCUS-1 — à faire en haut, terminées repliées dessous (comme l'onglet Suivi) :
+  // la relance cliquée n'est plus noyée sous l'historique.
+  const [doneOpen, setDoneOpen] = useState(false)
+  const listData = useMemo(() => {
+    const todo = unified.filter(u => !u.done)
+    const done = unified.filter(u => u.done).reverse()
+    return [
+      ...todo,
+      ...(done.length > 0 ? [{ ...DONE_HEADER, title: String(done.length) }] : []),
+      ...(doneOpen ? done : []),
+    ]
+  }, [unified, doneOpen])
+
   // CONTACT-4.2 §10/§13/§14 — attend que les données soient chargées, cherche la ressource
   // par id exact (jamais titre/date/index), scrolle une seule fois. focus introuvable (lien
-  // périmé/invalide) : ne fait rien, page normale (§12).
+  // périmé/invalide) : ne fait rien, page normale (§12). Relance terminée ciblée : on déplie
+  // d'abord les terminées.
   useEffect(() => {
     if (hasAutoScrolledRef.current) return
     if (loading || otherLoading) return
+    if (!focus) { hasAutoScrolledRef.current = true; return }
+    const target = unified.find(u => u.id === focus)
+    if (!target) { hasAutoScrolledRef.current = true; return }
+    if (target.done && !doneOpen) { setDoneOpen(true); return }
     hasAutoScrolledRef.current = true
-    if (!focus) return
-    const index = unified.findIndex(u => u.id === focus)
-    if (index === -1) return
+    const index = listData.findIndex(u => u.id === focus)
+    if (index <= 0) return
     requestAnimationFrame(() => {
       listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 })
     })
-  }, [loading, otherLoading, unified, focus])
+  }, [loading, otherLoading, unified, listData, doneOpen, focus])
 
   async function handleToggle(item: UnifiedAction) {
     if (item.source === 'followup' && item.followup) {
@@ -273,7 +294,14 @@ export default function ClientFollowupsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: t('followups.title'), headerRight: () => (
+      <Stack.Screen options={{ title: t('followups.title'),
+        // Ouverte depuis la page Relances : le retour y ramène (pas vers le contact).
+        ...(returnTo ? { headerLeft: () => (
+          <View style={{ paddingLeft: 12, paddingRight: 8 }}>
+            <BackButton onPress={() => router.replace(decodeURIComponent(returnTo) as any)} />
+          </View>
+        ) } : {}),
+        headerRight: () => (
         isDesktopWeb ? (
           <TouchableOpacity onPress={() => setShowModal(true)} style={styles.newActionBtn} activeOpacity={0.85}>
             <Text style={styles.newActionBtnText}>+ {t('followups.add')}</Text>
@@ -289,7 +317,7 @@ export default function ClientFollowupsScreen() {
           ? <ActivityIndicator style={styles.loader} color={colors.primary} />
           : <FlatList
               ref={listRef}
-              data={unified}
+              data={listData}
               keyExtractor={f => f.id}
               // CONTACT-4.2 §10 — filet de sécurité standard FlatList : l'item ciblé peut ne pas
               // être encore mesuré au premier essai (liste tout juste montée), un seul retry.
@@ -299,6 +327,13 @@ export default function ClientFollowupsScreen() {
                 }, 100)
               }}
               renderItem={({ item }) => {
+                if (item.id === DONE_HEADER.id) {
+                  return (
+                    <TouchableOpacity style={styles.doneToggle} onPress={() => setDoneOpen(v => !v)} activeOpacity={0.7}>
+                      <Text style={styles.doneToggleText}>{t('clients.suivi_done_toggle', { count: Number(item.title) })} {doneOpen ? '▴' : '▾'}</Text>
+                    </TouchableOpacity>
+                  )
+                }
                 // CONTACT-4.2 §8/§9 — mise en évidence réservée à LA carte exactement ciblée par
                 // ?focus=<id> (jamais toute la liste, hors périmètre de ce lot) : couleur selon
                 // l'échéance propre de cette ressource, bordure renforcée pour la distinguer
@@ -369,7 +404,7 @@ export default function ClientFollowupsScreen() {
                   </>
                 )
                 return (
-                <Card style={[item.done && styles.done, focusStyle]}>
+                <Card style={[item.done && !isFocused && styles.done, focusStyle]}>
                   {/* UI-AFFORDANCE-1.3 — simple View non interactif (jamais plus un
                       TouchableOpacity) : CompleteToggle/OpenActionLink/suppression sont des
                       contrôles FRÈRES, jamais imbriqués dans un autre élément interactif — sur
@@ -660,7 +695,9 @@ function makeStyles(colors: ThemeColors) {
   newActionBtnText: { color: '#fff', fontSize: 14, fontFamily: fonts.semibold },
   done:       { opacity: 0.5 },
   // CONTACT-4.2 — carte exactement ciblée par ?focus=<id> uniquement (jamais toute la liste).
-  cardFocused:        { borderWidth: 2, borderColor: colors.primary },
+  cardFocused:        { borderWidth: 2, borderColor: colors.primary, backgroundColor: colors.primaryLight },
+  doneToggle:         { paddingVertical: 10, paddingHorizontal: 4 },
+  doneToggleText:     { fontSize: 13.5, fontFamily: fonts.semibold, color: colors.textSecondary },
   cardFocusedOverdue: { borderWidth: 2, borderColor: colors.danger, backgroundColor: colors.dangerLight },
   cardFocusedToday:   { borderWidth: 2, borderColor: colors.warning, backgroundColor: colors.warningLight },
   focusUrgencyBadge:     { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999, backgroundColor: colors.card },

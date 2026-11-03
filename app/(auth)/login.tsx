@@ -17,6 +17,7 @@ import { supabase } from '@/shared/lib/supabase'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { fonts } from '@/shared/theme/fonts'
 import type { ThemeColors } from '@/shared/theme/colors'
+import { BackButton } from '@/shared/components/ui/BackButton'
 
 const APP_URL = (process.env.EXPO_PUBLIC_APP_URL ?? 'https://oryalis.vercel.app').replace(/\/+$/, '')
 const RESET_REDIRECT = `${APP_URL}/reset-password`
@@ -117,10 +118,7 @@ export default function LoginScreen() {
             {BrandBlock}
             <View style={styles.divider} />
 
-            <TouchableOpacity onPress={goToLogin} style={styles.backRow}>
-              <Text style={styles.backArrow}>←</Text>
-              <Text style={styles.backText}>{t('auth.back_to_login')}</Text>
-            </TouchableOpacity>
+            <BackButton onPress={goToLogin} label={t('auth.back_to_login')} />
 
             <Text style={styles.sectionTitle}>{t('auth.forgot_password')}</Text>
 

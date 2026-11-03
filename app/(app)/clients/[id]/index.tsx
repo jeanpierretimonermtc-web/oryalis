@@ -22,7 +22,7 @@ import { ContactSynthesis } from '@/features/clients/ContactSynthesis'
 import { ContactExpectationsCard } from '@/features/clients/ContactExpectationsCard'
 import { ContactSensitiveCard } from '@/features/clients/ContactSensitiveCard'
 import { useClientBrands } from '@/features/brands/useBrands'
-import { BrandPill } from '@/features/brands/BrandPill'
+import { BrandAvatar, BrandPill } from '@/features/brands/BrandPill'
 import { ContactBrandsCard } from '@/features/brands/ContactBrandsCard'
 import { BrandLoyaltySection } from '@/features/brands/BrandLoyaltySection'
 import type { Followup } from '@/shared/lib/types'
@@ -76,6 +76,8 @@ import { fonts } from '@/shared/theme/fonts'
 import { formatDate, formatTime, isoToLocalParts } from '@/shared/lib/dateFormat'
 import { computeRelationshipHealth } from '@/features/clients/relationshipHealth'
 import { PIPELINE_STAGES } from '@/shared/lib/types'
+import { BackButton } from '@/shared/components/ui/BackButton'
+import { useStackBack } from '@/shared/lib/useStackBack'
 
 type Tab = 'synthese' | 'chrono' | 'suivi' | 'profil'
 
@@ -113,6 +115,8 @@ interface TimelineEntry {
   // ACTION-OUTCOME-1 / P0 §22 — extrait du compte-rendu (notes_brutes), uniquement pour une
   // interaction terminée qui en possède un ; jamais un texte vide affiché (§23/§24).
   preview?: string
+  // Changement de statut (rôle / étape) : regroupé pour ne garder que l'état final.
+  isStatus?: boolean
   onPress: () => void
 }
 
@@ -150,6 +154,37 @@ function relativeDayLabel(dateStr: string, t: (key: string) => string): string {
   const diffDays = Math.round((startOfTarget.getTime() - startOfToday.getTime()) / 86400000)
   if (diffDays === 0) return t('clients.timeline_today')
   return diffDays > 0 ? `${t('clients.timeline_day_plus')}${diffDays}` : `${t('clients.timeline_day_minus')}${Math.abs(diffDays)}`
+}
+
+// ACTIVITY-HISTORY-1 — repère pour l'historique (uniquement du passé).
+function pastRelativeLabel(dateStr: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const target = new Date(dateStr)
+  const now = new Date()
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    - new Date(target.getFullYear(), target.getMonth(), target.getDate()).getTime()) / 86400000)
+  if (days <= 0) return t('clients.timeline_today')
+  if (days === 1) return t('clients.history_yesterday')
+  if (days < 31) return t('clients.history_days_ago', { count: days })
+  return t('clients.history_months_ago', { count: Math.round(days / 30) })
+}
+
+// ACTIVITY-HISTORY-1 — à appliquer sur une liste triée du plus récent au plus ancien.
+function statusDedupe() {
+  const daysKept = new Set<string>()
+  return (e: { date: string; title: string; isStatus?: boolean }, i: number, all: { date: string; title: string; isStatus?: boolean }[]) => {
+    if (!e.isStatus) return true
+    const d = new Date(e.date)
+    const day = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    if (daysKept.has(day)) return false
+    // Statut précédent (plus ancien) retenu : même jour exclu, on cherche le dernier état d'un jour antérieur.
+    const older = all.slice(i + 1).find(o => {
+      if (!o.isStatus) return false
+      const od = new Date(o.date)
+      return `${od.getFullYear()}-${od.getMonth()}-${od.getDate()}` !== day
+    })
+    daysKept.add(day)
+    return !older || older.title !== e.title
+  }
 }
 
 // Écart en jours par rapport à aujourd'hui, en comparant des dates locales (pas des
@@ -224,7 +259,7 @@ export default function ClientDetailScreen() {
   const TIMELINE_KIND_COLOR: Record<TimelineKind, { bg: string; text: string }> = {
     rdv:         { bg: colors.primaryLight,   text: colors.primary },
     note:        { bg: colors.bgDim,          text: colors.textSecondary },
-    relance:     { bg: colors.warningLight,   text: colors.warning },
+    relance:     { bg: colors.successLight,   text: colors.success },
     reco:        { bg: colors.successLight,   text: colors.success },
     commande:    { bg: colors.tertiaryLight,  text: colors.tertiary },
     interaction: { bg: colors.secondaryLight, text: colors.secondary },
@@ -241,6 +276,7 @@ export default function ClientDetailScreen() {
     done: colors.success, pending: colors.primary, cancelled: colors.danger,
   }
   const { id } = useLocalSearchParams<{ id: string }>()
+  const goBack = useStackBack('/(app)/clients')
   const { session } = useAuth()
   const { client, loading, refresh } = useClient(id)
   const { appointments, refresh: refreshAppointments } = useClientAppointmentsWithContext(id)
@@ -418,6 +454,7 @@ export default function ClientDetailScreen() {
   const [timelineStatusFilter, setTimelineStatusFilter] = useState<TimelineStatusFilter>('all')
   const [timelinePeriodFilter, setTimelinePeriodFilter] = useState<string | null>(null) // 'YYYY-MM' ou null = toute période
   const [openTimelineFilter, setOpenTimelineFilter] = useState<'type' | 'status' | 'period' | null>(null)
+  const [timelineFilterPos, setTimelineFilterPos] = useState<{ x: number; y: number } | null>(null)
   const [noteDraft, setNoteDraft]                 = useState('')
   const [noteSaving, setNoteSaving]                 = useState(false)
   const [noteDeleteConfirmId, setNoteDeleteConfirmId] = useState<string | null>(null)
@@ -608,9 +645,19 @@ export default function ClientDetailScreen() {
     interaction: 'clients.next_action_source_interaction',
   }
 
-  // ── Activité relationnelle : fusion de tous les événements par date ─────────
+  // ── Activité = historique : uniquement ce qui s'est passé (ACTIVITY-HISTORY-1) ──
+  // Le prévu (RDV à venir, relances à faire) vit dans l'onglet Suivi.
+  const endOfToday = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.getTime() })()
+  const isPast = (iso: string | null | undefined) => !!iso && new Date(iso).getTime() <= endOfToday
+  // Libellé d'un rôle dans le vocabulaire de ses marques ("Partenaire · Zinzino").
+  const eventRoleLabel = (role: string) => {
+    const brandRole = role === 'distributor' ? 'partner' : role === 'leader' ? 'leader' : role === 'customer' ? 'customer' : role === 'prospect' ? 'prospect' : null
+    const matches = brandRole ? brandLinks.filter(l => l.network_role === brandRole) : []
+    if (matches.length === 0) return getRoleLabel(role as any)
+    return matches.map(l => `${brandRoleLabel(l.brand, l.network_role, getRoleLabel)}${showBrandName ? ` · ${l.brand.name}` : ''}`).join(', ')
+  }
   const timelineEntries: TimelineEntry[] = [
-    ...appointments.map(appt => ({
+    ...appointments.filter(appt => appt.status !== 'scheduled' && appt.status !== 'rescheduled' ? true : isPast(appt.start_at)).map(appt => ({
       id: `rdv-${appt.id}`,
       date: appt.start_at,
       title: appt.title,
@@ -627,21 +674,20 @@ export default function ClientDetailScreen() {
       kind: 'note' as const,
       onPress: () => {},
     })),
-    ...followups.map(f => ({
+    ...followups.filter(f => f.done).map(f => ({
       id: `relance-${f.id}`,
-      date: f.due_date,
+      date: f.updated_at ?? f.due_date,
       title: f.title ?? f.content ?? t('followups.title'),
       // Relance faite : date de réalisation visible (c'est elle qui compte comme "dernier contact"
       // dans la Synthèse), la ligne restant classée à son échéance.
-      sub: f.done ? `${t('followups.done')} · ${formatDate(f.updated_at ?? f.created_at, locale)}` : undefined,
-      done: f.done,
+      sub: t('followups.done'),
       kind: 'relance' as const,
       statusCategory: (f.done ? 'done' : 'pending') as 'done' | 'pending',
       // NAV-FOCUS-1 — chaque ligne d'Activité représente une relance précise (f.id déjà
       // disponible), jamais une simple ouverture générique de la liste.
       onPress: () => router.push(`/(app)/clients/${id}/followups?focus=${f.id}`),
     })),
-    ...recommendations.map(r => ({
+    ...recommendations.filter(r => isPast(r.recommendation_date ?? r.created_at)).map(r => ({
       id: `reco-${r.id}`,
       date: r.recommendation_date ?? r.created_at,
       title: r.product_name,
@@ -655,7 +701,7 @@ export default function ClientDetailScreen() {
       statusCategory: (r.cancelled_at ? 'cancelled' : r.status === 'advised' ? 'pending' : 'done') as 'done' | 'pending' | 'cancelled',
       onPress: () => router.push(`/(app)/clients/${id}/recommendations`),
     })),
-    ...orders.map(o => ({
+    ...orders.filter(o => isPast(o.order_date)).map(o => ({
       id: `commande-${o.id}`,
       date: o.order_date,
       title: o.product_name,
@@ -663,9 +709,9 @@ export default function ClientDetailScreen() {
       kind: 'commande' as const,
       onPress: () => router.push(`/(app)/clients/${id}/orders`),
     })),
-    ...interactions.map(item => ({
+    ...interactions.filter(item => !!item.completed_at || isPast(item.scheduled_at ?? item.created_at)).map(item => ({
       id: `interaction-${item.id}`,
-      date: item.scheduled_at ?? item.completed_at ?? item.created_at,
+      date: item.completed_at ?? item.scheduled_at ?? item.created_at,
       title: item.subject ?? t(`interaction_types.${item.interaction_type}`),
       // ACTION-OUTCOME-1 / P0 §22 — le résultat rejoint le type dans le même badge existant
       // (jamais un nouvel élément visuel) uniquement s'il existe réellement.
@@ -673,7 +719,6 @@ export default function ClientDetailScreen() {
         ? `${t(`interaction_types.${item.interaction_type}`)} · ${t(`interaction_outcomes.${item.completion_result}`)}`
         : t(`interaction_types.${item.interaction_type}`),
       preview: item.completed_at && item.notes_brutes ? item.notes_brutes : undefined,
-      done: !!item.completed_at,
       kind: 'interaction' as const,
       statusCategory: (item.completed_at ? 'done' : 'pending') as 'done' | 'pending',
       // NAV-FOCUS-1 — chaque ligne d'Activité représente une interaction précise (item.id
@@ -681,17 +726,17 @@ export default function ClientDetailScreen() {
       onPress: () => router.push(`/(app)/clients/${id}/interactions?focus=${item.id}`),
     })),
     // Traçabilité (refonte) — automatique et non modifiable : jamais cliquable.
-    ...clientEvents.map(ev => {
+    ...clientEvents.filter(ev => ev.event_type !== 'pipeline_change'
+      || ev.new_value === 'lost'
+      || (!!ev.new_value && PIPELINE_STAGES.indexOf(ev.new_value as any) < PIPELINE_STAGES.indexOf('customer'))).map(ev => {
       let title = ''
       let sub: string | undefined
       if (ev.event_type === 'pipeline_change') {
-        title = t('clients.event_pipeline_change', {
-          old: ev.old_value ? getPipelineStageLabel(ev.old_value as any) : '—',
-          new: ev.new_value ? getPipelineStageLabel(ev.new_value as any) : '—',
-        })
+        title = t('clients.history_status_now', { status: getPipelineStageLabel(ev.new_value as any) })
       } else if (ev.event_type === 'role_change') {
-        const label = (v: string | null) => v ? v.split(',').filter(Boolean).map(r => getRoleLabel(r as any)).join(', ') : '—'
-        title = t('clients.event_role_change', { old: label(ev.old_value), new: label(ev.new_value) })
+        const roles = (ev.new_value ?? '').split(',').filter(Boolean)
+        const main = roles.includes('leader') ? 'leader' : roles.includes('distributor') ? 'distributor' : roles.includes('customer') ? 'customer' : roles[0] ?? 'prospect'
+        title = t('clients.history_status_now', { status: eventRoleLabel(main) })
       } else if (ev.event_type === 'appointment_cancelled') {
         title = ev.appointment_title ?? t('clients.event_appointment_cancelled')
         sub = ev.reason ? `${t('clients.event_appointment_cancelled')} · ${ev.reason}` : t('clients.event_appointment_cancelled')
@@ -704,6 +749,7 @@ export default function ClientDetailScreen() {
         date: ev.created_at,
         title,
         sub,
+        isStatus: ev.event_type === 'pipeline_change' || ev.event_type === 'role_change',
         kind: 'changement' as const,
         onPress: () => {},
       }
@@ -725,6 +771,7 @@ export default function ClientDetailScreen() {
       onPress: () => setRecapShareDetail(share),
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .filter(statusDedupe())
 
   // ── Filtres de l'onglet Activité : type, statut, période (mois/année) ───────
   const timelineAvailableKinds = Array.from(new Set(timelineEntries.map(e => e.kind))) as TimelineKind[]
@@ -1201,7 +1248,14 @@ export default function ClientDetailScreen() {
                 </View>
               </TouchableOpacity>
               <View style={styles.heroIdentity}>
-                <Text style={styles.heroName} numberOfLines={1}>{client.full_name}</Text>
+                <View style={styles.heroNameRow}>
+                  <Text style={styles.heroName} numberOfLines={1}>{client.full_name}</Text>
+                  {showBrandName && brandLinks.length > 0 ? (
+                    <View style={styles.heroBrandMarks}>
+                      {brandLinks.map(link => <BrandAvatar key={link.id} brand={link.brand} size={20} />)}
+                    </View>
+                  ) : null}
+                </View>
                 <View style={styles.heroBadges}>
                   {/* DESIGN-A — même règle que la liste : l'état du suivi ne s'affiche que s'il
                       appelle une attention ("À jour" se confondait avec le vert du rôle Client). */}
@@ -1286,33 +1340,40 @@ export default function ClientDetailScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* BRANDS-1 — marques du contact (logo si importé). */}
-            {brandLinks.length > 0 ? (
-              <View style={styles.heroBadges}>
-                {brandLinks.map(link => <BrandPill key={link.id} brand={link.brand} />)}
+            {/* DESIGN-B — coordonnées essentielles sans changer d'onglet. */}
+            {/* CONTACT-BLOCK-1 — mini bloc coordonnées : téléphone et email sur leur ligne,
+                l'heure chez le contact en dessous, séparée. */}
+            {client.phone || client.email || contactLocalTime ? (
+              <View style={styles.contactBlock}>
+                {client.phone ? (
+                  <TouchableOpacity style={styles.contactLine} onPress={() => Linking.openURL(`tel:${client.phone!.replace(/\s+/g, '')}`).catch(e => console.error('[hero.tel]', e))} activeOpacity={0.7}>
+                    <Text style={styles.contactIcon}>📞</Text>
+                    <Text style={styles.contactText} numberOfLines={1}>{client.phone}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {client.email ? (
+                  <TouchableOpacity style={styles.contactLine} onPress={() => Linking.openURL(`mailto:${client.email}`).catch(e => console.error('[hero.mail]', e))} activeOpacity={0.7}>
+                    <Text style={styles.contactIcon}>✉️</Text>
+                    <Text style={styles.contactText} numberOfLines={1}>{client.email}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {contactLocalTime ? (
+                  <View style={[styles.contactLine, (client.phone || client.email) ? styles.contactTimeLine : null]}>
+                    <Text style={styles.contactIcon}>{contactLocalTime.unsocial ? '🌙' : '🕒'}</Text>
+                    <Text style={styles.contactTime} numberOfLines={1}>
+                      {t('clients.tz_live', {
+                        time: contactLocalTime.time,
+                        name: client.first_name || client.full_name.split(' ')[0],
+                        city: contactLocalTime.city,
+                      })}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
-
-            {/* DESIGN-B — coordonnées essentielles sans changer d'onglet. */}
-            <View style={styles.heroMeta}>
-              {client.phone || client.email ? (
-                <Text style={styles.heroMetaText} numberOfLines={1}>
-                  {[client.phone ? `📱 ${client.phone}` : null, client.email ? `✉️ ${client.email}` : null].filter(Boolean).join(' · ')}
-                </Text>
-              ) : null}
-              {contactLocalTime ? (
-                <Text style={[styles.heroMetaText, styles.heroLocalTime, contactLocalTime.unsocial && { color: colors.textSecondary }]} numberOfLines={1}>
-                  {contactLocalTime.unsocial ? '🌙' : '🕒'} {t('clients.tz_live', {
-                    time: contactLocalTime.time,
-                    name: client.first_name || client.full_name.split(' ')[0],
-                    city: contactLocalTime.city,
-                  })}
-                </Text>
-              ) : null}
-              <Text style={styles.heroMetaText} numberOfLines={1}>
-                {t('clients.added_on', { date: formatDate(client.created_at, locale) })}
-              </Text>
-            </View>
+            <Text style={styles.heroAddedOn} numberOfLines={1}>
+              {t('clients.added_on', { date: formatDate(client.created_at, locale) })}
+            </Text>
 
             {/* ── Prochaine action — priorité visuelle maximale ────── */}
             {/* CONTACT-4.1 §3 — sur-titre discret rendant explicite que cette carte représente
@@ -1837,10 +1898,7 @@ export default function ClientDetailScreen() {
 
         {/* ── Navigation bar ──────────────────────────────────────── */}
         <View style={styles.navBar}>
-          <TouchableOpacity style={styles.backRow} onPress={() => router.back()} activeOpacity={0.7}>
-            <Text style={styles.backArrow}>←</Text>
-            <Text style={styles.navTitle}>{t('clients.profile_title')}</Text>
-          </TouchableOpacity>
+          <BackButton onPress={goBack} label={t('clients.profile_title')} />
         </View>
 
         <View style={[styles.bodyRow, isDesktopWeb && styles.bodyRowDesktop]}>
@@ -1975,24 +2033,19 @@ export default function ClientDetailScreen() {
                     <Text style={styles.noteComposerBtnText}>↑</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={styles.noteComposerHint}>{t('notes.timeline_note_hint')}</Text>
+                <Text style={styles.noteComposerHint}>{t('clients.history_note_hint')}</Text>
 
                 {/* ── Barre de filtres compacte ─────────────────────────── */}
                 <View style={styles.timelineFilterBar}>
-                  <TouchableOpacity style={styles.timelineFilterBtn} onPress={() => setOpenTimelineFilter('type')} activeOpacity={0.75}>
+                  <TouchableOpacity style={styles.timelineFilterBtn} onPress={(e) => { setTimelineFilterPos({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }); setOpenTimelineFilter('type') }} activeOpacity={0.75}>
                     <Text style={styles.timelineFilterBtnLabel}>{t('clients.timeline_filter_type')}</Text>
                     <Text style={styles.timelineFilterBtnValue} numberOfLines={1}>
                       {timelineKindFilter === 'all' ? t('clients.filter_all') : t(TIMELINE_KIND_LABEL_KEY[timelineKindFilter])}
                     </Text>
                     <Text style={styles.timelineFilterChevron}>▾</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.timelineFilterBtn} onPress={() => setOpenTimelineFilter('status')} activeOpacity={0.75}>
-                    <Text style={styles.timelineFilterBtnLabel}>{t('clients.timeline_filter_status')}</Text>
-                    <Text style={styles.timelineFilterBtnValue} numberOfLines={1}>{t(`clients.timeline_filter_status_${timelineStatusFilter}`)}</Text>
-                    <Text style={styles.timelineFilterChevron}>▾</Text>
-                  </TouchableOpacity>
                   {timelineAvailableMonths.length > 0 && (
-                    <TouchableOpacity style={styles.timelineFilterBtn} onPress={() => setOpenTimelineFilter('period')} activeOpacity={0.75}>
+                    <TouchableOpacity style={styles.timelineFilterBtn} onPress={(e) => { setTimelineFilterPos({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }); setOpenTimelineFilter('period') }} activeOpacity={0.75}>
                       <Text style={styles.timelineFilterBtnLabel}>{t('clients.timeline_filter_period')}</Text>
                       <Text style={styles.timelineFilterBtnValue} numberOfLines={1}>
                         {timelinePeriodFilter ? monthYearLabel(timelinePeriodFilter, locale) : t('clients.timeline_filter_period_all')}
@@ -2011,6 +2064,17 @@ export default function ClientDetailScreen() {
                   )}
                 </View>
 
+                {/* Le prévu est dans Suivi : un simple raccourci ici. */}
+                {(() => {
+                  const upcoming = apptGroups.upcoming.length + followupGroups.todo.length
+                  return upcoming > 0 ? (
+                    <TouchableOpacity style={styles.historyUpcomingLink} onPress={() => setActiveTab('suivi')} activeOpacity={0.75}>
+                      <Text style={styles.historyUpcomingText}>{t('clients.history_upcoming', { count: upcoming })}</Text>
+                      <Text style={styles.historyUpcomingCta}>{t('clients.history_upcoming_cta')} ›</Text>
+                    </TouchableOpacity>
+                  ) : null
+                })()}
+
                 {/* ── Fil chronologique ──────────────────────────────────── */}
                 {filteredTimelineEntries.length === 0
                   ? <Text style={styles.emptyText}>{t(timelineEntries.length === 0 ? 'clients.timeline_empty' : 'clients.timeline_filtered_empty')}</Text>
@@ -2025,14 +2089,15 @@ export default function ClientDetailScreen() {
                         const statusColor = entry.statusCategory ? TIMELINE_STATUS_COLOR[entry.statusCategory] : null
                         const isLast = idx === filteredTimelineEntries.length - 1
                         const isNote = entry.kind === 'note'
+                        const isSystem = entry.kind === 'changement'
                         const isConfirmingNoteDelete = isNote && noteDeleteConfirmId === entry.id
                         const content = (
                           <View style={styles.timelineContent}>
                             <View style={styles.timelineContentTop}>
-                              <Text style={[styles.timelineTitle, entry.done && styles.timelineTitleDone]} numberOfLines={isNote ? undefined : 2}>
+                              <Text style={[styles.timelineTitle, isSystem && styles.timelineTitleSystem]} numberOfLines={isNote ? undefined : 2}>
                                 {entry.title}
                               </Text>
-                              <Text style={styles.timelineRelative}>{relativeDayLabel(entry.date, t)}</Text>
+                              <Text style={styles.timelineRelative}>{pastRelativeLabel(entry.date, t)}</Text>
                             </View>
                             <View style={styles.timelineMetaRow}>
                               <Text style={styles.timelineDate}>{formatDate(entry.date, locale)}</Text>
@@ -2076,7 +2141,7 @@ export default function ClientDetailScreen() {
                                 </View>
                                 {!isLast && <View style={styles.timelineLine} />}
                               </View>
-                              {isNote ? content : (
+                              {isNote || isSystem ? content : (
                                 // UI-AFFORDANCE-1 §14 — Activité est déjà dense (titre + date relative,
                                 // date + statut, parfois extrait + tags) : un chevron discret avec un
                                 // accessibilityLabel explicite est préféré à un "Ouvrir ›" textuel complet
@@ -2119,57 +2184,37 @@ export default function ClientDetailScreen() {
                     })()
                 }
 
-                {/* ── Sélecteur de filtre (feuille inférieure) ──────────── */}
-                <Modal visible={openTimelineFilter !== null} transparent animationType="fade" onRequestClose={() => setOpenTimelineFilter(null)}>
-                  <TouchableOpacity style={styles.timelineFilterOverlay} activeOpacity={1} onPress={(e) => { if (e.target === e.currentTarget) setOpenTimelineFilter(null) }}>
-                    <View style={styles.timelineFilterSheet} onStartShouldSetResponder={() => true}>
-                      <View style={styles.timelineFilterSheetHandle} />
-                      {openTimelineFilter === 'type' && (
-                        <>
-                          <Text style={styles.timelineFilterSheetTitle}>{t('clients.timeline_filter_type')}</Text>
-                          <TouchableOpacity style={styles.timelineFilterOption} onPress={() => { setTimelineKindFilter('all'); setOpenTimelineFilter(null) }} activeOpacity={0.7}>
-                            <Text style={[styles.timelineFilterOptionText, timelineKindFilter === 'all' && styles.timelineFilterOptionTextActive]}>{t('clients.filter_all')}</Text>
-                            {timelineKindFilter === 'all' && <Check size={16} color={colors.primaryAction} strokeWidth={2.5} />}
-                          </TouchableOpacity>
-                          {timelineAvailableKinds.map(kind => (
-                            <TouchableOpacity key={kind} style={styles.timelineFilterOption} onPress={() => { setTimelineKindFilter(kind); setOpenTimelineFilter(null) }} activeOpacity={0.7}>
-                              <Text style={[styles.timelineFilterOptionText, timelineKindFilter === kind && styles.timelineFilterOptionTextActive]}>{t(TIMELINE_KIND_LABEL_KEY[kind])}</Text>
-                              {timelineKindFilter === kind && <Check size={16} color={colors.primaryAction} strokeWidth={2.5} />}
-                            </TouchableOpacity>
-                          ))}
-                        </>
-                      )}
-                      {openTimelineFilter === 'status' && (
-                        <>
-                          <Text style={styles.timelineFilterSheetTitle}>{t('clients.timeline_filter_status')}</Text>
-                          {(['all', 'pending', 'done', 'cancelled'] as TimelineStatusFilter[]).map(status => (
-                            <TouchableOpacity key={status} style={styles.timelineFilterOption} onPress={() => { setTimelineStatusFilter(status); setOpenTimelineFilter(null) }} activeOpacity={0.7}>
-                              <Text style={[styles.timelineFilterOptionText, timelineStatusFilter === status && styles.timelineFilterOptionTextActive]}>
-                                {t(`clients.timeline_filter_status_${status}`)}
-                              </Text>
-                              {timelineStatusFilter === status && <Check size={16} color={colors.primaryAction} strokeWidth={2.5} />}
-                            </TouchableOpacity>
-                          ))}
-                        </>
-                      )}
-                      {openTimelineFilter === 'period' && (
-                        <>
-                          <Text style={styles.timelineFilterSheetTitle}>{t('clients.timeline_filter_period')}</Text>
-                          <TouchableOpacity style={styles.timelineFilterOption} onPress={() => { setTimelinePeriodFilter(null); setOpenTimelineFilter(null) }} activeOpacity={0.7}>
-                            <Text style={[styles.timelineFilterOptionText, timelinePeriodFilter === null && styles.timelineFilterOptionTextActive]}>{t('clients.timeline_filter_period_all')}</Text>
-                            {timelinePeriodFilter === null && <Check size={16} color={colors.primaryAction} strokeWidth={2.5} />}
-                          </TouchableOpacity>
-                          {timelineAvailableMonths.map(month => (
-                            <TouchableOpacity key={month} style={styles.timelineFilterOption} onPress={() => { setTimelinePeriodFilter(month); setOpenTimelineFilter(null) }} activeOpacity={0.7}>
-                              <Text style={[styles.timelineFilterOptionText, timelinePeriodFilter === month && styles.timelineFilterOptionTextActive]}>{monthYearLabel(month, locale)}</Text>
-                              {timelinePeriodFilter === month && <Check size={16} color={colors.primaryAction} strokeWidth={2.5} />}
-                            </TouchableOpacity>
-                          ))}
-                        </>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                </Modal>
+                {/* ── Sélecteur de filtre : menu ancré, comme le reste de l'app (UI-POPOVER-2.1) ── */}
+                {(() => {
+                  const check = <Check size={16} color={colors.primaryAction} strokeWidth={2.5} />
+                  const items = openTimelineFilter === 'type'
+                    ? [
+                        { key: 'all', label: t('clients.filter_all'), icon: timelineKindFilter === 'all' ? check : undefined, onPress: () => setTimelineKindFilter('all') },
+                        ...timelineAvailableKinds.map(kind => ({
+                          key: kind, label: t(TIMELINE_KIND_LABEL_KEY[kind]), icon: timelineKindFilter === kind ? check : undefined, onPress: () => setTimelineKindFilter(kind),
+                        })),
+                      ]
+                    : openTimelineFilter === 'period'
+                      ? [
+                          { key: 'all', label: t('clients.timeline_filter_period_all'), icon: timelinePeriodFilter === null ? check : undefined, onPress: () => setTimelinePeriodFilter(null) },
+                          ...timelineAvailableMonths.map(month => ({
+                            key: month, label: monthYearLabel(month, locale), icon: timelinePeriodFilter === month ? check : undefined, onPress: () => setTimelinePeriodFilter(month),
+                          })),
+                        ]
+                      : []
+                  return (
+                    <AnchoredMenu
+                      visible={openTimelineFilter !== null}
+                      onClose={() => setOpenTimelineFilter(null)}
+                      anchor={timelineFilterPos}
+                      width={240}
+                      estimatedHeight={Math.min(420, 52 + items.length * 44)}
+                      minLeft={isDesktopWeb ? 248 : 8}
+                      title={openTimelineFilter === 'period' ? t('clients.timeline_filter_period') : t('clients.timeline_filter_type')}
+                      items={items}
+                    />
+                  )
+                })()}
               </View>
             )}
 
@@ -3120,8 +3165,17 @@ function makeStyles(colors: ThemeColors) {
   avatarRingImg: { width: 48, height: 48, borderRadius: 24 },
   avatarEditBadge: { position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   heroIdentity:  { flex: 1, gap: 6 },
+  heroNameRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  heroBrandMarks: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   heroName:      { fontSize: 20, lineHeight: 26, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.3 },
   heroMeta:      { gap: 3, marginTop: -4 },
+  contactBlock:  { width: '100%', backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 8, gap: 2 },
+  contactLine:   { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  contactTimeLine: { marginTop: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
+  contactIcon:   { fontSize: 14, width: 18, textAlign: 'center' },
+  contactText:   { flex: 1, fontSize: 13.5, fontFamily: fonts.medium, color: colors.text },
+  contactTime:   { flex: 1, fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary },
+  heroAddedOn:   { fontSize: 12, fontFamily: fonts.body, color: colors.textTertiary, marginTop: -6 },
   heroMetaText:  { fontSize: 12.5, fontFamily: fonts.body, color: colors.textSecondary },
   heroLocalTime: { fontFamily: fonts.semibold, color: colors.text },
   heroBadges:    { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
@@ -3366,6 +3420,10 @@ function makeStyles(colors: ThemeColors) {
   noteComposerBtn:     { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   noteComposerBtnDisabled: { backgroundColor: colors.textTertiary },
   noteComposerBtnText: { color: '#fff', fontSize: 20, fontFamily: fonts.bold },
+  historyUpcomingLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, backgroundColor: colors.primaryLight },
+  historyUpcomingText: { fontSize: 13.5, fontFamily: fonts.medium, color: colors.text },
+  historyUpcomingCta:  { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
+  timelineTitleSystem: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
   noteComposerHint:    { fontSize: 11.5, fontFamily: fonts.body, color: colors.textTertiary, marginTop: 6, marginLeft: 4 },
 
   // ── Suppression inline d'une note libre dans le fil Activité ───────────────

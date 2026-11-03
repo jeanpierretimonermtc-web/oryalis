@@ -20,9 +20,10 @@ export function BrandPill({ brand, size = 'md' }: { brand: Pick<Brand, 'name' | 
 export function BrandAvatar({ brand, size = 36 }: { brand: Pick<Brand, 'name' | 'color' | 'normalized_name' | 'logo_url'>; size?: number }) {
   const palette = brandPalette(brand)
   return brand.logo_url ? (
-    <Image source={{ uri: brand.logo_url }} style={{ width: size, height: size, borderRadius: 10 }} accessibilityIgnoresInvertColors />
+    // Logo entier (jamais rogné), même s'il n'est pas carré.
+    <Image source={{ uri: brand.logo_url }} style={{ width: size, height: size, borderRadius: Math.min(10, size / 2) }} resizeMode="contain" accessibilityIgnoresInvertColors />
   ) : (
-    <View style={{ width: size, height: size, borderRadius: 10, backgroundColor: palette.bg, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: size, height: size, borderRadius: Math.min(10, size / 2), backgroundColor: palette.bg, alignItems: 'center', justifyContent: 'center' }}>
       <Text style={{ fontSize: size * 0.44, fontFamily: fonts.bold, color: palette.text }}>{brand.name.charAt(0).toUpperCase()}</Text>
     </View>
   )

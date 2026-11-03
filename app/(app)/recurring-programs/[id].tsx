@@ -26,6 +26,7 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { RecurringProgram, RecurringProgramOccurrence, OrderListItem, RecurringRenewalMode } from '@/shared/lib/types'
+import { BackButton } from '@/shared/components/ui/BackButton'
 
 type ProgramClient = { id: string; full_name: string }
 type PendingAction = 'pause' | 'cancel' | 'reactivate' | null
@@ -279,8 +280,8 @@ export default function RecurringProgramScreen() {
   // Défini ici (avant les retours conditionnels) pour être réutilisable dans les 3 branches de
   // rendu (loading/notFound/chargé) sans dupliquer la logique de fallback.
   function goBack() {
-    if (router.canGoBack()) router.back()
-    else if (client) router.replace(`/(app)/clients/${client.id}` as any)
+    // BACK-1 — écran hors pile : router.back() remontait à l'historique des onglets.
+    if (client) router.replace(`/(app)/clients/${client.id}` as any)
     else router.replace('/(app)/clients' as any)
   }
   const backLabel = client?.full_name ?? t('common.back')
@@ -302,10 +303,7 @@ export default function RecurringProgramScreen() {
   }
   const navBar = (
     <View style={styles.navBar}>
-      <TouchableOpacity style={styles.backRow} onPress={goBack} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Text style={styles.backArrow}>←</Text>
-        <Text style={styles.navTitle} numberOfLines={1}>{backLabel}</Text>
-      </TouchableOpacity>
+      <BackButton onPress={goBack} label={backLabel} />
     </View>
   )
 

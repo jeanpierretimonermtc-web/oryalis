@@ -29,6 +29,7 @@ import { updateClientBrandNetwork } from '@/features/brands/brandService'
 import { BrandAvatar } from '@/features/brands/BrandPill'
 import type { BrandNetworkRole } from '@/shared/lib/types'
 import { TIMEZONE_OPTIONS, timeZoneCity, timeZoneOffsetMinutes, formatUtcOffset } from '@/features/clients/timezones'
+import { useStackBack } from '@/shared/lib/useStackBack'
 
 // STATUS-1 — étapes de prospect, puis Client / Partenaire / Leader, ou Perdu.
 const PROSPECT_STEPS: PipelineStage[] = ['new_lead', 'contacted', 'presentation_scheduled', 'presentation_completed', 'follow_up']
@@ -70,6 +71,7 @@ export default function EditClientScreen() {
   const { isModuleActive, getRoleLabel, getPipelineStageLabel, getLrpName, profile: businessProfile } = useAppConfig()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { id } = useLocalSearchParams<{ id: string }>()
+  const goBack = useStackBack(`/(app)/clients/${id}`)
   const { width } = useWindowDimensions()
   const isWide = width >= 768
   const { session } = useAuth()
@@ -260,7 +262,7 @@ export default function EditClientScreen() {
         }
       }
 
-      router.back()
+      goBack()
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : t('common.error'))
       console.error('[updateClient]', e)

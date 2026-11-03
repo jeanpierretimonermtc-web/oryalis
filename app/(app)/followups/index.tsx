@@ -80,7 +80,8 @@ function FollowupCard({ f, today, onRequestDone }: {
   // provoquent une erreur d'hydratation sur web). La carte est désormais un simple View ; la
   // navigation reste exactement la même, portée par deux Pressable FRÈRES de CompleteToggle
   // (jamais un parent commun interactif) qui couvrent la même zone visuelle qu'avant.
-  const goToContact = () => router.push(`/(app)/clients/${f.client_id}/followups` as any)
+  // FOLLOWUP-FOCUS-1 — ouvre la relance cliquée (mise en évidence) et le retour revient ici.
+  const goToContact = () => router.push(`/(app)/clients/${f.client_id}/followups?focus=${f.id}&returnTo=${encodeURIComponent('/(app)/followups')}` as any)
 
   return (
     <View style={[styles.card, isOverdue && styles.cardOverdue]}>

@@ -26,6 +26,8 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
+import { BackButton } from '@/shared/components/ui/BackButton'
+import { useStackBack } from '@/shared/lib/useStackBack'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function initials(name: string | null | undefined) {
@@ -211,9 +213,10 @@ export default function NewAppointmentScreen() {
   // Naviguer ici depuis un autre onglet (ex. fiche contact → RDV) via un chemin absolu ne
   // laisse pas toujours un historique de retour exploitable — voir appointments/[id]/index.tsx
   // pour le même mécanisme.
+  const stackBack = useStackBack('/(app)/appointments')
   function goBack() {
     if (returnTo) router.replace(decodeURIComponent(returnTo) as any)
-    else router.back()
+    else stackBack()
   }
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const [loadingAppt, setLoadingAppt] = useState(isEdit)
@@ -384,9 +387,9 @@ export default function NewAppointmentScreen() {
           title: t('appointments.edit_title'),
           headerBackTitle: '',
           headerLeft: () => (
-            <TouchableOpacity onPress={goBack} style={styles.headerBackBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.headerBackText}>‹ {t('common.back')}</Text>
-            </TouchableOpacity>
+            <View style={{ paddingLeft: 12, paddingRight: 8 }}>
+              <BackButton onPress={goBack} label={t('common.back')} />
+            </View>
           ),
         }} />
         <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
@@ -402,9 +405,9 @@ export default function NewAppointmentScreen() {
         title: isEdit ? t('appointments.edit_title') : t('appointments.new_title'),
         headerBackTitle: '',
         headerLeft: () => (
-          <TouchableOpacity onPress={goBack} style={styles.headerBackBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.headerBackText}>‹ {t('common.back')}</Text>
-          </TouchableOpacity>
+          <View style={{ paddingLeft: 12, paddingRight: 8 }}>
+            <BackButton onPress={goBack} label={t('common.back')} />
+          </View>
         ),
       }} />
       <ScrollView style={styles.container} contentContainerStyle={[styles.content, isWide && styles.contentWide]} keyboardShouldPersistTaps="handled">
