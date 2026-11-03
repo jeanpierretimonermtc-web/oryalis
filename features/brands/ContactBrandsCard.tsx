@@ -17,9 +17,9 @@ import type { ClientBrandWithBrand, BrandMember } from './brandService'
 import { ContactPickerModal } from '@/features/network/ContactPickerModal'
 import type { BrandNetworkRole } from '@/shared/lib/types'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
-import { BRAND_ROLES, brandRoleLabel } from './brandRoleLabels'
+import { BRAND_STATUSES, brandRoleLabel, isBrandPartnerRole } from './brandRoleLabels'
 
-const BRAND_ROLE_ICON: Record<BrandNetworkRole, string> = { customer: '👤', partner: '🤝', leader: '⭐' }
+const BRAND_ROLE_ICON: Record<BrandNetworkRole, string> = { prospect: '🌱', customer: '👤', partner: '🤝', leader: '⭐' }
 
 const SOURCE_ICON: Record<string, string> = { manual: '✋', order: '🛒', recommendation: '🌿', appointment: '📅' }
 
@@ -91,7 +91,7 @@ export function ContactBrandsCard({ clientId, userId, links, onChanged }: Props)
     const excluded = brandDownlineIds(clientId, list)
     const sponsors = new Set(list.map(m => m.sponsor_client_id).filter(Boolean))
     return list
-      .filter(m => !excluded.has(m.client_id) && (m.network_role !== 'customer' || sponsors.has(m.client_id)))
+      .filter(m => !excluded.has(m.client_id) && (isBrandPartnerRole(m.network_role) || sponsors.has(m.client_id)))
       .map(m => ({ id: m.client_id, label: m.full_name }))
   }, [sponsorFor, members, clientId])
 
@@ -173,7 +173,7 @@ export function ContactBrandsCard({ clientId, userId, links, onChanged }: Props)
           <View style={styles.networkRow}>
             <Text style={styles.networkLabel}>{t('brands.network_role')}</Text>
             <View style={styles.roleChips}>
-              {BRAND_ROLES.map(role => {
+              {BRAND_STATUSES.map(role => {
                 const active = link.network_role === role
                 return (
                   <TouchableOpacity

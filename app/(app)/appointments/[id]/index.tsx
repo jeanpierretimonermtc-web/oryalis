@@ -7,7 +7,7 @@ import { MEETING_MODE_ICON, meetingActionUrl } from '@/features/appointments/mee
 import { RemoteTimeHint } from '@/features/clients/RemoteTimeHint'
 import { useBrands, useClientBrands } from '@/features/brands/useBrands'
 import { attachToBrandSponsor } from '@/features/brands/brandService'
-import { brandRoleLabel } from '@/features/brands/brandRoleLabels'
+import { brandRoleLabel, brandRoleLevel } from '@/features/brands/brandRoleLabels'
 import { BrandPill } from '@/features/brands/BrandPill'
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
@@ -1853,10 +1853,13 @@ export default function AppointmentDetailScreen() {
       if (appointment.brand_id && (stage === 'customer' || stage === 'distributor')) {
         try {
           const link = rdvClientBrandLinks.find(l => l.brand_id === appointment.brand_id)
+          // Jamais de rétrogradation : un partenaire qui "devient client" reste partenaire.
+          const targetRole = stage === 'distributor' ? 'partner' : 'customer'
+          const keep = link && brandRoleLevel(link.network_role) >= brandRoleLevel(targetRole)
           await attachToBrandSponsor(
             appointment.user_id, appointment.client_id, appointment.brand_id,
             link?.sponsor_client_id ?? null,
-            stage === 'distributor' ? 'partner' : undefined,
+            keep ? undefined : targetRole,
           )
           refreshRdvClientBrands()
         } catch (brandError) {
@@ -2292,7 +2295,7 @@ export default function AppointmentDetailScreen() {
   // APPT-PIPELINE-1 — statut actuel du contact et choix qui le font avancer.
   const rdvBrandLink = appointment.brand_id ? rdvClientBrandLinks.find(l => l.brand_id === appointment.brand_id) ?? null : null
   const brandStage: PipelineStage | null = rdvBrandLink
-    ? (rdvBrandLink.network_role === 'customer' ? 'customer' : 'distributor')
+    ? (rdvBrandLink.network_role === 'prospect' ? null : rdvBrandLink.network_role === 'customer' ? 'customer' : 'distributor')
     : null
   const contactStage = clientInfo?.pipeline_stage ?? null
   // Dans la marque du RDV, c'est le rôle de marque qui compte ; sinon l'étape générale.

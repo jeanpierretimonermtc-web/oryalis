@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { Brand, BrandNetworkRole } from '@/shared/lib/types'
+import { isBrandPartnerRole } from './brandRoleLabels'
 import { fetchBrands, fetchClientBrands, fetchAllClientBrandLinks } from './brandService'
 import type { ClientBrandLinkLite } from './brandService'
 import type { BrandWithCounts, ClientBrandWithBrand } from './brandService'
@@ -59,7 +60,7 @@ export function useClientBrandMap() {
   const linkedClientIds = useMemo(() => new Set(links.map(l => l.client_id)), [links])
   const teamClientIds = useMemo(() => {
     const mine = new Set<string>()
-    for (const l of links) if (!l.sponsor_client_id || l.network_role !== 'customer') mine.add(l.client_id)
+    for (const l of links) if (!l.sponsor_client_id || isBrandPartnerRole(l.network_role)) mine.add(l.client_id)
     return new Set([...linkedClientIds].filter(id => !mine.has(id)))
   }, [links, linkedClientIds])
 

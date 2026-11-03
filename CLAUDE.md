@@ -289,6 +289,9 @@ Ajouts du 2026-11-03 (exécutés en prod) :
 - `20261103_privacy_account.sql` — `account_deletion_requests` (demande de suppression RGPD, délai 30 j,
   écriture uniquement via `request_account_deletion` / `cancel_account_deletion`) et `list_my_login_devices()`
   (appareils du praticien, lus depuis `security_login_events`). L'effacement effectif reste une opération owner.
+- `20261103_brand_prospect_role.sql` — `client_brands.network_role` accepte `prospect` ; le statut général
+  d'un contact rattaché = le plus avancé de ses marques (`brand_role_level`, `sync_contact_roles_from_brands`),
+  sans jamais écraser `lost`. Rattachement automatique d'un prospect (RDV, page prospect, reco) → `prospect`.
 
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,

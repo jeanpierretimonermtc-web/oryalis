@@ -541,7 +541,8 @@ export interface ClientBrand {
   updated_at: string
 }
 
-export type BrandNetworkRole = 'customer' | 'partner' | 'leader'
+// BRAND-PROSPECT-1 — statut dans une marque ; le statut général est le plus avancé des marques.
+export type BrandNetworkRole = 'prospect' | 'customer' | 'partner' | 'leader'
 
 export type CareJourneyStatus = 'active' | 'completed' | 'stopped'
 

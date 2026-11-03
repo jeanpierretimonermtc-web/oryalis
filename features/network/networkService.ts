@@ -1,5 +1,6 @@
 import { supabase } from '@/shared/lib/supabase'
 import type { Brand, BrandNetworkRole, Client, NetworkNode } from '@/shared/lib/types'
+import { isBrandPartnerRole } from '@/features/brands/brandRoleLabels'
 import { isProgramEligibleForNextOccurrence } from '@/features/clients/recurringProgramService'
 
 const NETWORK_COLS =
@@ -147,7 +148,7 @@ export async function fetchBrandNetworks(userId: string): Promise<BrandNetwork[]
   // le réseau, sauf s'il y est déjà placé comme partenaire ou sous un parrain.
   const links = ((linksRes.data ?? []) as unknown as BrandLinkRow[]).filter(l =>
     l.client && !l.client.archived_at &&
-    (l.network_role !== 'customer' || l.sponsor_client_id != null || l.client.contact_role.some(r => r !== 'prospect' && r !== 'inactive')))
+    (isBrandPartnerRole(l.network_role) || l.sponsor_client_id != null || (l.network_role === 'customer' && l.client.contact_role.some(r => r !== 'prospect' && r !== 'inactive'))))
 
   const linkedIds = new Set(links.map(l => l.client_id))
   const unbranded = flat.filter(c => !linkedIds.has(c.id))

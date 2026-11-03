@@ -271,10 +271,10 @@ function RolePills({ client, brandRoles, linked }: { client: ClientListItem; bra
   return (
     <>
       {client.contact_role
-        .filter(role => !linked || (role !== 'customer' && !PARTNER_ROLES.includes(role)))
+        .filter(role => !linked || (role !== 'customer' && role !== 'prospect' && !PARTNER_ROLES.includes(role)))
         .map(role => <RolePill key={role} role={role} />)}
       {(brandRoles ?? []).map(({ brand, role }) => {
-        const rc = getRoleColors(role === 'leader' ? 'leader' : role === 'partner' ? 'distributor' : 'customer', colors)
+        const rc = getRoleColors(role === 'leader' ? 'leader' : role === 'partner' ? 'distributor' : role === 'prospect' ? 'prospect' : 'customer', colors)
         return (
           <View key={brand.id} style={[styles.pill, { backgroundColor: rc.bg }]}>
             <Text style={[styles.pillText, { color: rc.text }]}>{brandRoleLabel(brand, role, getRoleLabel)}{showBrandName ? ` · ${brand.name}` : ''}</Text>

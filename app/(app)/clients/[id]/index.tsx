@@ -1226,7 +1226,7 @@ export default function ClientDetailScreen() {
                   {/* BRAND-ROLES-1 — avec des marques, les rôles réseau s'affichent par marque
                       ("Conseillère · doTERRA") au lieu d'un rôle global unique. */}
                   {client.contact_role
-                    .filter(role => brandLinks.length === 0 || (role !== 'customer' && !(NETWORK_ROLES as readonly string[]).includes(role)))
+                    .filter(role => brandLinks.length === 0 || (role !== 'customer' && role !== 'prospect' && !(NETWORK_ROLES as readonly string[]).includes(role)))
                     .map(role => {
                       const rc = getRoleColors(role, colors)
                       return (
@@ -1238,7 +1238,7 @@ export default function ClientDetailScreen() {
                       )
                     })}
                   {brandLinks.map(l => {
-                    const rc = getRoleColors(l.network_role === 'leader' ? 'leader' : l.network_role === 'partner' ? 'distributor' : 'customer', colors)
+                    const rc = getRoleColors(l.network_role === 'leader' ? 'leader' : l.network_role === 'partner' ? 'distributor' : l.network_role === 'prospect' ? 'prospect' : 'customer', colors)
                     return (
                       <View key={l.id} style={[styles.heroPill, { backgroundColor: rc.bg }]}>
                         <Text style={[styles.heroPillText, { color: rc.text }]}>
