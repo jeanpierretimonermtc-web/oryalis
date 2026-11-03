@@ -1408,7 +1408,8 @@
     "urgent": "Urgent",
     "confirm": "Confirm",
     "retry": "Retry",
-    "calendar_day_appointments": "Already booked that day"
+    "calendar_day_appointments": "Already booked that day",
+    "close": "Close"
   },
   "owner": {
     "access_required": "Owner access required",

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { View, Text, TouchableOpacity, TextInput, Modal, Switch, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, TouchableOpacity, TextInput, Modal, Switch, StyleSheet, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react-native'
@@ -47,6 +47,8 @@ export function OrderEditModal({ order, onClose, onSave }: OrderEditModalProps) 
   const { getLrpName } = useAppConfig()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
+  const { width: screenWidth } = useWindowDimensions()
+  const isWideModal = screenWidth >= 768
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
 
   const [date, setDate]               = useState(order.order_date.split('T')[0])
@@ -283,16 +285,24 @@ export function OrderEditModal({ order, onClose, onSave }: OrderEditModalProps) 
 
   return (
     <>
-      <Modal visible transparent animationType="slide" onRequestClose={() => { if (!saving) onClose() }}>
-        <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <View style={styles.handle} />
+      <Modal visible transparent animationType={isWideModal ? 'fade' : 'slide'} onRequestClose={() => { if (!saving) onClose() }}>
+        <View style={[styles.overlay, isWideModal && styles.overlayWide]}>
+          <View style={[styles.sheet, isWideModal && styles.sheetWide]}>
+            {!isWideModal ? <View style={styles.handle} /> : null}
             <View style={styles.header}>
               <Text style={styles.title}>{t('orders.edit_title')}</Text>
-              <TouchableOpacity onPress={() => { if (!saving) onClose() }} disabled={saving} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Text style={styles.close}>✕</Text>
+              <TouchableOpacity
+                style={styles.closeBtn}
+                onPress={() => { if (!saving) onClose() }}
+                disabled={saving}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel={t('common.close')}
+              >
+                <X size={16} color={colors.textSecondary} strokeWidth={2.2} />
               </TouchableOpacity>
             </View>
+
+            <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
 
             {/* LRP-4.5 §8 — contexte contact toujours visible en tête de modale (déjà chargé via
                 la jointure client:clients(full_name) de ORDER_LIST_COLS, aucune requête
@@ -641,8 +651,9 @@ export function OrderEditModal({ order, onClose, onSave }: OrderEditModalProps) 
               </View>
             </View>
             <TextArea label={t('orders.fields.notes')} value={notes} onChangeText={setNotes} />
-            {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+            </ScrollView>
 
+            {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
             <View style={styles.formBtns}>
               <TouchableOpacity style={styles.cancelBtn} onPress={onClose} disabled={saving}>
                 <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
@@ -677,15 +688,19 @@ export function OrderEditModal({ order, onClose, onSave }: OrderEditModalProps) 
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+    overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' },
+    overlayWide: { justifyContent: 'center', alignItems: 'center', padding: 24 },
     sheet: {
       backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-      paddingHorizontal: 20, paddingBottom: 32, gap: 12,
+      paddingHorizontal: 20, paddingBottom: 24, gap: 12, maxHeight: '92%',
     },
+    sheetWide: { width: '100%', maxWidth: 640, maxHeight: '90%', borderRadius: 20, paddingTop: 18, paddingHorizontal: 24 },
     handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
-    title:  { fontSize: 16, fontFamily: fonts.bold, color: colors.text, flex: 1 },
-    close:  { fontSize: 16, color: colors.textTertiary, padding: 4 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+    title:  { fontSize: 18, fontFamily: fonts.bold, color: colors.text, flex: 1 },
+    closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+    body: { flexGrow: 0, flexShrink: 1 },
+    bodyContent: { gap: 12, paddingVertical: 4 },
 
     // ORDER-SYNC-1 — lignes produit d'une commande structurée : bordure/rayon/couleurs cohérents
     // avec Input/TextArea de cet écran (colors.border, colors.card), compact et responsive

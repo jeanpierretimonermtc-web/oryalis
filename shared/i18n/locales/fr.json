@@ -1408,7 +1408,8 @@
     "urgent": "Urgent",
     "confirm": "Confirmer",
     "retry": "Réessayer",
-    "calendar_day_appointments": "RDV déjà prévus ce jour-là"
+    "calendar_day_appointments": "RDV déjà prévus ce jour-là",
+    "close": "Fermer"
   },
   "owner": {
     "access_required": "Accès owner requis",
