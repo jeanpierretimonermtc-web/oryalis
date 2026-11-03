@@ -162,7 +162,10 @@ export function useDailyActions() {
         // le contact réel le plus ancien d'abord, départagé par id. Volume réel vérifié (28
         // clients pour ce compte) très en-dessous de la limite, mais l'ordre explicite reste
         // nécessaire pour ne jamais dépendre de l'ordre naturel Postgres.
-        supabase.from('clients').select('id, full_name, next_action_at, last_interaction_at, manually_inactive, created_at').eq('user_id', uid).is('archived_at', null).not('last_interaction_at', 'is', null).order('last_interaction_at', { ascending: true }).order('id').limit(300),
+        supabase.from('clients').select('id, full_name, next_action_at, last_interaction_at, manually_inactive, created_at, risk_dismissed_at').eq('user_id', uid).is('archived_at', null).not('last_interaction_at', 'is', null).order('last_interaction_at', { ascending: true }).order('id').limit(300)
+          .then(async res => res.error?.code === '42703'
+            ? supabase.from('clients').select('id, full_name, next_action_at, last_interaction_at, manually_inactive, created_at').eq('user_id', uid).is('archived_at', null).not('last_interaction_at', 'is', null).order('last_interaction_at', { ascending: true }).order('id').limit(300)
+            : res),
         // LRP-4 — source de vérité recurring_programs (status='active' obligatoire) : un
         // programme paused/cancelled/completed ne doit plus jamais générer d'entrée
         // "Aujourd'hui", même règle que LRP-2 appliquée au nouveau modèle.
@@ -284,7 +287,15 @@ export function useDailyActions() {
       // maintenu par trigger DB). "overdue" n'est retenu que si l'échéance manquée est
       // antérieure à aujourd'hui, pour ne jamais faire doublon avec les catégories concrètes
       // aujourd'hui/en retard ci-dessus (priorité toujours inférieure, voir DAILY_PRIORITY).
+      // DASH-RISK-1 — un contact déjà listé pour une action concrète en retard (RDV, relance,
+      // échange, tâche) n'est pas répété en "client à risque" : même problème, une seule ligne.
+      const concreteOverdue = new Set(result
+        .filter(r => r.kind === 'overdue_appointment' || r.kind === 'overdue_followup' || r.kind === 'overdue_interaction' || r.kind === 'overdue_task')
+        .map(r => r.clientId))
       for (const row of (atRiskCandidates.data ?? []) as any[]) {
+        if (concreteOverdue.has(row.id)) continue
+        // "Ne plus signaler" — valable tant qu'aucun nouvel échange n'a eu lieu depuis.
+        if (row.risk_dismissed_at && row.risk_dismissed_at >= row.last_interaction_at) continue
         // Garde en défense en profondeur — la requête filtre déjà last_interaction_at IS NOT
         // NULL, mais un contact jamais sollicité ne doit jamais pouvoir apparaître ici même
         // si la requête changeait plus tard.

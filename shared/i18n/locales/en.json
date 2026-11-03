@@ -379,7 +379,8 @@
     "history_upcoming_one": "Upcoming: {{count}} planned action",
     "history_upcoming_other": "Upcoming: {{count}} planned actions",
     "history_upcoming_cta": "See Follow-up",
-    "history_note_hint": "Free note, added to the contact’s history."
+    "history_note_hint": "Free note, added to the contact’s history.",
+    "quick_filter_dormant": "Dormant"
   },
   "appointments": {
     "title": "Appointments",
@@ -804,7 +805,8 @@
     "after_no_change": "No change",
     "after_becomes": "Becomes {{role}}",
     "after_unknown": "not set",
-    "error_followup_conflict": "A follow-up already exists around this date: tick the orange box under the date to create it anyway, or pick another date."
+    "error_followup_conflict": "A follow-up already exists around this date: tick the orange box under the date to create it anyway, or pick another date.",
+    "outcome_automations_hint": "Untick the ones not to create. Dates and texts can be edited afterwards in the contact’s Follow-up tab."
   },
   "appointment_types": {
     "discovery_call": "Discovery call",
@@ -1378,7 +1380,16 @@
     "pipeline_total_other": "{{count}} contacts",
     "mlm_no_brand": "Off-catalog products",
     "clock_me": "Me · {{city}}",
-    "clock_hint": "Add a time zone to a contact abroad to see their time here."
+    "clock_hint": "Add a time zone to a contact abroad to see their time here.",
+    "risk_close": "Postpone",
+    "risk_remind_title": "Remind me…",
+    "risk_remind_1w": "📅 In 1 week",
+    "risk_remind_1m": "📅 In 1 month",
+    "risk_remind_3m": "📅 In 3 months",
+    "risk_dismiss": "✕ Stop flagging",
+    "risk_followup_title": "Get back in touch with {{name}}",
+    "risk_more_one": "+ {{count}} other dormant contact",
+    "risk_more_other": "+ {{count}} other dormant contacts"
   },
   "common": {
     "save": "Save",

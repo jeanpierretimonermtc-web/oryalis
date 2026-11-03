@@ -379,7 +379,8 @@
     "history_upcoming_one": "À venir : {{count}} action prévue",
     "history_upcoming_other": "À venir : {{count}} actions prévues",
     "history_upcoming_cta": "Voir le Suivi",
-    "history_note_hint": "Note libre, ajoutée à l’historique du contact."
+    "history_note_hint": "Note libre, ajoutée à l’historique du contact.",
+    "quick_filter_dormant": "Dormants"
   },
   "appointments": {
     "title": "Rendez-vous",
@@ -804,7 +805,8 @@
     "after_no_change": "Pas de changement",
     "after_becomes": "Devient {{role}}",
     "after_unknown": "non renseigné",
-    "error_followup_conflict": "Une relance existe déjà autour de cette date : cochez l’encadré orange sous la date pour la créer quand même, ou choisissez une autre date."
+    "error_followup_conflict": "Une relance existe déjà autour de cette date : cochez l’encadré orange sous la date pour la créer quand même, ou choisissez une autre date.",
+    "outcome_automations_hint": "Décochez celles à ne pas créer. Dates et textes modifiables ensuite dans l’onglet Suivi du contact."
   },
   "appointment_types": {
     "discovery_call": "Appel découverte",
@@ -1378,7 +1380,16 @@
     "pipeline_total_other": "{{count}} contacts",
     "mlm_no_brand": "Produits hors catalogue",
     "clock_me": "Moi · {{city}}",
-    "clock_hint": "Ajoute un fuseau horaire à un contact à l’étranger pour voir son heure ici."
+    "clock_hint": "Ajoute un fuseau horaire à un contact à l’étranger pour voir son heure ici.",
+    "risk_close": "Reporter",
+    "risk_remind_title": "Me le rappeler…",
+    "risk_remind_1w": "📅 Dans 1 semaine",
+    "risk_remind_1m": "📅 Dans 1 mois",
+    "risk_remind_3m": "📅 Dans 3 mois",
+    "risk_dismiss": "✕ Ne plus signaler",
+    "risk_followup_title": "Reprendre contact avec {{name}}",
+    "risk_more_one": "+ {{count}} autre contact dormant",
+    "risk_more_other": "+ {{count}} autres contacts dormants"
   },
   "common": {
     "save": "Enregistrer",

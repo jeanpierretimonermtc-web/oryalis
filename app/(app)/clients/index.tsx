@@ -68,9 +68,9 @@ function inSegment(c: ClientListItem, s: Segment, team: TeamInfo): boolean {
 
 // Filtres rapides, choix unique : chacun pilote les états existants (actionFilter/horizon) ou
 // un filtre ponctuel (prospects chauds, VIP) — jamais un second moteur de filtrage.
-type QuickFilter = 'all' | 'overdue' | 'todo' | 'none' | 'hot' | 'at_risk' | 'vip' | 'inactive' | 'duplicates'
-const QUICK_FILTERS: QuickFilter[] = ['all', 'overdue', 'todo', 'none', 'hot', 'at_risk', 'vip', 'inactive', 'duplicates']
-type ExtraFilter = 'hot' | 'at_risk' | 'vip' | 'inactive' | 'duplicates' | null
+type QuickFilter = 'all' | 'overdue' | 'todo' | 'none' | 'hot' | 'at_risk' | 'dormant' | 'vip' | 'inactive' | 'duplicates'
+const QUICK_FILTERS: QuickFilter[] = ['all', 'overdue', 'todo', 'none', 'hot', 'at_risk', 'dormant', 'vip', 'inactive', 'duplicates']
+type ExtraFilter = 'hot' | 'at_risk' | 'dormant' | 'vip' | 'inactive' | 'duplicates' | null
 
 // ACTION-3.2 — filtre "ce qui nécessite mon attention", dérivé uniquement de next_action_at
 // (déjà calculé côté DB, voir clients.next_action_* / migration 20260712_contact_activity_
@@ -590,8 +590,8 @@ export default function ClientsScreen() {
   const { t } = useTranslation()
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { status: statusParam, pipeline: pipelineParam, action: actionParam, horizon: horizonParam } =
-    useLocalSearchParams<{ status?: ContactRole | 'all' | 'vip'; pipeline?: PipelineStage; action?: ActionFilter; horizon?: HorizonFilter }>()
+  const { status: statusParam, pipeline: pipelineParam, action: actionParam, horizon: horizonParam, quick: quickParam } =
+    useLocalSearchParams<{ status?: ContactRole | 'all' | 'vip'; pipeline?: PipelineStage; action?: ActionFilter; horizon?: HorizonFilter; quick?: string }>()
   const [query, setQuery] = useState('')
   // Debounce local (P2.2.1) : évite une requête Supabase à chaque frappe ("martin" tapé vite
   // ne doit produire qu'1 recherche, pas 6). L'effacement du champ (query === '') contourne
@@ -604,7 +604,8 @@ export default function ClientsScreen() {
   }, [query])
   const [segment, setSegment] = useState<Segment>('all')
   const [partnerRole, setPartnerRole] = useState<ContactRole | null>(null)
-  const [extraFilter, setExtraFilter] = useState<ExtraFilter>(null)
+  const [extraFilter, setExtraFilter] = useState<ExtraFilter>(quickParam === 'dormant' ? 'dormant' : null)
+  useEffect(() => { if (quickParam === 'dormant') setExtraFilter('dormant') }, [quickParam])
   const [pipelineFilter, setPipelineFilter] = useState<PipelineStage | null>(pipelineParam ?? null)
   // BRANDS-1 — filtre Marque (id de marque, ou 'none' = sans marque), combiné aux autres.
   const [brandFilter, setBrandFilter] = useState<string | null>(null)
@@ -796,6 +797,11 @@ export default function ClientsScreen() {
   // Inactifs = rôle Inactif OU marqué inactif à la main dans la fiche (manually_inactive) —
   // jamais "Dormant", qui décrit seulement l'absence de contact récent avec un contact actif.
   const inactiveContacts = useMemo(() => displayed.filter(c => c.manually_inactive || c.contact_role.includes('inactive')), [displayed])
+  // DASH-RISK-1 — dormants : sans échange depuis 30 j et rien de prévu (même règle que l'accueil).
+  const dormantContacts = useMemo(() => displayed.filter(c => {
+    const h = computeRelationshipHealth(c)
+    return h.tier === 'dormant' && !h.overridden
+  }), [displayed])
   // CONTACTS-DUPLICATES-1 — détection sur TOUS les contacts actifs (un doublon peut être rangé
   // dans un autre segment), puis restreinte aux contacts affichés ; groupes côte à côte.
   const duplicateInfo = useMemo(() => findDuplicates(clients), [clients])
@@ -885,6 +891,7 @@ export default function ClientsScreen() {
     : actionFilter === 'none' ? noActionContacts
     : extraFilter === 'hot' ? hotContacts
     : extraFilter === 'at_risk' ? atRiskContacts
+    : extraFilter === 'dormant' ? dormantContacts
     : extraFilter === 'vip' ? vipContacts
     : extraFilter === 'inactive' ? inactiveContacts
     : extraFilter === 'duplicates' ? duplicateContacts
@@ -896,7 +903,7 @@ export default function ClientsScreen() {
     : extraFilter ?? 'all'
 
   function applyQuick(q: QuickFilter) {
-    setExtraFilter(q === 'hot' || q === 'at_risk' || q === 'vip' || q === 'inactive' || q === 'duplicates' ? q : null)
+    setExtraFilter(q === 'hot' || q === 'at_risk' || q === 'dormant' || q === 'vip' || q === 'inactive' || q === 'duplicates' ? q : null)
     if (q === 'overdue') { setActionFilter('todo'); setHorizonFilter('overdue'); setSourceFilter('all') }
     else if (q === 'todo') { setActionFilter('todo'); if (isUrgencyWindow(horizonFilter)) setHorizonFilter('7d') }
     else if (q === 'none') setActionFilter('none')
@@ -910,6 +917,7 @@ export default function ClientsScreen() {
     none: noActionContacts.length,
     hot: hotContacts.length,
     at_risk: atRiskContacts.length,
+    dormant: dormantContacts.length,
     vip: vipContacts.length,
     inactive: inactiveContacts.length,
     duplicates: duplicateContacts.length,

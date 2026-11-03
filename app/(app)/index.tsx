@@ -46,6 +46,8 @@ import { fonts } from '@/shared/theme/fonts'
 import type { FollowupWithClient, Client, PipelineStage } from '@/shared/lib/types'
 import type { Appointment } from '@/features/appointments/appointmentTypes'
 import { formatDate } from '@/shared/lib/dateFormat'
+import { snoozeClientRisk, dismissClientRisk } from '@/features/clients/riskService'
+import { AnchoredMenu } from '@/shared/components/ui/AnchoredMenu'
 
 function useLocale() {
   const { i18n } = useTranslation()
@@ -289,13 +291,33 @@ function useReasonText() {
 // DASH-ACTIVITY-1 — unique liste d'actions de l'accueil : les priorités en cartes, puis le reste
 // des actions du jour en lignes compactes (ancien bloc "À faire aujourd'hui", supprimé).
 const REST_MAX = 8
+const RISK_MAX = 3
 
-function TopPriorities({ top, rest, loading }: { top: DailyActionItem[]; rest: DailyActionItem[]; loading: boolean }) {
+function TopPriorities({ top, rest, loading, riskOverflow, onRiskChanged }: {
+  top: DailyActionItem[]; rest: DailyActionItem[]; loading: boolean; riskOverflow: number; onRiskChanged: () => void
+}) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const locale = useLocale()
   const reasonText = useReasonText()
+  const { session } = useAuth()
+  // DASH-RISK-1 — clôturer un risque : relance à une date, ou ne plus signaler.
+  const [riskMenu, setRiskMenu] = useState<{ item: DailyActionItem; pos: { x: number; y: number } } | null>(null)
+  const [riskError, setRiskError] = useState<string | null>(null)
+  async function runRisk(action: () => Promise<void>) {
+    setRiskError(null)
+    try { await action(); onRiskChanged() }
+    catch (e) { console.error('[dashboard.risk]', e); setRiskError(t('common.error')) }
+  }
+  function snooze(item: DailyActionItem, days: number) {
+    if (!session || !item.clientId) return
+    const d = new Date(); d.setDate(d.getDate() + days)
+    const due = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    void runRisk(() => snoozeClientRisk(session.user.id, item.clientId!, due, t('dashboard.risk_followup_title', { name: item.clientName })))
+  }
+  const openRiskMenu = (item: DailyActionItem) => (e: { nativeEvent: { pageX: number; pageY: number } }) =>
+    setRiskMenu({ item, pos: { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY } })
 
   if (loading) return <View style={styles.actionCenter}><ActivityIndicator color={colors.primary} /></View>
 
@@ -347,6 +369,11 @@ function TopPriorities({ top, rest, loading }: { top: DailyActionItem[]; rest: D
                   <Text style={styles.topPriorityBtnPrimaryText}>{t(PRIMARY_ACTION_LABEL_KEY[item.kind] as any)}</Text>
                   <ChevronRight size={14} color="#ffffff" strokeWidth={2.4} />
                 </TouchableOpacity>
+                {item.kind === 'at_risk_client' ? (
+                  <TouchableOpacity style={styles.topPriorityBtnSecondary} onPress={openRiskMenu(item)} activeOpacity={0.75}>
+                    <Text style={styles.topPriorityBtnSecondaryText}>{t('dashboard.risk_close')} ▾</Text>
+                  </TouchableOpacity>
+                ) : null}
                 {showViewFile ? (
                   <TouchableOpacity
                     style={styles.topPriorityBtnSecondary}
@@ -381,6 +408,11 @@ function TopPriorities({ top, rest, loading }: { top: DailyActionItem[]; rest: D
                 </View>
               ) : null}
             </View>
+            {item.kind === 'at_risk_client' ? (
+              <TouchableOpacity style={styles.riskRowBtn} onPress={openRiskMenu(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7}>
+                <Text style={styles.riskRowBtnText}>{t('dashboard.risk_close')} ▾</Text>
+              </TouchableOpacity>
+            ) : null}
             <ChevronRight size={16} color={colors.textTertiary} strokeWidth={2.2} />
           </TouchableOpacity>
         )
@@ -390,6 +422,25 @@ function TopPriorities({ top, rest, loading }: { top: DailyActionItem[]; rest: D
           <Text style={styles.actionMore}>+{rest.length - REST_MAX} {t('dashboard.other_actions')}</Text>
         </TouchableOpacity>
       ) : null}
+      {riskOverflow > 0 ? (
+        <TouchableOpacity onPress={() => router.push('/(app)/clients?quick=dormant' as any)} activeOpacity={0.7}>
+          <Text style={styles.actionMore}>{t('dashboard.risk_more', { count: riskOverflow })} ›</Text>
+        </TouchableOpacity>
+      ) : null}
+      {riskError ? <Text style={styles.riskError}>{riskError}</Text> : null}
+      <AnchoredMenu
+        visible={!!riskMenu}
+        onClose={() => setRiskMenu(null)}
+        anchor={riskMenu?.pos ?? null}
+        width={240}
+        title={t('dashboard.risk_remind_title')}
+        items={riskMenu ? [
+          { key: 'w1', label: t('dashboard.risk_remind_1w'), onPress: () => snooze(riskMenu.item, 7) },
+          { key: 'm1', label: t('dashboard.risk_remind_1m'), onPress: () => snooze(riskMenu.item, 30) },
+          { key: 'm3', label: t('dashboard.risk_remind_3m'), onPress: () => snooze(riskMenu.item, 90) },
+          { key: 'dismiss', label: t('dashboard.risk_dismiss'), danger: true, onPress: () => { const id = riskMenu.item.clientId; if (id) void runRisk(() => dismissClientRisk(id)) } },
+        ] : []}
+      />
     </View>
   )
 }
@@ -488,12 +539,22 @@ export default function DashboardScreen() {
 
   // "Priorités du jour" : les 6 premières en cartes (dédupliquées), le reste en lignes compactes
   // dans la même liste — jamais le même élément deux fois.
-  const topPriorities = useMemo(() => buildTopPriorities(dailyActions, 6), [dailyActions])
+  // DASH-RISK-1 — au plus 3 clients à risque (les plus anciens contacts d'abord) ; le reste
+  // est accessible depuis le filtre Dormants de la liste Contacts.
+  const { visibleActions, riskOverflow } = useMemo(() => {
+    const risk = dailyActions.filter(a => a.kind === 'at_risk_client')
+    const keep = new Set(risk.slice(0, RISK_MAX).map(r => r.id))
+    return {
+      visibleActions: dailyActions.filter(a => a.kind !== 'at_risk_client' || keep.has(a.id)),
+      riskOverflow: Math.max(0, risk.length - RISK_MAX),
+    }
+  }, [dailyActions])
+  const topPriorities = useMemo(() => buildTopPriorities(visibleActions, 6), [visibleActions])
   const todayClientIds = useMemo(() => dailyActions.map(a => a.clientId).filter((v): v is string => !!v), [dailyActions])
   const remainingActions = useMemo(() => {
     const shown = new Set(topPriorities.map(i => i.id))
-    return dailyActions.filter(item => !shown.has(item.id))
-  }, [dailyActions, topPriorities])
+    return visibleActions.filter(item => !shown.has(item.id))
+  }, [visibleActions, topPriorities])
 
   const firstName = session?.user?.user_metadata?.full_name?.split(' ')[0] ?? ''
   const hour = new Date().getHours()
@@ -650,7 +711,7 @@ export default function DashboardScreen() {
         )}
 
         {/* ── Priorités du jour (condensé, dédupliqué) ──── */}
-        <TopPriorities top={topPriorities} rest={remainingActions} loading={dailyLoading} />
+        <TopPriorities top={topPriorities} rest={remainingActions} loading={dailyLoading} riskOverflow={riskOverflow} onRiskChanged={refreshDaily} />
 
         {/* ── DASH/CAL-2 — Agenda personnel (jamais mêlé aux actions CRM) ─── */}
         <PersonalAgendaBlock events={personalEvents} loading={dailyLoading} />
@@ -1176,6 +1237,9 @@ function makeStyles(colors: ThemeColors) {
     actionRowText: { flex: 1 }, actionClient: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
     actionDetail: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary, marginTop: 2 },
     actionMore: { textAlign: 'center', fontSize: 12, color: colors.textTertiary, paddingTop: 4 },
+    riskRowBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginRight: 6 },
+    riskRowBtnText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.textSecondary },
+    riskError: { fontSize: 12.5, fontFamily: fonts.medium, color: colors.danger, marginTop: 6 },
 
     // ── DASH/CAL-2 / DASH/CAL-2.1 — Agenda personnel : bloc secondaire, repliable, jamais
     // danger/warning/primary (aucune notion d'urgence CRM ici). Header seul cliquable (zone

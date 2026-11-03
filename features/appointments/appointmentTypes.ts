@@ -191,6 +191,8 @@ export interface AppointmentOutcomeSaleOrderPlan {
   // l'utilisateur a confirmé le bloc "Programme récurrent" (jamais déduit automatiquement).
   isLrp: boolean
   lrpProgram: LrpProgramValue | null
+  // AUTO-SKIP-1 — relances automatiques décochées dans la fenêtre de clôture.
+  skippedAutomationRuleIds?: string[]
 }
 export interface AppointmentOutcomeRecommendationPlan {
   productName: string

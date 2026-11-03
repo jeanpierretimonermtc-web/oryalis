@@ -404,8 +404,9 @@ export async function confirmOrderFollowups(
   plan?: AutomationPlan,
   appointmentId?: string | null,
   orderId?: string | null,
+  excludeRuleIds: string[] = [],
 ): Promise<void> {
-  await applyOrderAutomation(userId, clientId, firstName, isFirstOrder, plan, appointmentId, orderId)
+  await applyOrderAutomation(userId, clientId, firstName, isFirstOrder, plan, appointmentId, orderId, excludeRuleIds)
 }
 
 export async function updateOrderStatus(id: string, status: OrderStatus): Promise<void> {

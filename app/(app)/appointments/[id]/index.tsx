@@ -536,6 +536,8 @@ export default function AppointmentDetailScreen() {
   const personalFollowupUserTouchedRef = useRef(false)
   const [followupConflict,        setFollowupConflict]        = useState<FollowupConflict | null>(null)
   const [confirmConflict,         setConfirmConflict]         = useState(false)
+  // AUTO-SKIP-1 — relances automatiques de commande décochées dans la fenêtre de clôture.
+  const [skippedAutoRules, setSkippedAutoRules] = useState<Set<string>>(new Set())
   // APPT-PIPELINE-2 — statut du contact avant le premier choix "Où en est X ?" de cette visite.
   const [afterBaseline, setAfterBaseline] = useState<{ effective: PipelineStage | null; contact: PipelineStage | null } | null>(null)
   // RDV futurs existants du contact — réutiliser comme suite plutôt que dupliquer (§13).
@@ -1573,7 +1575,7 @@ export default function AppointmentDetailScreen() {
   function buildActionPlanFromDrafts(): AppointmentOutcomeActionPlan {
     return {
       saleOrder: outcomeDraft === 'sale_completed' && saleProducts.length > 0
-        ? { products: saleProducts, isLrp: isLrpSaleDraft, lrpProgram: !showRevision ? lrpProgramValueDraft : null }
+        ? { products: saleProducts, isLrp: isLrpSaleDraft, lrpProgram: !showRevision ? lrpProgramValueDraft : null, skippedAutomationRuleIds: [...skippedAutoRules] }
         : null,
       // RDV-CLOSURE-PRODUCTS/P2.1 — 1 recommandation = 1 produit (audit P2, product_id/
       // catalog_id sont singuliers sur recommendations) : au plus UN produit envisagé peut être
@@ -2700,7 +2702,8 @@ export default function AppointmentDetailScreen() {
           {(saleListExpanded ? saleProducts : saleProducts.slice(0, 3)).map((p, i) => (
             <View key={i} style={styles.saleProductRow}>
               <TextInput
-                style={[styles.bizValueInput, { flex: 1, maxWidth: undefined }]}
+                style={[styles.bizValueInput, styles.productNameInput]}
+                  multiline
                 value={p.label}
                 onChangeText={(v) => updateSaleProduct(i, { label: v })}
                 placeholder={t('appointments.outcome_sale_product_placeholder')}
@@ -3038,12 +3041,22 @@ export default function AppointmentDetailScreen() {
             <Text style={styles.boxTitle}>{t('appointments.outcome_automations_title')}</Text>
             {rules.map(rule => {
               const delay = getAutomationDelay(rule.id, rule.delayDays)
+              const on = !skippedAutoRules.has(rule.id)
               return (
-                <View key={rule.id} style={styles.debriefRecapRow}>
-                  <Text style={styles.debriefRecapLabel} numberOfLines={1}>{renderRuleTitle(rule, firstName, delay)}</Text>
-                </View>
+                <TouchableOpacity
+                  key={rule.id}
+                  style={styles.autoRuleRow}
+                  onPress={() => setSkippedAutoRules(prev => { const next = new Set(prev); if (on) next.add(rule.id); else next.delete(rule.id); return next })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.taskCheckBox, on && { backgroundColor: colors.success, borderColor: colors.success }]}>
+                    {on && <Check size={12} color="#fff" strokeWidth={3} />}
+                  </View>
+                  <Text style={[styles.debriefRecapLabel, { flex: 1 }, !on && styles.autoRuleOff]} numberOfLines={2}>{renderRuleTitle(rule, firstName, delay)}</Text>
+                </TouchableOpacity>
               )
             })}
+            <Text style={styles.noFollowupHint}>{t('appointments.outcome_automations_hint')}</Text>
           </View>
         )
       })() : null}
@@ -4027,7 +4040,8 @@ export default function AppointmentDetailScreen() {
             {discussedProducts.map((p, i) => (
               <View key={i} style={styles.saleProductRow}>
                 <TextInput
-                  style={[styles.bizValueInput, { flex: 1, maxWidth: undefined }]}
+                  style={[styles.bizValueInput, styles.productNameInput]}
+                  multiline
                   value={p.label}
                   onChangeText={(v) => updateDiscussedProduct(i, { label: v })}
                   placeholder={t('appointments.outcome_sale_product_placeholder')}
@@ -4703,6 +4717,8 @@ function makeStyles(colors: ThemeColors) {
     saleProductRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
     // P4 §2 — en-têtes de colonnes Produit/Qté/Prix unitaire, même schéma flex/largeurs que
     // saleProductRow pour un alignement exact.
+    // Nom du produit : toute la largeur restante, retour à la ligne si le nom est long.
+    productNameInput: { flex: 1, minWidth: 0, maxWidth: '100%', textAlignVertical: 'top' },
     productColumnHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
     productColumnHeaderText: { fontSize: 10.5, fontFamily: fonts.bold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.4 },
     // P4 §5 — mise en avant discrète du warning "prix manquant", distincte du hint neutre
@@ -4795,6 +4811,8 @@ function makeStyles(colors: ThemeColors) {
     debriefRecap:      { marginBottom: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 12, gap: 4 },
     detailInput:       { width: '100%', minHeight: 44, fontSize: 14, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginTop: 4 },
     detailInputMultiline: { minHeight: 64, textAlignVertical: 'top' },
+    autoRuleRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+    autoRuleOff:       { color: colors.textTertiary, textDecorationLine: 'line-through' },
     conflictBox:       { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.warning, backgroundColor: colors.warningLight },
     conflictText:      { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.text },
     switchConfirmBox:  { marginBottom: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.warning, backgroundColor: colors.warningLight, padding: 12, gap: 10 },

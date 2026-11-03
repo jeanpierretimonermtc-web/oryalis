@@ -22,6 +22,20 @@ function daysSince(iso: string, now: number): number {
   return Math.floor((now - new Date(iso).getTime()) / 86400000)
 }
 
+// DASH-RISK-1 — "Me le rappeler" : une relance normale à la date choisie (le contact a alors une
+// action future et sort des clients à risque jusqu'à cette date).
+export async function snoozeClientRisk(userId: string, clientId: string, dueDate: string, title: string): Promise<void> {
+  const { error } = await supabase.from('followups')
+    .insert({ user_id: userId, client_id: clientId, title, due_date: dueDate, done: false })
+  if (error) throw error
+}
+
+// "Ne plus signaler" : le contact sort des priorités (il reste dans le filtre Dormants).
+export async function dismissClientRisk(clientId: string): Promise<void> {
+  const { error } = await supabase.from('clients').update({ risk_dismissed_at: new Date().toISOString() }).eq('id', clientId)
+  if (error) throw error
+}
+
 export async function fetchAtRiskClients(userId: string): Promise<AtRiskClient[]> {
   const [clientsRes, ordersRes, programsRes] = await Promise.all([
     supabase.from('clients')

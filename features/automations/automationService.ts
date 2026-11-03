@@ -232,10 +232,12 @@ export async function applyOrderAutomation(
   plan?: AutomationPlan,
   appointmentId?: string | null,
   orderId?: string | null,
+  excludeRuleIds: string[] = [],
 ): Promise<void> {
   try {
     const { modules, delays } = await getAutomationConfig(userId)
-    let rules = getSuggestedRules(isFirstOrder).filter(r => modules.includes(r.moduleKey))
+    // AUTO-SKIP-1 — relances décochées à la clôture du RDV : jamais créées.
+    let rules = getSuggestedRules(isFirstOrder).filter(r => modules.includes(r.moduleKey) && !excludeRuleIds.includes(r.id))
     // CARE-JOURNEY-1 — pendant un accompagnement actif, ses étapes assurent déjà le suivi :
     // seule la vérification de réception (J+3) est conservée, pour éviter deux messages la
     // même semaine. Un plan explicite (choix de l'utilisateur dans la modale) fait foi.

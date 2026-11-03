@@ -253,7 +253,7 @@ export async function applyOutcomePlanActions(
       // à jour d'une commande déjà existante (la garde de insertFollowup reste une protection
       // supplémentaire, pas la seule).
       if (created) {
-        await confirmOrderFollowups(userId, clientId, clientFirstName, isFirstOrder, undefined, appointmentId, order.id)
+        await confirmOrderFollowups(userId, clientId, clientFirstName, isFirstOrder, undefined, appointmentId, order.id, plan.saleOrder.skippedAutomationRuleIds ?? [])
       }
       // LRP-4 §13/§19 — le programme contact n'avance JAMAIS sur une révision, seulement sur la
       // clôture initiale — identifié via actionKeyPrefix (':closure') plutôt que `created` :
