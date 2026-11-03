@@ -276,11 +276,11 @@ export default function FollowupsScreen() {
                 ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
                 contentContainerStyle={[styles.list, displayed.length === 0 && styles.listEmpty]}
                 ListEmptyComponent={
+                  // EMPTY-STATE-2 — épuré : pas de bouton, les onglets sont déjà juste au-dessus.
                   <EmptyState
                     message={t(TAB_CONFIG[activeTab].emptyKey)}
-                    icon="✅"
-                    actionLabel={t('clients.title')}
-                    onAction={() => router.push('/(app)/clients')}
+                    hint={t(activeTab === 'upcoming' ? 'followups.empty_hint_upcoming' : 'followups.empty_hint_done')}
+                    icon={activeTab === 'upcoming' ? '🗓️' : '✓'}
                   />
                 }
                 onRefresh={refresh}

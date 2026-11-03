@@ -13,6 +13,7 @@ import type { ModuleKey } from '@/shared/lib/types'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
+import { deviceTimeZone, timeZoneCity } from '@/features/clients/timezones'
 
 const SIDEBAR_BREAKPOINT = 768
 
@@ -122,15 +123,44 @@ function makeTabStyles(colors: ThemeColors) {
   })
 }
 
+// ── Date du jour (TODAY-STAMP-1) ────────────────────────────────────────────
+
+function useNowStamp(timeZone: string) {
+  const { i18n } = useTranslation()
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    // Calé sur le début de chaque minute, pour que l'heure et le jour changent à l'heure pile.
+    let interval: ReturnType<typeof setInterval> | undefined
+    const timeout = setTimeout(() => {
+      setNow(new Date())
+      interval = setInterval(() => setNow(new Date()), 60000)
+    }, 60000 - (Date.now() % 60000))
+    return () => { clearTimeout(timeout); if (interval) clearInterval(interval) }
+  }, [])
+  const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
+  const fmt = (options: Intl.DateTimeFormatOptions) => {
+    try { return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(now) }
+    catch { return new Intl.DateTimeFormat(locale, options).format(now) }
+  }
+  const capitalize = (v: string) => v.charAt(0).toUpperCase() + v.slice(1)
+  return {
+    longDate:  capitalize(fmt({ weekday: 'long', day: 'numeric', month: 'long' })),
+    shortDate: capitalize(fmt({ weekday: 'short', day: 'numeric', month: 'short' })),
+    time:      fmt({ hour: '2-digit', minute: '2-digit' }),
+    city:      timeZoneCity(timeZone),
+  }
+}
+
 // ── Sidebar (web ≥768px) ────────────────────────────────────────────────────
 
-function Sidebar({ pathname }: { pathname: string }) {
+function Sidebar({ pathname, timeZone }: { pathname: string; timeZone: string }) {
   const { t } = useTranslation()
   const { session } = useAuth()
   const { colors, mode } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { isModuleActive } = useAppConfig()
   const visibleNavItems = NAV_ITEMS.filter(item => !item.module || isModuleActive(item.module as ModuleKey))
+  const stamp = useNowStamp(timeZone)
 
   function isActive(segment: string) {
     if (segment === '') return pathname === '/'
@@ -154,6 +184,11 @@ function Sidebar({ pathname }: { pathname: string }) {
             resizeMode="contain"
           />
         </View>
+
+        <TouchableOpacity style={styles.todayStamp} onPress={() => router.push('/(app)/appointments' as any)} activeOpacity={0.7}>
+          <Text style={styles.todayStampDate} numberOfLines={1}>{stamp.longDate}</Text>
+          <Text style={styles.todayStampTime} numberOfLines={1}>{stamp.time} · {stamp.city}</Text>
+        </TouchableOpacity>
 
         <View style={styles.sidebarNav}>
           {visibleNavItems.map(item => {
@@ -210,6 +245,8 @@ export default function AppLayout() {
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null)
   const [avatarUrl, setAvatarUrl]   = useState<string | null>(null)
   const [profileName, setProfileName] = useState<string>('')
+  const [timeZone, setTimeZone] = useState<string>(deviceTimeZone())
+  const mobileStamp = useNowStamp(timeZone)
 
   useEffect(() => {
     if (!session) { setOnboardingDone(null); return }
@@ -217,12 +254,13 @@ export default function AppLayout() {
       try {
         const { data } = await supabase
           .from('profiles')
-          .select('onboarding_completed, avatar_url, full_name')
+          .select('onboarding_completed, avatar_url, full_name, timezone')
           .eq('id', session.user.id)
           .single()
         setOnboardingDone(data?.onboarding_completed ?? false)
         setAvatarUrl(data?.avatar_url ?? null)
         setProfileName(data?.full_name ?? '')
+        if (data?.timezone) setTimeZone(data.timezone)
       } catch {
         setOnboardingDone(true)
       }
@@ -255,7 +293,7 @@ export default function AppLayout() {
     <AppConfigProvider>
       <View style={[styles.root, isWide && styles.rootWide]}>
         {isWide
-          ? <Sidebar pathname={pathname} />
+          ? <Sidebar pathname={pathname} timeZone={timeZone} />
           : isRootRoute && (
             <View style={styles.mobileHeader}>
               <StatusBar style="light" />
@@ -264,6 +302,7 @@ export default function AppLayout() {
                 <Image source={require('@/assets/wordmark-dark.png')} style={styles.mobileHeaderWordmark} resizeMode="contain" />
               </View>
               <View style={styles.mobileHeaderRight}>
+                <Text style={styles.mobileHeaderDate} numberOfLines={1}>{mobileStamp.shortDate}</Text>
                 <TouchableOpacity onPress={() => router.push('/(app)/clients')} style={styles.mobileHeaderBtn}>
                   <Text style={styles.mobileHeaderBtnIcon}>🔍</Text>
                 </TouchableOpacity>
@@ -342,6 +381,7 @@ function makeStyles(colors: ThemeColors) {
   mobileHeaderWordmark:   { width: 146, height: 20 },
   mobileHeaderRight:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
   mobileHeaderBtn:        { padding: 4 },
+  mobileHeaderDate:       { fontSize: 12.5, fontFamily: fonts.medium, color: 'rgba(255,255,255,0.75)' },
   mobileHeaderBtnIcon:    { fontSize: 18 },
   mobileHeaderAvatar:     { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   mobileHeaderAvatarImg:  { width: 32, height: 32, borderRadius: 16 },
@@ -371,6 +411,9 @@ function makeStyles(colors: ThemeColors) {
   sidebarLogo:     { width: 44, height: 44 },
   sidebarWordmark: { width: 150, height: 20 },
   sidebarNav:     { paddingHorizontal: 8, paddingTop: 4, gap: 2 },
+  todayStamp:     { marginHorizontal: 8, marginBottom: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, gap: 1 },
+  todayStampDate: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
+  todayStampTime: { fontSize: 12.5, fontFamily: fonts.body, color: colors.textTertiary },
 
   navItem:       { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 10 },
   navItemActive: { backgroundColor: colors.primaryLight },

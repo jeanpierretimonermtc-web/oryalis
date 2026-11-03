@@ -11,7 +11,7 @@ import { enrollTotp, getMfaState, verifyTotp } from './mfaService'
 
 type Enrollment = Awaited<ReturnType<typeof enrollTotp>>
 
-function qrXml(value?: string) {
+export function qrXml(value?: string) {
   if (!value) return null
   if (value.startsWith('<svg')) return value
   const marker = 'data:image/svg+xml;utf-8,'

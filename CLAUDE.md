@@ -281,6 +281,15 @@ Réseau par marque : les rôles réseau de `clients.contact_role` sont synchroni
 
 `upline_nodes` existe désormais en prod (migration `20261031_upline_nodes.sql`, exécutée le 2026-10-31).
 
+Ajouts du 2026-11-03 (exécutés en prod) :
+- `20261101_appointment_brand.sql` — `appointments.brand_id` (marque du RDV, rattache le contact à la marque).
+- `20261102_unified_contact_status.sql` — un seul trigger `client_status_reconcile_trigger`
+  (`reconcile_contact_status()`) synchronise `contact_role` ↔ `pipeline_stage` ; un partenaire de marque
+  ne redescend pas sous `distributor`. Remplace les deux anciens triggers rôle/étape.
+- `20261103_privacy_account.sql` — `account_deletion_requests` (demande de suppression RGPD, délai 30 j,
+  écriture uniquement via `request_account_deletion` / `cancel_account_deletion`) et `list_my_login_devices()`
+  (appareils du praticien, lus depuis `security_login_events`). L'effacement effectif reste une opération owner.
+
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
 `solutions_proposed`, `recap_sent`, `next_appointment_date`, `native_event_id` : elles n'existent plus

@@ -75,6 +75,7 @@ import { gravatarUrl } from '@/shared/lib/gravatar'
 import { fonts } from '@/shared/theme/fonts'
 import { formatDate, formatTime, isoToLocalParts } from '@/shared/lib/dateFormat'
 import { computeRelationshipHealth } from '@/features/clients/relationshipHealth'
+import { PIPELINE_STAGES } from '@/shared/lib/types'
 
 type Tab = 'synthese' | 'chrono' | 'suivi' | 'profil'
 
@@ -244,6 +245,8 @@ export default function ClientDetailScreen() {
   const { client, loading, refresh } = useClient(id)
   const { appointments, refresh: refreshAppointments } = useClientAppointmentsWithContext(id)
   const [guardAction, setGuardAction] = useState<GuardedAction | null>(null)
+  const [pastApptsOpen, setPastApptsOpen] = useState(false)
+  const [doneFollowupsOpen, setDoneFollowupsOpen] = useState(false)
   const contactLocalTime = useContactLocalTime(client?.timezone)
   const { notes, refresh: refreshNotes } = useNotes(id)
   const { followups, refresh: refreshFollowups } = useClientFollowups(id)
@@ -461,7 +464,8 @@ export default function ClientDetailScreen() {
   const [photoUrlDraft, setPhotoUrlDraft]   = useState('')
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [gravatarFailed, setGravatarFailed] = useState(false)
-  const { isModuleActive, getRoleLabel, getPipelineStageLabel, getLrpName } = useAppConfig()
+  const { isModuleActive, getRoleLabel, getPipelineStageLabel, getLrpName, profile: businessProfile } = useAppConfig()
+  const showBrandName = businessProfile.activity_type === 'multi'
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const { width: screenW, height: screenH } = useWindowDimensions()
   const isDesktopWeb = Platform.OS === 'web' && screenW >= 768
@@ -931,11 +935,29 @@ export default function ClientDetailScreen() {
       : 'later'
   const NEXT_ACTION_COLOR = {
     overdue: { fg: colors.danger,  bg: colors.dangerLight,  border: colors.danger },
-    today:   { fg: colors.warning, bg: colors.warningLight, border: colors.warning },
+    today:   { fg: colors.warning, bg: colors.warningLight + '66', border: colors.warning },
     soon:    { fg: colors.primary, bg: colors.primaryLight, border: colors.primary },
     later:   { fg: colors.primary, bg: colors.card,         border: colors.border },
   }
   const nextActionColor = NEXT_ACTION_COLOR[nextActionUrgency]
+  // COLOR-RULE-1 — les boutons restent bleus ; seul le retard les passe en rouge.
+  const nextActionBtnColor = nextActionUrgency === 'overdue' ? colors.danger : colors.primary
+  // SUIVI-GROUPS-1 — RDV : passé non clôturé (à débriefer), à venir, passés/clôturés.
+  const apptGroups = (() => {
+    const nowMs = Date.now()
+    const isOpen = (a: typeof appointments[number]) => a.status === 'scheduled' || a.status === 'rescheduled'
+    const byStartAsc = (a: typeof appointments[number], b: typeof appointments[number]) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()
+    return {
+      toDebrief: appointments.filter(a => isOpen(a) && new Date(a.end_at).getTime() < nowMs).sort(byStartAsc),
+      upcoming: appointments.filter(a => isOpen(a) && new Date(a.end_at).getTime() >= nowMs).sort(byStartAsc),
+      past: appointments.filter(a => !isOpen(a)).sort((a, b) => byStartAsc(b, a)),
+    }
+  })()
+  // Relances : à faire (échéance la plus proche d'abord), terminées ou annulées (récentes d'abord).
+  const followupGroups = {
+    todo: followups.filter(f => !f.done && !f.cancelled_at).sort((a, b) => a.due_date.localeCompare(b.due_date)),
+    done: followups.filter(f => f.done || f.cancelled_at).sort((a, b) => b.due_date.localeCompare(a.due_date)),
+  }
   // RDV-PHASE-1 — moment du RDV mis en avant : avant / en cours (30 min avant → fin) / passé.
   const nextActionAppt = client.next_action_source === 'appointment'
     ? appointments.find(a => a.id === client.next_action_source_id) ?? null
@@ -1204,7 +1226,7 @@ export default function ClientDetailScreen() {
                   {/* BRAND-ROLES-1 — avec des marques, les rôles réseau s'affichent par marque
                       ("Conseillère · doTERRA") au lieu d'un rôle global unique. */}
                   {client.contact_role
-                    .filter(role => brandLinks.length === 0 || !(NETWORK_ROLES as readonly string[]).includes(role))
+                    .filter(role => brandLinks.length === 0 || (role !== 'customer' && !(NETWORK_ROLES as readonly string[]).includes(role)))
                     .map(role => {
                       const rc = getRoleColors(role, colors)
                       return (
@@ -1215,12 +1237,12 @@ export default function ClientDetailScreen() {
                         </View>
                       )
                     })}
-                  {brandLinks.filter(l => l.network_role !== 'customer').map(l => {
-                    const rc = getRoleColors(l.network_role === 'leader' ? 'leader' : 'distributor', colors)
+                  {brandLinks.map(l => {
+                    const rc = getRoleColors(l.network_role === 'leader' ? 'leader' : l.network_role === 'partner' ? 'distributor' : 'customer', colors)
                     return (
                       <View key={l.id} style={[styles.heroPill, { backgroundColor: rc.bg }]}>
                         <Text style={[styles.heroPillText, { color: rc.text }]}>
-                          {`${brandRoleLabel(l.brand, l.network_role, getRoleLabel)} · ${l.brand.name}`.toUpperCase()}
+                          {`${brandRoleLabel(l.brand, l.network_role, getRoleLabel)}${showBrandName ? ` · ${l.brand.name}` : ''}`.toUpperCase()}
                         </Text>
                       </View>
                     )
@@ -1234,8 +1256,10 @@ export default function ClientDetailScreen() {
                   ) : null}
                   {/* DESIGN-B — l'étape du parcours commercial remplace l'ancienne carte "Parcours"
                       de la Synthèse : une pastille neutre suffit. */}
-                  {client.pipeline_stage && !client.contact_role.some(role =>
-                    getRoleLabel(role).toLowerCase() === getPipelineStageLabel(client.pipeline_stage).toLowerCase()) ? (
+                  {/* STATUS-1 — l'étape ne s'affiche que pour un prospect (ou un contact perdu) :
+                      pour un client ou un partenaire, elle doublonnerait le rôle. */}
+                  {client.pipeline_stage && (client.pipeline_stage === 'lost'
+                    || PIPELINE_STAGES.indexOf(client.pipeline_stage) < PIPELINE_STAGES.indexOf('customer')) ? (
                     <View style={[styles.heroPill, { backgroundColor: colors.surfaceContainerHighest, maxWidth: 160 }]}>
                       <Text style={[styles.heroPillText, { color: colors.textSecondary }]} numberOfLines={1}>
                         {getPipelineStageLabel(client.pipeline_stage).toUpperCase()}
@@ -1277,7 +1301,7 @@ export default function ClientDetailScreen() {
                 </Text>
               ) : null}
               {contactLocalTime ? (
-                <Text style={[styles.heroMetaText, styles.heroLocalTime, contactLocalTime.unsocial && { color: colors.warning }]} numberOfLines={1}>
+                <Text style={[styles.heroMetaText, styles.heroLocalTime, contactLocalTime.unsocial && { color: colors.textSecondary }]} numberOfLines={1}>
                   {contactLocalTime.unsocial ? '🌙' : '🕒'} {t('clients.tz_live', {
                     time: contactLocalTime.time,
                     name: client.first_name || client.full_name.split(' ')[0],
@@ -1301,24 +1325,35 @@ export default function ClientDetailScreen() {
             )}
             {client.next_action_source ? (
               <View style={[styles.nextActionBlock, { backgroundColor: nextActionColor.bg, borderColor: nextActionColor.border }]}>
-                <View style={styles.nextActionTopRow}>
-                  <View style={[styles.nextActionIconBox, { backgroundColor: nextActionUrgency === 'later' ? colors.primaryLight : colors.card }]}>
+                <TouchableOpacity
+                  style={styles.nextActionTopRow}
+                  disabled={!nextActionAppt}
+                  onPress={() => nextActionAppt && router.push(`/(app)/appointments/${nextActionAppt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.nextActionIconBox, { backgroundColor: nextActionUrgency === 'later' ? colors.primaryLight : colors.card, borderColor: nextActionColor.border + '55' }]}>
                     {(() => {
                       const NextIcon = client.next_action_type ? NEXT_ACTION_ICON[client.next_action_type] : Clock
                       return <NextIcon size={19} color={nextActionColor.fg} strokeWidth={2} />
                     })()}
                   </View>
                   <View style={styles.nextActionTextBlock}>
-                    <Text style={[styles.nextActionLabel, { color: nextActionColor.fg }]}>
-                      {t(NEXT_ACTION_LABEL_KEY[nextActionUrgency])}
-                    </Text>
-                    <Text style={styles.nextActionMainText}>
+                    {nextActionUrgency === 'soon' || nextActionUrgency === 'later' ? (
+                      <Text style={[styles.nextActionLabel, { color: nextActionColor.fg }]}>
+                        {t(NEXT_ACTION_LABEL_KEY[nextActionUrgency])}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.nextActionMainText} numberOfLines={1}>
                       {client.next_action_type ? t(`next_action_types.${client.next_action_type}`) : t(`clients.next_action_source_${client.next_action_source}`)}
+                      {nextActionAppt?.title ? <Text style={styles.nextActionSubTitle}> · {nextActionAppt.title}</Text> : null}
                     </Text>
                     {client.next_action_at ? (
                       <Text style={styles.nextActionMeta}>
-                        {formatDate(client.next_action_at, locale)}
-                        {nextActionAppt ? ` · ${formatTime(nextActionAppt.start_at)}` : ''} · {relativeDayLabel(client.next_action_at, t)}
+                        {nextActionAppt ? <Text style={styles.nextActionTime}>{formatTime(nextActionAppt.start_at)}</Text> : null}
+                        {nextActionAppt ? '  ' : ''}
+                        {nextActionUrgency === 'today'
+                          ? relativeDayLabel(client.next_action_at, t)
+                          : `${formatDate(client.next_action_at, locale)} · ${relativeDayLabel(client.next_action_at, t)}`}
                       </Text>
                     ) : null}
                     {nextActionAppt ? (
@@ -1327,7 +1362,7 @@ export default function ClientDetailScreen() {
                       </View>
                     ) : null}
                   </View>
-                </View>
+                </TouchableOpacity>
                 {nextActionAppt && appointmentPhase !== 'after' ? (
                   // RDV-PHASE-1 — avant le RDV : on l'ouvre pour le préparer ; le jour J (30 min
                   // avant → fin) : l'action du mode en un geste. "Terminer et débriefer" n'arrive
@@ -1335,7 +1370,7 @@ export default function ClientDetailScreen() {
                   <View style={styles.nextActionBtnRow}>
                     {appointmentPhase === 'live' && meetingUrl ? (
                       <TouchableOpacity
-                        style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionColor.fg }]}
+                        style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionBtnColor }]}
                         onPress={() => guarded(t(`appointments.meeting_action_${nextActionAppt.meeting_mode}`), () => {
                           Linking.openURL(meetingUrl).catch(e => console.error('[nextAction.meeting]', e))
                         })}
@@ -1347,7 +1382,7 @@ export default function ClientDetailScreen() {
                       </TouchableOpacity>
                     ) : (
                       <TouchableOpacity
-                        style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionColor.fg }]}
+                        style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionBtnColor }]}
                         onPress={() => router.push(`/(app)/appointments/${nextActionAppt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
                         activeOpacity={0.85}
                       >
@@ -1356,28 +1391,50 @@ export default function ClientDetailScreen() {
                     )}
                     {appointmentPhase === 'live' && meetingUrl ? (
                       <TouchableOpacity
-                        style={[styles.nextActionBtnSecondary, { borderColor: nextActionColor.fg }]}
+                        style={[styles.nextActionBtnSecondary, { borderColor: nextActionBtnColor }]}
                         onPress={() => router.push(`/(app)/appointments/${nextActionAppt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
                         activeOpacity={0.85}
                       >
-                        <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionColor.fg }]}>{t('appointments.open_appointment')}</Text>
+                        <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionBtnColor }]}>{t('appointments.open_appointment')}</Text>
                       </TouchableOpacity>
                     ) : (
                       <TouchableOpacity
                         disabled={actionBusy}
-                        style={[styles.nextActionBtnSecondary, { borderColor: nextActionColor.fg }]}
+                        style={[styles.nextActionBtnSecondary, { borderColor: nextActionBtnColor }]}
                         onPress={openReschedule}
                         activeOpacity={0.85}
                       >
-                        <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionColor.fg }]}>{t('clients.postpone_action')}</Text>
+                        <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionBtnColor }]}>{t('clients.postpone_action')}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
+                ) : nextActionAppt ? (
+                  <>
+                    <View style={styles.nextActionBtnRow}>
+                      <TouchableOpacity
+                        style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionBtnColor }]}
+                        onPress={() => router.push(`/(app)/appointments/${nextActionAppt.id}?debrief=1&returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.nextActionBtnPrimaryText}>{t('clients.debrief_action')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.nextActionBtnSecondary, { borderColor: nextActionBtnColor }]}
+                        onPress={() => router.push(`/(app)/appointments/${nextActionAppt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionBtnColor }]}>{t('appointments.open_appointment')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity disabled={actionBusy} onPress={openReschedule} style={styles.nextActionLink} hitSlop={{ top: 6, bottom: 6, left: 8, right: 8 }}>
+                      <Text style={styles.nextActionLinkText}>{t('clients.postpone_action')}</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : (
                 <View style={styles.nextActionBtnRow}>
                   <TouchableOpacity
                     disabled={actionBusy}
-                    style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionColor.fg }, actionBusy && { opacity: 0.6 }]}
+                    style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionBtnColor }, actionBusy && { opacity: 0.6 }]}
                     onPress={() => {
                       // ACTION-OUTCOME-1 / P1.1 — une action prioritaire "relance" ouvre
                       // désormais le même FollowupCompletionModal que les pages Relances
@@ -1417,11 +1474,11 @@ export default function ClientDetailScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     disabled={actionBusy}
-                    style={[styles.nextActionBtnSecondary, { borderColor: nextActionColor.fg }]}
+                    style={[styles.nextActionBtnSecondary, { borderColor: nextActionBtnColor }]}
                     onPress={openReschedule}
                     activeOpacity={0.85}
                   >
-                    <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionColor.fg }]}>{t('clients.postpone_action')}</Text>
+                    <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionBtnColor }]}>{t('clients.postpone_action')}</Text>
                   </TouchableOpacity>
                 </View>
                 )}
@@ -2123,168 +2180,191 @@ export default function ClientDetailScreen() {
                 <View style={styles.suiviGroup}>
                   <Text style={styles.suiviGroupTitle}>{t('clients.suivi_group_todo')}</Text>
                   <View style={[styles.tabColumns, isDesktopWeb && styles.tabColumnsDesktop]}>
-                    {/* RDV */}
+                    {/* SUIVI-GROUPS-1 — RDV : à débriefer + à venir en cartes pleines ; passés repliés,
+                        sur une ligne grisée. Le statut se lit d'un coup d'œil. */}
                     <View style={[styles.suiviSection, isDesktopWeb && styles.tabColumnItem]}>
                       <View style={styles.cardHeader}>
                         <View style={[styles.iconBox, { backgroundColor: colors.primaryLight }]}><Calendar size={14} color={colors.primary} strokeWidth={2} /></View>
                         <Text style={styles.cardTitle}>{t('clients.tab_rdv')}</Text>
-                        {appointments.length > 0 ? (
-                          <View style={styles.sectionCountBadge}><Text style={styles.sectionCountBadgeText}>{appointments.length}</Text></View>
-                        ) : null}
                         <TouchableOpacity style={styles.suiviViewAllBtn} onPress={() => router.push(`/(app)/clients/${id}/appointments`)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                           <Text style={styles.suiviViewAll}>{t('clients.view_all')}</Text>
                         </TouchableOpacity>
                       </View>
-                      {appointments.length === 0
-                        ? (
+                      {appointments.length > 0 ? (
+                        <Text style={styles.suiviCounts}>
+                          {[
+                            apptGroups.toDebrief.length ? t('clients.suivi_count_debrief', { count: apptGroups.toDebrief.length }) : null,
+                            t('clients.suivi_count_upcoming', { count: apptGroups.upcoming.length }),
+                            t('clients.suivi_count_past', { count: apptGroups.past.length }),
+                          ].filter(Boolean).join(' · ')}
+                        </Text>
+                      ) : null}
+                      {apptGroups.toDebrief.map(appt => {
+                        const late = daysUntil(appt.start_at) < 0
+                        const tone = late ? colors.danger : colors.warning
+                        return (
+                        <TouchableOpacity
+                          key={appt.id}
+                          style={[styles.listCard, styles.listCardAccent, { borderLeftColor: tone }]}
+                          onPress={() => router.push(`/(app)/appointments/${appt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.listCardLeft}>
+                            <View style={styles.apptRowHeader}>
+                              <Text style={styles.listCardDate}>{formatDate(appt.start_at, locale)}</Text>
+                              <View style={[styles.apptStatusPill, { backgroundColor: tone + '22' }]}>
+                                <Text style={[styles.apptStatusPillText, { color: tone }]}>{t('clients.suivi_to_debrief')}</Text>
+                              </View>
+                            </View>
+                            <Text style={styles.listCardSub} numberOfLines={1}>{appt.title}</Text>
+                            <TouchableOpacity
+                              onPress={() => router.push(`/(app)/appointments/${appt.id}?debrief=1&returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                              hitSlop={{ top: 6, bottom: 6, left: 4, right: 8 }}
+                            >
+                              <Text style={[styles.debriefCta, { color: tone }]}>{t('clients.debrief_action')} ›</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                            <View style={styles.listCardBadge}>
+                              <Text style={styles.listCardBadgeText}>{formatTime(appt.start_at)}</Text>
+                            </View>
+                            <RemoteTimeBadge at={new Date(appt.start_at)} contactTz={client.timezone} size="xs" />
+                          </View>
+                        </TouchableOpacity>
+                        )
+                      })}
+                      {apptGroups.upcoming.slice(0, 3).map(appt => {
+                        const days = daysUntil(appt.start_at)
+                        const rel = days === 0 ? t('clients.rel_today') : days === 1 ? t('clients.rel_tomorrow') : t('clients.rel_in_days', { count: days })
+                        return (
                           <TouchableOpacity
-                            style={styles.suiviEmptyRow}
-                            onPress={() => router.push(`/(app)/appointments/new?clientId=${id}&returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
-                            activeOpacity={0.7}
+                            key={appt.id}
+                            style={[styles.listCard, styles.listCardAccent, days === 0 && styles.listCardToday]}
+                            onPress={() => router.push(`/(app)/appointments/${appt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                            activeOpacity={0.8}
                           >
-                            <Text style={styles.suiviEmptyRowText}>{t('appointments.empty')}</Text>
-                            <Text style={styles.suiviEmptyRowAdd}>+ {t('appointments.add')}</Text>
+                            <View style={styles.listCardLeft}>
+                              <View style={styles.apptRowHeader}>
+                                <Text style={styles.listCardDate}>{formatDate(appt.start_at, locale)}</Text>
+                                <Text style={styles.relLabel}>{rel}</Text>
+                                {/* APPT-BRAND-1 — marque du RDV. */}
+                                {(() => { const b = brandLinks.find(l => l.brand_id === appt.brand_id)?.brand; return b ? <BrandPill brand={b} size="sm" /> : null })()}
+                              </View>
+                              <Text style={styles.listCardSub} numberOfLines={1}>{appt.title}</Text>
+                              <Text style={styles.listCardContext} numberOfLines={1}>{t(`appointment_types.${appt.appointment_type}` as any)}</Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                              <View style={styles.listCardBadge}>
+                                <Text style={styles.listCardBadgeText}>{formatTime(appt.start_at)}</Text>
+                              </View>
+                              <RemoteTimeBadge at={new Date(appt.start_at)} contactTz={client.timezone} size="xs" />
+                            </View>
                           </TouchableOpacity>
                         )
-                        : <>
-                          {appointments
-                            .slice()
-                            .sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime())
-                            .slice(0, 3)
-                            .map(appt => {
-                              const biz = appt.business_context
-                              const contextParts: string[] = []
-                              if (biz?.prospect_temperature) {
-                                contextParts.push(t(`prospect_temperatures.${biz.prospect_temperature}` as any))
-                              }
-                              if (biz?.commercial_intent?.length) {
-                                contextParts.push(biz.commercial_intent.map(i => t(`commercial_intents.${i}` as any)).join(', '))
-                              }
-                              if (biz?.pipeline_stage) {
-                                contextParts.push(getPipelineStageLabel(biz.pipeline_stage))
-                              }
-                              // CONTACT-4 §9 — surbrillance légère, uniquement pour un RDV encore actif
-                              // (jamais completed/cancelled/no_show), cohérente avec le bloc "À traiter".
-                              const apptUrgency = (appt.status === 'scheduled' || appt.status === 'rescheduled') ? urgencyOf(appt.start_at) : null
-                              return (
-                                <TouchableOpacity
-                                  key={appt.id}
-                                  style={[
-                                    styles.listCard,
-                                    apptUrgency === 'overdue' && styles.listCardOverdue,
-                                    apptUrgency === 'today' && styles.listCardToday,
-                                  ]}
-                                  onPress={() => router.push(`/(app)/appointments/${appt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
-                                  activeOpacity={0.8}
-                                >
-                                  <View style={styles.listCardLeft}>
-                                    <View style={styles.apptRowHeader}>
-                                      <Text style={styles.listCardDate}>
-                                        {formatDate(appt.start_at, locale)}
-                                      </Text>
-                                      {apptUrgency ? (
-                                        <View style={styles.urgencyBadge}>
-                                          <Text style={[styles.urgencyBadgeText, { color: apptUrgency === 'overdue' ? colors.danger : colors.warning }]}>
-                                            {t(apptUrgency === 'overdue' ? 'followups.overdue_badge' : 'followups.today_badge')}
-                                          </Text>
-                                        </View>
-                                      ) : (
-                                        <View style={[styles.apptStatusPill, { backgroundColor: (APPT_STATUS_COLOR[appt.status] ?? colors.textSecondary) + '22' }]}>
-                                          <Text style={[styles.apptStatusPillText, { color: APPT_STATUS_COLOR[appt.status] ?? colors.textSecondary }]}>
-                                            {t(`appointment_statuses.${appt.status}` as any)}
-                                          </Text>
-                                        </View>
-                                      )}
-                                    </View>
-                                    <Text style={styles.listCardSub} numberOfLines={1}>{appt.title}</Text>
-                                    {contextParts.length > 0 && (
-                                      <Text style={styles.listCardContext} numberOfLines={1}>{contextParts.join(' · ')}</Text>
-                                    )}
-                                  </View>
-                                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                                    <View style={styles.listCardBadge}>
-                                      <Text style={styles.listCardBadgeText}>{new Date(appt.start_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</Text>
-                                    </View>
-                                    <RemoteTimeBadge at={new Date(appt.start_at)} contactTz={client.timezone} size="xs" />
-                                  </View>
-                                </TouchableOpacity>
-                              )
-                            })}
-                          <TouchableOpacity
-                            style={styles.addRowBtn}
-                            onPress={() => router.push(`/(app)/appointments/new?clientId=${id}&returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={styles.addRowBtnText}>+ {t('appointments.add')}</Text>
+                      })}
+                      {appointments.length > 0 && apptGroups.toDebrief.length === 0 && apptGroups.upcoming.length === 0 ? (
+                        <Text style={styles.suiviNone}>{t('clients.suivi_no_upcoming_appt')}</Text>
+                      ) : null}
+                      {apptGroups.past.length > 0 ? (
+                        <>
+                          <TouchableOpacity style={styles.collapseToggle} onPress={() => setPastApptsOpen(v => !v)} activeOpacity={0.7}>
+                            <Text style={styles.collapseToggleText}>{t('clients.suivi_past_toggle', { count: apptGroups.past.length })} {pastApptsOpen ? '▴' : '▾'}</Text>
                           </TouchableOpacity>
+                          {pastApptsOpen ? apptGroups.past.slice(0, 8).map(appt => {
+                            const icon = appt.status === 'completed' ? '✓' : appt.status === 'cancelled' ? '✕' : appt.status === 'no_show' ? '!' : '•'
+                            return (
+                              <TouchableOpacity
+                                key={appt.id}
+                                style={styles.compactRow}
+                                onPress={() => router.push(`/(app)/appointments/${appt.id}?returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={[styles.compactIcon, appt.status === 'no_show' && { color: colors.warning }]}>{icon}</Text>
+                                <Text style={[styles.compactText, appt.status === 'cancelled' && styles.listCardDateStrike]} numberOfLines={1}>
+                                  {fmtShort(appt.start_at, locale)} · {appt.title}
+                                </Text>
+                                <Text style={[styles.compactStatus, appt.status === 'no_show' && { color: colors.warning }]}>{t(`appointment_statuses.${appt.status}` as any)}</Text>
+                              </TouchableOpacity>
+                            )
+                          }) : null}
                         </>
-                      }
+                      ) : null}
+                      <TouchableOpacity
+                        style={styles.addRowBtn}
+                        onPress={() => router.push(`/(app)/appointments/new?clientId=${id}&returnTo=${encodeURIComponent(`/(app)/clients/${id}`)}` as any)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.addRowBtnText}>+ {t('appointments.add')}</Text>
+                      </TouchableOpacity>
                     </View>
 
-                    {/* Relances */}
+                    {/* SUIVI-GROUPS-1 — Relances : à faire en haut, terminées repliées en dessous. */}
                     <View style={[styles.suiviSection, isDesktopWeb && styles.tabColumnItem]}>
                       <View style={styles.cardHeader}>
                         <View style={[styles.iconBox, { backgroundColor: colors.warningLight }]}><Bell size={14} color={colors.warning} strokeWidth={2} /></View>
                         <Text style={styles.cardTitle}>{t('clients.tab_followups')}</Text>
-                        {followups.length > 0 ? (
-                          <View style={styles.sectionCountBadge}><Text style={styles.sectionCountBadgeText}>{followups.length}</Text></View>
-                        ) : null}
                         <TouchableOpacity style={styles.suiviViewAllBtn} onPress={() => router.push(`/(app)/clients/${id}/followups`)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                           <Text style={styles.suiviViewAll}>{t('clients.view_all')}</Text>
                         </TouchableOpacity>
                       </View>
-                      {followups.length === 0
-                        ? (
-                          <TouchableOpacity style={styles.suiviEmptyRow} onPress={() => router.push(`/(app)/clients/${id}/followups`)} activeOpacity={0.7}>
-                            <Text style={styles.suiviEmptyRowText}>{t('followups.none')}</Text>
-                            <Text style={styles.suiviEmptyRowAdd}>+ {t('followups.add')}</Text>
+                      {followups.length > 0 ? (
+                        <Text style={styles.suiviCounts}>
+                          {t('clients.suivi_count_todo', { count: followupGroups.todo.length })} · {t('clients.suivi_count_done', { count: followupGroups.done.length })}
+                        </Text>
+                      ) : null}
+                      {followupGroups.todo.slice(0, 3).map(f => {
+                        const followupUrgency = urgencyOf(f.due_date)
+                        return (
+                          <TouchableOpacity
+                            key={f.id}
+                            style={[
+                              styles.listCard,
+                              styles.listCardAccent,
+                              { borderLeftColor: followupUrgency === 'overdue' ? colors.danger : followupUrgency === 'today' ? colors.warning : colors.primary },
+                              followupUrgency === 'overdue' && styles.listCardOverdue,
+                              followupUrgency === 'today' && styles.listCardToday,
+                            ]}
+                            // NAV-FOCUS-1 — carte d'une relance précise (f.id), pas "Voir tout".
+                            onPress={() => router.push(`/(app)/clients/${id}/followups?focus=${f.id}`)}
+                            activeOpacity={0.8}
+                          >
+                            <View style={styles.listCardLeft}>
+                              <Text style={styles.listCardDate}>{fmtShort(f.due_date, locale)}</Text>
+                              <Text style={styles.listCardSub} numberOfLines={2}>{f.title ?? f.content}</Text>
+                            </View>
+                            {followupUrgency ? (
+                              <View style={styles.urgencyBadge}>
+                                <Text style={[styles.urgencyBadgeText, { color: followupUrgency === 'overdue' ? colors.danger : colors.warning }]}>
+                                  {t(followupUrgency === 'overdue' ? 'followups.overdue_badge' : 'followups.today_badge')}
+                                </Text>
+                              </View>
+                            ) : (
+                              <Text style={styles.relLabel}>{relativeDayLabel(f.due_date, t)}</Text>
+                            )}
                           </TouchableOpacity>
                         )
-                        : <>
-                          {followups
-                            .slice()
-                            .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
-                            .slice(0, 3)
-                            .map(f => {
-                              const followupUrgency = (!f.done && !f.cancelled_at) ? urgencyOf(f.due_date) : null
-                              return (
-                                <TouchableOpacity
-                                  key={f.id}
-                                  style={[
-                                    styles.listCard,
-                                    f.done && styles.listCardDone,
-                                    followupUrgency === 'overdue' && styles.listCardOverdue,
-                                    followupUrgency === 'today' && styles.listCardToday,
-                                  ]}
-                                  // NAV-FOCUS-1 — carte d'une relance précise (f.id), pas "Voir tout".
-                                  onPress={() => router.push(`/(app)/clients/${id}/followups?focus=${f.id}`)}
-                                  activeOpacity={0.8}
-                                >
-                                  <View style={styles.listCardLeft}>
-                                    <Text style={[styles.listCardDate, f.done && styles.listCardDateStrike]}>
-                                      {fmtShort(f.due_date, locale)}
-                                    </Text>
-                                    <Text style={styles.listCardSub} numberOfLines={2}>{f.title ?? f.content}</Text>
-                                  </View>
-                                  {f.done ? (
-                                    <View style={styles.doneBadge}>
-                                      <Text style={styles.doneBadgeText}>{t('followups.done')}</Text>
-                                    </View>
-                                  ) : followupUrgency ? (
-                                    <View style={styles.urgencyBadge}>
-                                      <Text style={[styles.urgencyBadgeText, { color: followupUrgency === 'overdue' ? colors.danger : colors.warning }]}>
-                                        {t(followupUrgency === 'overdue' ? 'followups.overdue_badge' : 'followups.today_badge')}
-                                      </Text>
-                                    </View>
-                                  ) : null}
-                                </TouchableOpacity>
-                              )
-                            })}
-                          <TouchableOpacity style={styles.addRowBtn} onPress={() => router.push(`/(app)/clients/${id}/followups`)} activeOpacity={0.7}>
-                            <Text style={styles.addRowBtnText}>+ {t('followups.add')}</Text>
+                      })}
+                      {followups.length === 0 || followupGroups.todo.length === 0 ? (
+                        <Text style={styles.suiviNone}>{t('followups.none')}</Text>
+                      ) : null}
+                      {followupGroups.done.length > 0 ? (
+                        <>
+                          <TouchableOpacity style={styles.collapseToggle} onPress={() => setDoneFollowupsOpen(v => !v)} activeOpacity={0.7}>
+                            <Text style={styles.collapseToggleText}>{t('clients.suivi_done_toggle', { count: followupGroups.done.length })} {doneFollowupsOpen ? '▴' : '▾'}</Text>
                           </TouchableOpacity>
+                          {doneFollowupsOpen ? followupGroups.done.slice(0, 8).map(f => (
+                            <TouchableOpacity key={f.id} style={styles.compactRow} onPress={() => router.push(`/(app)/clients/${id}/followups?focus=${f.id}`)} activeOpacity={0.7}>
+                              <Text style={styles.compactIcon}>{f.cancelled_at ? '✕' : '✓'}</Text>
+                              <Text style={[styles.compactText, styles.listCardDateStrike]} numberOfLines={1}>
+                                {fmtShort(f.due_date, locale)} · {f.title ?? f.content}
+                              </Text>
+                            </TouchableOpacity>
+                          )) : null}
                         </>
-                      }
+                      ) : null}
+                      <TouchableOpacity style={styles.addRowBtn} onPress={() => router.push(`/(app)/clients/${id}/followups`)} activeOpacity={0.7}>
+                        <Text style={styles.addRowBtnText}>+ {t('followups.add')}</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </View>
@@ -3062,18 +3142,22 @@ function makeStyles(colors: ThemeColors) {
   // ── Prochaine action — bloc principal du hero ───────────────────────────────
   // CONTACT-4.1 — même famille typographique que todoBlockTitle (Autres actions), discret.
   priorityActionTitle:    { fontSize: 12.5, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: -4 },
-  nextActionBlock:        { width: '100%', borderRadius: 16, borderWidth: 1.5, padding: 14, gap: 12 },
+  nextActionBlock:        { width: '100%', borderRadius: 16, borderWidth: 1, borderLeftWidth: 4, padding: 14, gap: 12 },
   nextActionTopRow:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  nextActionIconBox:      { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  nextActionIconBox:      { width: 40, height: 40, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   nextActionTextBlock:    { flex: 1, gap: 2 },
   nextActionLabel:        { fontSize: 11, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.6 },
   nextActionMainText:     { fontSize: 16, fontFamily: fonts.bold, color: colors.text },
-  nextActionMeta:         { fontSize: 12.5, fontFamily: fonts.medium, color: colors.textSecondary },
+  nextActionSubTitle:     { fontSize: 14, fontFamily: fonts.medium, color: colors.textSecondary },
+  nextActionMeta:         { fontSize: 12.5, fontFamily: fonts.body, color: colors.textSecondary },
+  nextActionTime:         { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
   nextActionBtnRow:       { flexDirection: 'row', gap: 10 },
-  nextActionBtnPrimary:      { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12 },
-  nextActionBtnPrimaryText:  { fontSize: 14, fontFamily: fonts.semibold, color: '#fff', textAlign: 'center' },
-  nextActionBtnSecondary:     { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, borderWidth: 1.5, backgroundColor: colors.card },
-  nextActionBtnSecondaryText: { fontSize: 14, fontFamily: fonts.semibold, textAlign: 'center' },
+  nextActionLink:         { alignSelf: 'center', marginTop: -4 },
+  nextActionLinkText:     { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary, textDecorationLine: 'underline' },
+  nextActionBtnPrimary:      { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 10 },
+  nextActionBtnPrimaryText:  { fontSize: 13.5, fontFamily: fonts.semibold, color: '#fff', textAlign: 'center' },
+  nextActionBtnSecondary:     { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 10, borderWidth: 1, backgroundColor: colors.card },
+  nextActionBtnSecondaryText: { fontSize: 13.5, fontFamily: fonts.medium, textAlign: 'center' },
   nextActionEmpty:        { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 4 },
   nextActionEmptyText:    { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
   nextActionEmptyBtn:     { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 9999, backgroundColor: colors.primaryLight },
@@ -3294,9 +3378,21 @@ function makeStyles(colors: ThemeColors) {
 
   listCard:       { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.cardBorder, padding: 16, gap: 6, flexDirection: 'row', alignItems: 'flex-start', ...CARD_SHADOW },
   listCardDone:   { opacity: 0.55 },
+  listCardAccent: { borderLeftWidth: 3, borderLeftColor: colors.primary },
+  listCardDebrief: { borderLeftColor: colors.warning, backgroundColor: colors.warningLight },
+  debriefCta:     { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.warning, marginTop: 2 },
+  relLabel:       { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
+  suiviCounts:    { fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary, marginTop: -4 },
+  suiviNone:      { fontSize: 12.5, fontFamily: fonts.body, color: colors.textTertiary },
+  collapseToggle: { paddingVertical: 4 },
+  collapseToggleText: { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.textSecondary },
+  compactRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5, paddingHorizontal: 4 },
+  compactIcon:    { width: 14, fontSize: 12, fontFamily: fonts.bold, color: colors.textTertiary, textAlign: 'center' },
+  compactText:    { flex: 1, fontSize: 12.5, fontFamily: fonts.body, color: colors.textTertiary },
+  compactStatus:  { fontSize: 11.5, fontFamily: fonts.medium, color: colors.textTertiary },
   // CONTACT-4 §9 — accent très léger (jamais un aplat agressif), lisible en light/dark.
-  listCardOverdue: { backgroundColor: colors.dangerLight, borderWidth: 1, borderColor: colors.danger },
-  listCardToday:   { backgroundColor: colors.warningLight, borderWidth: 1, borderColor: colors.warning },
+  listCardOverdue: { borderLeftColor: colors.danger },
+  listCardToday:   { borderLeftColor: colors.warning },
   urgencyBadge:     { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999, backgroundColor: colors.card },
   urgencyBadgeText: { fontSize: 10.5, fontFamily: fonts.bold, letterSpacing: 0.4 },
   listCardLeft:   { flex: 1, gap: 4 },

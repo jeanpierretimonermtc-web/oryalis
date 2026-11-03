@@ -5,6 +5,10 @@ import {
 } from 'react-native'
 import { MEETING_MODE_ICON, meetingActionUrl } from '@/features/appointments/meetingMode'
 import { RemoteTimeHint } from '@/features/clients/RemoteTimeHint'
+import { useBrands, useClientBrands } from '@/features/brands/useBrands'
+import { attachToBrandSponsor } from '@/features/brands/brandService'
+import { brandRoleLabel } from '@/features/brands/brandRoleLabels'
+import { BrandPill } from '@/features/brands/BrandPill'
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { Lock, Snowflake, CloudSun, Flame, Check, X, TriangleAlert, ArrowDown } from 'lucide-react-native'
@@ -168,6 +172,7 @@ type ClientInfo = {
   timezone: string | null
   next_lrp_date: string | null
   contact_role: ContactRole[]
+  pipeline_stage: PipelineStage | null
 }
 type HistoryItem = { id: string; title: string; status: string; start_at: string }
 // RDV-HISTORY-NAV-1 — RDV d'origine consulté depuis "Historique RDV" : mêmes champs d'affichage
@@ -272,7 +277,7 @@ export default function AppointmentDetailScreen() {
   const { t, i18n } = useTranslation()
   const { id, returnTo, debrief, originAppointmentId } = useLocalSearchParams<{ id: string; returnTo?: string; debrief?: string; originAppointmentId?: string }>()
   const { colors } = useTheme()
-  const { getRoleLabel, getPipelineStageLabel, isModuleActive, getAutomationDelay, getLrpName } = useAppConfig()
+  const { getRoleLabel, getPipelineStageLabel, isModuleActive, getAutomationDelay, getLrpName, profile: businessProfile } = useAppConfig()
   const styles = useMemo(() => makeStyles(colors), [colors])
 
   function goBack() {
@@ -528,6 +533,8 @@ export default function AppointmentDetailScreen() {
   const personalFollowupUserTouchedRef = useRef(false)
   const [followupConflict,        setFollowupConflict]        = useState<FollowupConflict | null>(null)
   const [confirmConflict,         setConfirmConflict]         = useState(false)
+  // APPT-PIPELINE-2 — statut du contact avant le premier choix "Où en est X ?" de cette visite.
+  const [afterBaseline, setAfterBaseline] = useState<{ effective: PipelineStage | null; contact: PipelineStage | null } | null>(null)
   // RDV futurs existants du contact — réutiliser comme suite plutôt que dupliquer (§13).
   const [upcomingAppts,       setUpcomingAppts]       = useState<UpcomingAppointmentOption[]>([])
   const [selectedUpcomingId,  setSelectedUpcomingId]  = useState<string | null>(null)
@@ -582,6 +589,9 @@ export default function AppointmentDetailScreen() {
   const [inlineError,       setInlineError]        = useState<string | null>(null)
   const [practitionerName,  setPractitionerName]   = useState('')
   const [clientInfo,        setClientInfo]         = useState<ClientInfo | null>(null)
+  const { brands: brandsForAppt } = useBrands()
+  const [rdvClientId, setRdvClientId] = useState('')
+  const { links: rdvClientBrandLinks, refresh: refreshRdvClientBrands } = useClientBrands(rdvClientId)
   // LRP-4.1 §3 — tous les programmes actifs du contact (pas "le" plus proche) : 2+ candidats
   // imposent un choix explicite dans LrpProgramFields, jamais un rattachement silencieux.
   const [activePrograms, setActivePrograms] = useState<RecurringProgram[]>([])
@@ -844,8 +854,8 @@ export default function AppointmentDetailScreen() {
   useEffect(() => {
     const cid = appointment?.client_id
     if (!cid) return
-    supabase.from('clients').select('id, full_name, status, first_name, phone, email, timezone, next_lrp_date, contact_role').eq('id', cid).single()
-      .then(({ data }) => { if (data) setClientInfo(data as ClientInfo) })
+    supabase.from('clients').select('id, full_name, status, first_name, phone, email, timezone, next_lrp_date, contact_role, pipeline_stage').eq('id', cid).single()
+      .then(({ data }) => { if (data) { setClientInfo(data as ClientInfo); setRdvClientId((data as ClientInfo).id) } })
     // LRP-4.1 §3 — tous les programmes actifs, source pour le sélecteur "Commande {nom du
     // programme}" de la section vente (remplace clientInfo.lrp_*).
     fetchProgramsForClient(cid).then(all => setActivePrograms(all.filter(p => p.status === 'active'))).catch(() => setActivePrograms([]))
@@ -1137,8 +1147,11 @@ export default function AppointmentDetailScreen() {
     // RDV-FOLLOWUP-1/P0 — la case "Créer une relance" peut être cochée avec des champs vidés
     // par l'utilisateur après le préremplissage : vérifié ici (confirmation), plus jamais au
     // niveau du simple togglePersonalFollowupPlanned (§17).
-    if (personalFollowupPlanned && (!personalFollowupDate || !personalFollowupTitle.trim() || (followupConflict && !confirmConflict))) {
+    if (personalFollowupPlanned && (!personalFollowupDate || !personalFollowupTitle.trim())) {
       setInlineError(t('appointments.error_followup_incomplete')); return
+    }
+    if (personalFollowupPlanned && followupConflict && !confirmConflict) {
+      setInlineError(t('appointments.error_followup_conflict')); return
     }
     if (!hasAnyNextStep && !noFollowupRequired) { setInlineError(t('appointments.error_next_step_required')); return }
     if (notesDirty) {
@@ -1681,8 +1694,11 @@ export default function AppointmentDetailScreen() {
     if (outcomeDraft === 'other' && !outcomeOtherLabelDraft.trim()) { setRevisionError(t('appointments.error_outcome_other_required')); return }
     if (!revisionReason) { setRevisionError(t('appointments.error_revision_reason_required')); return }
     if (revisionReason === 'other' && !revisionReasonOtherText.trim()) { setRevisionError(t('appointments.error_revision_reason_other_required')); return }
-    if (personalFollowupPlanned && (!personalFollowupDate || !personalFollowupTitle.trim() || (followupConflict && !confirmConflict))) {
+    if (personalFollowupPlanned && (!personalFollowupDate || !personalFollowupTitle.trim())) {
       setRevisionError(t('appointments.error_followup_incomplete')); return
+    }
+    if (personalFollowupPlanned && followupConflict && !confirmConflict) {
+      setRevisionError(t('appointments.error_followup_conflict')); return
     }
     const hasNextStep = hasPlannedOrKeptAction(revisionCancelFollowups, revisionCancelTasks)
     if (!hasNextStep && !revisionNoFollowupRequired) { setRevisionError(t('appointments.error_next_step_required')); return }
@@ -1814,14 +1830,40 @@ export default function AppointmentDetailScreen() {
     }
   }
 
-  async function handlePipelineChange(stage: PipelineStage) {
+  async function handlePipelineChange(stage: PipelineStage | null, baselineContact?: PipelineStage | null) {
     setInlineError(null)
-    const ok = await saveBusinessContext({ pipeline_stage: stage })
+    const ok = await saveBusinessContext({ pipeline_stage: stage ?? 'new_lead' })
     if (!ok) { setInlineError(t('appointments.error_save_business')); return }
-    // Le statut du client doit refléter la dernière étape constatée en RDV.
+    if (!stage) {
+      if (appointment?.client_id && baselineContact !== undefined && clientInfo?.pipeline_stage !== baselineContact) {
+        const { error: restoreError } = await supabase.from('clients').update({ pipeline_stage: baselineContact }).eq('id', appointment.client_id)
+        if (restoreError) { console.error('[afterRdv.restore]', restoreError); setInlineError(t('appointments.error_save_business')); return }
+        setClientInfo(prev => prev ? { ...prev, pipeline_stage: baselineContact } : prev)
+      }
+      return
+    }
+    // APPT-PIPELINE-1 — le contact n'avance que vers l'avant (ou "Perdu", ou depuis "Perdu"),
+    // même règle que le trigger sync_client_pipeline_from_appointment.
     if (appointment?.client_id) {
       const previousStage = biz?.pipeline_stage ?? null
-      await supabase.from('clients').update({ pipeline_stage: stage }).eq('id', appointment.client_id)
+      const current = clientInfo?.pipeline_stage ?? null
+      const forward = stage === 'lost' || !current || current === 'lost' || PIPELINE_STAGES.indexOf(stage) > PIPELINE_STAGES.indexOf(current)
+      if (forward) await supabase.from('clients').update({ pipeline_stage: stage }).eq('id', appointment.client_id)
+      // Multi-marques : "devient client / partenaire" s'applique à la marque du RDV.
+      if (appointment.brand_id && (stage === 'customer' || stage === 'distributor')) {
+        try {
+          const link = rdvClientBrandLinks.find(l => l.brand_id === appointment.brand_id)
+          await attachToBrandSponsor(
+            appointment.user_id, appointment.client_id, appointment.brand_id,
+            link?.sponsor_client_id ?? null,
+            stage === 'distributor' ? 'partner' : undefined,
+          )
+          refreshRdvClientBrands()
+        } catch (brandError) {
+          console.error('[afterRdv.brandRole]', brandError)
+        }
+      }
+      if (forward) setClientInfo(prev => prev ? { ...prev, pipeline_stage: stage } : prev)
       if (previousStage !== stage) {
         try {
           await logClientEvent(appointment.user_id, appointment.client_id, 'pipeline_change', { old_value: previousStage, new_value: stage })
@@ -2047,6 +2089,7 @@ export default function AppointmentDetailScreen() {
   const startTime   = `${pad2(startDate.getHours())}h${pad2(startDate.getMinutes())}`
   const endTime     = `${pad2(endDate.getHours())}h${pad2(endDate.getMinutes())}`
   const isCancelled = appointment.status === 'cancelled'
+  const appointmentBrand = appointment.brand_id ? brandsForAppt.find(b => b.id === appointment.brand_id) ?? null : null
 
   const tasksOverdue = appointment.tasks.filter(
     tk => tk.status !== 'done' && tk.status !== 'cancelled' && !!tk.due_at && new Date(tk.due_at) < new Date()
@@ -2111,6 +2154,7 @@ export default function AppointmentDetailScreen() {
           ) : null}
 
           <View style={styles.pillsRow}>
+            {appointmentBrand ? <BrandPill brand={appointmentBrand} /> : null}
             {/* RDV-1 §5 — statut affiché ici uniquement sur mobile (pas de colonne latérale) ;
                 sur web il figure déjà, en lecture seule, dans la colonne de droite (sidebar) —
                 jamais les deux à la fois. isCancelled a déjà sa propre pill plus bas : on évite
@@ -2191,9 +2235,26 @@ export default function AppointmentDetailScreen() {
     </View>
   )
 
+  // RDV-SECTIONS-1 — en-tête commun des sections de la fiche.
+  const sectionHeader = (icon: string, label: string) => (
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionHeaderLeft}>
+        <View style={styles.sectionHeaderIcon}><Text style={styles.sectionHeaderEmoji}>{icon}</Text></View>
+        <Text style={styles.sectionHeaderText}>{label}</Text>
+      </View>
+    </View>
+  )
+  // Débrief : étapes numérotées (1 récap, 2 résultat, 3 suites).
+  const stepHeader = (n: number | null, label: string) => (
+    <View style={styles.stepHeader}>
+      {n !== null ? <View style={styles.stepBubble}><Text style={styles.stepBubbleText}>{n}</Text></View> : null}
+      <Text style={styles.stepHeaderText}>{label}</Text>
+    </View>
+  )
+
   const statusSection = (
     <View style={styles.card}>
-      <Text style={styles.cardLabel}>{t('appointments.status_label')}</Text>
+      {sectionHeader('📍', t('appointments.status_label'))}
       <View style={styles.statusPills}>
         {STATUS_PILLS.map(s => {
           const active = appointment.status === s
@@ -2228,12 +2289,57 @@ export default function AppointmentDetailScreen() {
     </View>
   )
 
+  // APPT-PIPELINE-1 — statut actuel du contact et choix qui le font avancer.
+  const rdvBrandLink = appointment.brand_id ? rdvClientBrandLinks.find(l => l.brand_id === appointment.brand_id) ?? null : null
+  const brandStage: PipelineStage | null = rdvBrandLink
+    ? (rdvBrandLink.network_role === 'customer' ? 'customer' : 'distributor')
+    : null
+  const contactStage = clientInfo?.pipeline_stage ?? null
+  // Dans la marque du RDV, c'est le rôle de marque qui compte ; sinon l'étape générale.
+  const effectiveStage: PipelineStage | null = appointment.brand_id
+    ? (contactStage === 'lost' ? 'lost' : brandStage ?? (contactStage && PIPELINE_STAGES.indexOf(contactStage) < PIPELINE_STAGES.indexOf('customer') ? contactStage : 'new_lead'))
+    : contactStage
+  // Les choix partent du statut d'avant ce RDV (figé au premier clic), pas du statut qui
+  // vient d'être choisi : sinon cliquer "Perdu" fait disparaître "Perdu" de la liste.
+  const baseStage = afterBaseline ? afterBaseline.effective : effectiveStage
+  const afterPicked: PipelineStage | null = biz?.pipeline_stage && biz.pipeline_stage !== 'new_lead' ? biz.pipeline_stage : null
+  const afterChoices: PipelineStage[] = (() => {
+    const prospectSteps: PipelineStage[] = ['contacted', 'presentation_completed', 'follow_up', 'customer', 'distributor']
+    const list: PipelineStage[] = !baseStage || baseStage === 'lost'
+      ? prospectSteps
+      : prospectSteps.filter(st => PIPELINE_STAGES.indexOf(st) > PIPELINE_STAGES.indexOf(baseStage))
+    if (baseStage !== 'lost') list.push('lost')
+    if (afterPicked && !list.includes(afterPicked)) list.push(afterPicked)
+    return list
+  })()
+  const appointmentBrandForLabels = appointment.brand_id ? brandsForAppt.find(b => b.id === appointment.brand_id) ?? null : null
+  function afterChoiceLabel(choice: 'none' | PipelineStage): string {
+    if (choice === 'none') return t('appointments.after_no_change')
+    if (choice === 'customer' || choice === 'distributor') {
+      const role = appointmentBrandForLabels
+        ? brandRoleLabel(appointmentBrandForLabels, choice === 'customer' ? 'customer' : 'partner', getRoleLabel)
+        : getRoleLabel(choice)
+      return t('appointments.after_becomes', { role })
+    }
+    return getPipelineStageLabel(choice)
+  }
+  const afterCurrentLabel = (() => {
+    if (appointmentBrandForLabels) {
+      const role = rdvBrandLink
+        ? brandRoleLabel(appointmentBrandForLabels, rdvBrandLink.network_role, getRoleLabel)
+        : effectiveStage ? getPipelineStageLabel(effectiveStage) : t('appointments.after_unknown')
+      return businessProfile.activity_type === 'multi' ? `${role} · ${appointmentBrandForLabels.name}` : role
+    }
+    return contactStage ? getPipelineStageLabel(contactStage) : t('appointments.after_unknown')
+  })()
+
   // Option A validée : au-delà de la conversion (Client/Distributeur), la température et les
   // intentions "Devenir…" déjà atteintes n'ont plus de sens — mais uniquement tant que le RDV
   // n'est pas déjà terminé, pour ne jamais réécrire rétroactivement un débrief passé.
   const applyConversionFilter = appointment.status !== 'completed'
-  const isCustomerOrAbove = applyConversionFilter && (biz?.pipeline_stage === 'customer' || biz?.pipeline_stage === 'distributor')
-  const isDistributorStage = applyConversionFilter && biz?.pipeline_stage === 'distributor'
+  const conversionStage = afterPicked === 'customer' || afterPicked === 'distributor' ? afterPicked : baseStage
+  const isCustomerOrAbove = applyConversionFilter && (conversionStage === 'customer' || conversionStage === 'distributor')
+  const isDistributorStage = applyConversionFilter && conversionStage === 'distributor'
   const visibleIntents = INTENT_PILLS.filter(intent =>
     !((intent === 'become_customer' && isCustomerOrAbove) || (intent === 'become_distributor' && isDistributorStage))
   )
@@ -2243,14 +2349,14 @@ export default function AppointmentDetailScreen() {
   // d'équivalent ContactRole) — leur libellé doit donc suivre la personnalisation utilisateur
   // (Mes libellés), jamais un mot d'entreprise en dur.
   function getIntentLabel(intent: CommercialIntent): string {
-    if (intent === 'become_customer') return t('commercial_intents.become_role', { role: getRoleLabel('customer') })
-    if (intent === 'become_distributor') return t('commercial_intents.become_role', { role: getRoleLabel('distributor') })
+    if (intent === 'become_customer') return t('commercial_intents.become_role', { role: appointmentBrandForLabels ? brandRoleLabel(appointmentBrandForLabels, 'customer', getRoleLabel) : getRoleLabel('customer') })
+    if (intent === 'become_distributor') return t('commercial_intents.become_role', { role: appointmentBrandForLabels ? brandRoleLabel(appointmentBrandForLabels, 'partner', getRoleLabel) : getRoleLabel('distributor') })
     return t(GENERIC_INTENT_I18N_KEYS[intent])
   }
 
   const commercialSection = (
     <View style={styles.card}>
-      <Text style={styles.cardLabel}>{t('appointments.section_commercial')}</Text>
+      {sectionHeader('🎯', t('appointments.section_commercial'))}
 
       {biz?.outcome ? (
         <View style={[styles.outcomeBadge, { backgroundColor: OUTCOME_COLOR[biz.outcome] + '22', borderColor: OUTCOME_COLOR[biz.outcome] }]}>
@@ -2274,24 +2380,37 @@ export default function AppointmentDetailScreen() {
         </TouchableOpacity>
       ) : null}
 
-      <Text style={styles.commercialSubLabel}>{t('appointments.field_pipeline')}</Text>
-      <View style={styles.statusPills}>
-        {PIPELINE_STAGES.map(stage => {
-          const active = biz?.pipeline_stage === stage
-          return (
-            <TouchableOpacity
-              key={stage}
-              onPress={() => handlePipelineChange(stage)}
-              style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.statusPillText, { color: active ? colors.primary : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
-                {getPipelineStageLabel(stage)}
-              </Text>
-            </TouchableOpacity>
-          )
-        })}
-      </View>
+      {/* APPT-PIPELINE-1 — "Où en est X après ce RDV ?" : statut actuel (dans la marque du RDV
+          s'il y en a une), "Pas de changement" par défaut, seulement les choix qui font avancer. */}
+      {appointment.client_id ? (
+        <>
+          <Text style={styles.commercialSubLabel}>
+            {t('appointments.after_title', { name: clientInfo?.first_name || clientInfo?.full_name?.split(' ')[0] || '' })}
+          </Text>
+          <Text style={styles.afterCurrent}>{t('appointments.after_current', { status: afterCurrentLabel })}</Text>
+          <View style={styles.statusPills}>
+            {(['none', ...afterChoices] as Array<'none' | PipelineStage>).map(choice => {
+              const active = choice === 'none' ? !afterPicked : afterPicked === choice
+              return (
+                <TouchableOpacity
+                  key={choice}
+                  onPress={() => {
+                    const baseline = afterBaseline ?? { effective: effectiveStage, contact: contactStage }
+                    if (!afterBaseline) setAfterBaseline(baseline)
+                    handlePipelineChange(choice === 'none' ? null : choice, baseline.contact)
+                  }}
+                  style={[styles.statusPill, active && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.statusPillText, { color: active ? colors.primary : colors.textSecondary }, active && { fontFamily: fonts.semibold }]}>
+                    {afterChoiceLabel(choice)}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        </>
+      ) : null}
 
       {!isCustomerOrAbove && (
         <>
@@ -2344,7 +2463,7 @@ export default function AppointmentDetailScreen() {
         <>
           <Text style={styles.commercialSubLabel}>{t('appointments.field_intent_other_label')}</Text>
           <TextInput
-            style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+            style={styles.detailInput}
             value={intentOtherLabel}
             onChangeText={(v) => { setIntentOtherLabel(v.slice(0, 80)); setIntentOtherLabelDirty(true) }}
             placeholder={t('appointments.intent_other_placeholder')}
@@ -2455,7 +2574,7 @@ export default function AppointmentDetailScreen() {
   // et par la révision (toutes deux pilotent les mêmes brouillons partagés ci-dessus).
   const outcomePlanSections = (
     <>
-      <Text style={styles.commercialSubLabel}>{t('appointments.field_outcome')}</Text>
+      {stepHeader(showDebrief ? 2 : null, t('appointments.field_outcome'))}
       {biz?.outcome === 'follow_up_required' && !outcomeDraft ? (
         <Text style={styles.noFollowupHint}>{t('appointments.outcome_historical_notice')}</Text>
       ) : null}
@@ -2481,14 +2600,14 @@ export default function AppointmentDetailScreen() {
       ) : null}
 
       {outcomePendingSwitch ? (
-        <View style={styles.debriefRecap}>
-          <Text style={styles.debriefRecapLabel}>{t('appointments.outcome_switch_confirm')}</Text>
-          <View style={styles.debriefNoClientRow}>
-            <TouchableOpacity style={styles.debriefSecondaryBtn} onPress={cancelOutcomeSwitch} activeOpacity={0.8}>
-              <Text style={styles.debriefSecondaryBtnText}>{t('common.cancel')}</Text>
+        <View style={styles.switchConfirmBox}>
+          <Text style={styles.switchConfirmText}>⚠️ {t('appointments.outcome_switch_confirm')}</Text>
+          <View style={styles.switchConfirmBtns}>
+            <TouchableOpacity style={styles.switchCancelBtn} onPress={cancelOutcomeSwitch} activeOpacity={0.8}>
+              <Text style={styles.switchCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.debriefDoneBtn, { flex: 1, marginTop: 0 }]} onPress={confirmOutcomeSwitch} activeOpacity={0.85}>
-              <Text style={styles.debriefDoneBtnText}>{t('appointments.outcome_switch_confirm_action')}</Text>
+            <TouchableOpacity style={styles.switchConfirmBtn} onPress={confirmOutcomeSwitch} activeOpacity={0.85}>
+              <Text style={styles.switchConfirmBtnText}>{t('appointments.outcome_switch_confirm_action')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2734,7 +2853,7 @@ export default function AppointmentDetailScreen() {
           })() : null}
 
           <TextInput
-            style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+            style={styles.detailInput}
             value={outcomeDetailsDraft.freeText ?? ''}
             onChangeText={(v) => setOutcomeDetailsDraft(prev => prev?.kind === 'interested' ? { ...prev, freeText: v } : prev)}
             placeholder={t('appointments.outcome_interested_free_text_placeholder')}
@@ -2811,7 +2930,7 @@ export default function AppointmentDetailScreen() {
           </View>
           {outcomeDetailsDraft.reason === 'other' ? (
             <TextInput
-              style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+              style={styles.detailInput}
               value={outcomeDetailsDraft.reasonOtherText ?? ''}
               onChangeText={(v) => setOutcomeDetailsDraft(prev => prev?.kind === 'not_interested' ? { ...prev, reasonOtherText: v } : prev)}
               placeholder={t('appointments.outcome_not_interested_other_placeholder')}
@@ -2845,7 +2964,8 @@ export default function AppointmentDetailScreen() {
             <View key={field} style={{ marginBottom: 8 }}>
               <Text style={styles.followupPlanDelayLabel}>{t(`appointments.${key}` as any)}</Text>
               <TextInput
-                style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+                style={[styles.detailInput, styles.detailInputMultiline]}
+                multiline
                 value={(outcomeDetailsDraft as PartnerPotentialDetails)[field] ?? ''}
                 onChangeText={(v) => setOutcomeDetailsDraft(prev => prev?.kind === 'partner_potential' ? { ...prev, [field]: v } : prev)}
                 placeholderTextColor={colors.textTertiary}
@@ -2866,7 +2986,8 @@ export default function AppointmentDetailScreen() {
             <View key={field} style={{ marginBottom: 8 }}>
               <Text style={styles.followupPlanDelayLabel}>{t(`appointments.${key}` as any)}</Text>
               <TextInput
-                style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+                style={[styles.detailInput, field !== 'startDate' && styles.detailInputMultiline]}
+                multiline={field !== 'startDate'}
                 value={(outcomeDetailsDraft as PartnerRecruitedDetails)[field] ?? ''}
                 onChangeText={(v) => setOutcomeDetailsDraft(prev => prev?.kind === 'partner_recruited' ? { ...prev, [field]: v } : prev)}
                 placeholderTextColor={colors.textTertiary}
@@ -2883,7 +3004,7 @@ export default function AppointmentDetailScreen() {
         <View style={styles.debriefRecap}>
           <Text style={styles.commercialSubLabel}>{t('appointments.outcome_other_label')}</Text>
           <TextInput
-            style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+            style={styles.detailInput}
             value={outcomeOtherLabelDraft}
             onChangeText={(v) => setOutcomeOtherLabelDraft(v.slice(0, 80))}
             placeholder={t('appointments.outcome_other_placeholder')}
@@ -2908,7 +3029,7 @@ export default function AppointmentDetailScreen() {
         const firstName = clientInfo?.first_name || clientInfo?.full_name?.split(' ')[0] || ''
         return (
           <View style={styles.debriefRecap}>
-            <Text style={styles.commercialSubLabel}>{t('appointments.outcome_automations_title')}</Text>
+            <Text style={styles.boxTitle}>{t('appointments.outcome_automations_title')}</Text>
             {rules.map(rule => {
               const delay = getAutomationDelay(rule.id, rule.delayDays)
               return (
@@ -2924,7 +3045,7 @@ export default function AppointmentDetailScreen() {
       {/* ── RDV futurs existants (§13) ───────────────────────────────────────── */}
       {outcomeDraft && upcomingAppts.length > 0 ? (
         <View style={styles.debriefRecap}>
-          <Text style={styles.commercialSubLabel}>{t('appointments.outcome_upcoming_appts_title')}</Text>
+          <Text style={styles.boxTitle}>{t('appointments.outcome_upcoming_appts_title')}</Text>
           {upcomingAppts.map(a => {
             const active = selectedUpcomingId === a.id
             return (
@@ -2947,7 +3068,7 @@ export default function AppointmentDetailScreen() {
           (§20) — plus de dédoublonnage fragile basé sur le titre. */}
       {outcomeDraft && appointment.client_id ? (
         <View style={styles.debriefRecap}>
-          <Text style={styles.commercialSubLabel}>{t('appointments.outcome_personal_followup_title')}</Text>
+          <Text style={styles.boxTitle}>{t('appointments.outcome_personal_followup_title')}</Text>
           <View style={styles.noFollowupRow}>
             <TouchableOpacity style={styles.taskCheck} onPress={togglePersonalFollowupPlanned}>
               <View style={[styles.taskCheckBox, personalFollowupPlanned && { backgroundColor: colors.success, borderColor: colors.success }]}>
@@ -3017,8 +3138,16 @@ export default function AppointmentDetailScreen() {
               onChangeValue={(iso) => { markPersonalFollowupTouched(); setPersonalFollowupDate(iso); setFollowupConflict(null) }}
             />
           </View>
+          {personalFollowupPlanned && followupConflict ? (
+            <TouchableOpacity style={styles.conflictBox} onPress={() => setConfirmConflict(v => !v)} activeOpacity={0.8}>
+              <View style={[styles.taskCheckBox, confirmConflict && { backgroundColor: colors.warning, borderColor: colors.warning }]}>
+                {confirmConflict && <Check size={12} color="#fff" strokeWidth={3} />}
+              </View>
+              <Text style={styles.conflictText}>⚠️ {t('appointments.outcome_followup_conflict_warning')}</Text>
+            </TouchableOpacity>
+          ) : null}
           <TextInput
-            style={[styles.bizValueInput, { maxWidth: '100%', width: '100%' }, !personalFollowupPlanned && { opacity: 0.4 }]}
+            style={[styles.detailInput, !personalFollowupPlanned && { opacity: 0.4 }]}
             value={personalFollowupTitle}
             editable={personalFollowupPlanned}
             onChangeText={(v) => { markPersonalFollowupTouched(); setPersonalFollowupTitle(v) }}
@@ -3026,23 +3155,13 @@ export default function AppointmentDetailScreen() {
             placeholderTextColor={colors.textTertiary}
           />
           <TextInput
-            style={[styles.bizValueInput, { maxWidth: '100%', width: '100%' }, !personalFollowupPlanned && { opacity: 0.4 }]}
+            style={[styles.detailInput, !personalFollowupPlanned && { opacity: 0.4 }]}
             value={personalFollowupComment}
             editable={personalFollowupPlanned}
             onChangeText={setPersonalFollowupComment}
             placeholder={t('appointments.outcome_personal_followup_comment_placeholder')}
             placeholderTextColor={colors.textTertiary}
           />
-          {personalFollowupPlanned && followupConflict ? (
-            <View style={styles.noFollowupRow}>
-              <TouchableOpacity style={styles.taskCheck} onPress={() => setConfirmConflict(v => !v)}>
-                <View style={[styles.taskCheckBox, confirmConflict && { backgroundColor: colors.warning, borderColor: colors.warning }]}>
-                  {confirmConflict && <Check size={12} color="#fff" strokeWidth={3} />}
-                </View>
-              </TouchableOpacity>
-              <Text style={styles.noFollowupHint}>{t('appointments.outcome_followup_conflict_warning')}</Text>
-            </View>
-          ) : null}
         </View>
       ) : null}
     </>
@@ -3066,13 +3185,13 @@ export default function AppointmentDetailScreen() {
           <Text style={styles.debriefSub}>{t('appointments.debrief_sub')}</Text>
 
           <ScrollView style={{ maxHeight: 420 }}>
-            <Text style={styles.commercialSubLabel}>{t('appointments.debrief_recap_title')}</Text>
-            {(biz?.pipeline_stage || biz?.prospect_temperature || biz?.commercial_intent?.length) ? (
+            {stepHeader(1, t('appointments.debrief_recap_title'))}
+            {(afterPicked || biz?.prospect_temperature || biz?.commercial_intent?.length) ? (
               <View style={styles.debriefRecap}>
-                {biz?.pipeline_stage ? (
+                {afterPicked ? (
                   <View style={styles.debriefRecapRow}>
                     <Text style={styles.debriefRecapLabel}>{t('appointments.field_pipeline')}</Text>
-                    <Text style={styles.debriefRecapValue}>{getPipelineStageLabel(biz.pipeline_stage)}</Text>
+                    <Text style={styles.debriefRecapValue}>{afterChoiceLabel(afterPicked)}</Text>
                   </View>
                 ) : null}
                 {!isCustomerOrAbove && biz?.prospect_temperature ? (
@@ -3094,7 +3213,7 @@ export default function AppointmentDetailScreen() {
 
             {outcomePlanSections}
 
-            <Text style={styles.commercialSubLabel}>{t('appointments.debrief_followups_title')}</Text>
+            {stepHeader(3, t('appointments.debrief_followups_title'))}
             {(() => {
               const labelByKey: Record<PostCompletionPlanKey, string> = {
                 buy_product: 'appointments.debrief_followup_buy_product',
@@ -3320,7 +3439,7 @@ export default function AppointmentDetailScreen() {
               </View>
               {revisionReason === 'other' ? (
                 <TextInput
-                  style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+                  style={styles.detailInput}
                   value={revisionReasonOtherText}
                   onChangeText={setRevisionReasonOtherText}
                   placeholder={t('appointments.revision_reason_other_placeholder')}
@@ -3418,7 +3537,7 @@ export default function AppointmentDetailScreen() {
 
   const preparationSection = isBeforeRdv ? (
     <View style={styles.card}>
-      <Text style={styles.cardLabel}>{t('appointments.section_preparation')}</Text>
+      {sectionHeader('🧭', t('appointments.section_preparation'))}
 
       <View style={styles.prepRow}>
         <Text style={styles.prepRowLabel}>{t('appointments.prep_objective')}</Text>
@@ -3462,7 +3581,7 @@ export default function AppointmentDetailScreen() {
   // section ne doit plus apparaître une fois le RDV marqué "Complété").
   const nextStepSection = appointment.status !== 'completed' ? (
     <View style={styles.card}>
-      <Text style={styles.cardLabel}>{t('appointments.next_step_title')}</Text>
+      {sectionHeader('➡️', t('appointments.next_step_title'))}
       <View style={styles.statusPills}>
         <TouchableOpacity
           style={[styles.statusPill, nextStepMode === 'unknown' && { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
@@ -3499,7 +3618,7 @@ export default function AppointmentDetailScreen() {
             />
             <Text style={styles.commercialSubLabel}>{`${t('appointments.next_step_relance_note')} (${t('common.optional')})`}</Text>
             <TextInput
-              style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+              style={styles.detailInput}
               value={relanceNote}
               onChangeText={setRelanceNote}
               placeholder={t('appointments.next_step_relance_note_placeholder')}
@@ -3542,7 +3661,7 @@ export default function AppointmentDetailScreen() {
 
             <Text style={styles.commercialSubLabel}>{t('appointments.propose_next_purpose')}</Text>
             <TextInput
-              style={[styles.bizValueInput, { maxWidth: undefined, width: '100%' }]}
+              style={styles.detailInput}
               value={proposeNextPurpose}
               onChangeText={setProposeNextPurpose}
               placeholder={t('appointments.propose_next_purpose_placeholder')}
@@ -3853,7 +3972,10 @@ export default function AppointmentDetailScreen() {
       {/* RDV-2 §5 — indicateur discret (jamais de toast), un seul texte statique à côté du
           titre. Reflète notesSaveState, alimenté uniquement par handleSaveNotes/noteChanger. */}
       <View style={styles.notesSectionTitleRow}>
-        <Text style={styles.notesSectionTitle}>{t('appointments.section_report')}</Text>
+        <View style={styles.sectionHeaderLeft}>
+          <View style={styles.sectionHeaderIcon}><Text style={styles.sectionHeaderEmoji}>🗒️</Text></View>
+          <Text style={styles.sectionHeaderText}>{t('appointments.section_report')}</Text>
+        </View>
         {notesSaveState !== 'idle' ? (
           <Text style={[
             styles.notesSaveStateText,
@@ -4040,7 +4162,7 @@ export default function AppointmentDetailScreen() {
   // navigation dédiée uniquement pour ce lien aurait été hors périmètre (voir rapport).
   const orderSection = appointmentOrders.length > 0 ? (
     <View style={styles.card}>
-      <Text style={styles.cardLabel}>{t('appointments.order_section_title')}</Text>
+      {sectionHeader('🛒', t('appointments.order_section_title'))}
       {appointmentOrders.map(order => {
         const isCancelled = !!order.cancelled_at
         const isReturned = order.status === 'returned'
@@ -4118,7 +4240,7 @@ export default function AppointmentDetailScreen() {
 
   const tasksSection = (
     <View style={styles.card}>
-      <Text style={styles.cardLabel}>{t('appointments.section_tasks')}</Text>
+      {sectionHeader('✅', t('appointments.section_tasks'))}
       {/* CONTACT-RDV-TASKS/P3.1 — micro-UX uniquement : l'explication pédagogique + les exemples
           ne s'affichent que sur l'état vide (§8 du brief, jamais répétés une fois des tâches
           présentes) — combinés en une seule phrase secondaire compacte plutôt que plusieurs
@@ -4535,6 +4657,16 @@ function makeStyles(colors: ThemeColors) {
     card:      { backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder, padding: 16, ...SOFT_CARD_SHADOW },
     cardLabel: { fontSize: 12, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 12 },
     notesSectionTitle: { fontSize: 12, fontFamily: fonts.bold, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.6 },
+    sectionHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 12, marginBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+    sectionHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
+    sectionHeaderIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+    sectionHeaderEmoji: { fontSize: 15 },
+    sectionHeaderText: { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
+    stepHeader:        { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18, marginBottom: 10, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border },
+    stepBubble:        { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    stepBubbleText:    { fontSize: 12, fontFamily: fonts.bold, color: colors.onPrimary },
+    stepHeaderText:    { fontSize: 14.5, fontFamily: fonts.bold, color: colors.text },
+    boxTitle:          { fontSize: 13, fontFamily: fonts.semibold, color: colors.text, marginBottom: 6 },
     notesSectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
     notesSaveStateText: { fontSize: 11, fontFamily: fonts.medium, color: colors.textTertiary },
     outcomeBadge:     { alignSelf: 'flex-start', borderRadius: 8, borderWidth: 1, paddingVertical: 5, paddingHorizontal: 10, marginBottom: 14 },
@@ -4558,7 +4690,8 @@ function makeStyles(colors: ThemeColors) {
     statusPillTempRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 
     // Commercial context
-    commercialSubLabel: { fontSize: 11, fontFamily: fonts.semibold, color: colors.textSecondary, marginTop: 14, marginBottom: 8 },
+    commercialSubLabel: { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.text, marginTop: 16, marginBottom: 8 },
+    afterCurrent: { fontSize: 12.5, fontFamily: fonts.medium, color: colors.textSecondary, marginBottom: 6 },
     bizValueInput: { fontSize: 14, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.bgDim, borderRadius: 8, padding: 10, maxWidth: 160 },
 
     // Débrief — choix des relances à créer
@@ -4660,7 +4793,19 @@ function makeStyles(colors: ThemeColors) {
     debriefHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
     debriefTitle:  { fontSize: 16, fontFamily: fonts.bold, color: colors.text, flex: 1 },
     debriefSub:    { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, marginBottom: 12, lineHeight: 18 },
-    debriefRecap:      { marginBottom: 14, borderRadius: 10, backgroundColor: colors.bgDim, paddingHorizontal: 10 },
+    // Encadré de détails du résultat : fond doux, bordure, vraie marge intérieure.
+    debriefRecap:      { marginBottom: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 12, gap: 4 },
+    detailInput:       { width: '100%', minHeight: 44, fontSize: 14, fontFamily: fonts.body, color: colors.text, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginTop: 4 },
+    detailInputMultiline: { minHeight: 64, textAlignVertical: 'top' },
+    conflictBox:       { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.warning, backgroundColor: colors.warningLight },
+    conflictText:      { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.text },
+    switchConfirmBox:  { marginBottom: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.warning, backgroundColor: colors.warningLight, padding: 12, gap: 10 },
+    switchConfirmText: { fontSize: 13.5, fontFamily: fonts.medium, color: colors.text },
+    switchConfirmBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+    switchCancelBtn:   { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+    switchCancelText:  { fontSize: 13.5, fontFamily: fonts.semibold, color: colors.text },
+    switchConfirmBtn:  { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: colors.warning },
+    switchConfirmBtnText: { fontSize: 13.5, fontFamily: fonts.semibold, color: colors.onPrimary },
     debriefRecapRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
     debriefRecapLabel: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary },
     debriefRecapValue: { fontSize: 12, fontFamily: fonts.semibold, color: colors.text, flexShrink: 1, textAlign: 'right', marginLeft: 12 },

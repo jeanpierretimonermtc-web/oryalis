@@ -23,6 +23,7 @@ export function useBrands() {
 export function useClientBrands(clientId: string) {
   const [links, setLinks] = useState<ClientBrandWithBrand[]>([])
   const fetch = useCallback(async () => {
+    if (!clientId) { setLinks([]); return }
     try { setLinks(await fetchClientBrands(clientId)) }
     catch (e) { console.error('[clientBrands.fetch]', e) }
   }, [clientId])
@@ -68,7 +69,7 @@ export function useClientBrandMap() {
     const map = new Map<string, BrandRoleEntry[]>()
     for (const l of links) {
       const b = brandById.get(l.brand_id)
-      if (!b || l.network_role === 'customer') continue
+      if (!b) continue
       map.set(l.client_id, [...(map.get(l.client_id) ?? []), { brand: b, role: l.network_role }])
     }
     return map

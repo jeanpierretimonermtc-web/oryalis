@@ -6,6 +6,9 @@ import {
 import { MEETING_MODE_ICON, meetingActionUrl } from '@/features/appointments/meetingMode'
 import { RemoteTimeBadge } from '@/features/clients/RemoteTimeBadge'
 import { RemoteTimeHint } from '@/features/clients/RemoteTimeHint'
+import { useBrands } from '@/features/brands/useBrands'
+import { BrandPill } from '@/features/brands/BrandPill'
+import type { Brand } from '@/shared/lib/types'
 import { router, Stack, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -243,9 +246,10 @@ function AppointmentPreviewContent({
 // CAL-POPOVER-3 — aperçu au clic : contact, quand, comment (avec l'action du jour J), puis les
 // actions en boutons. Le Hover Preview garde AppointmentPreviewContent (compact).
 function AppointmentQuickPreview({
-  appt, colors, styles, t, getRoleLabel, isFr, daysLong, monthsFull,
+  appt, colors, styles, t, getRoleLabel, isFr, daysLong, monthsFull, brand,
 }: {
   appt: CalendarAppointment
+  brand: Brand | null
   colors: ThemeColors
   styles: ReturnType<typeof makeStyles>
   t: (key: string, opts?: Record<string, unknown>) => string
@@ -288,6 +292,7 @@ function AppointmentQuickPreview({
 
       {!isPersonal ? (
         <View style={styles.qpPills}>
+          {brand ? <BrandPill brand={brand} /> : null}
           <View style={[styles.qpPill, { backgroundColor: accent + '1A' }]}>
             <Text style={[styles.qpPillText, { color: accent }]}>{typeLabel}</Text>
           </View>
@@ -366,6 +371,7 @@ export default function AgendaScreen() {
   // calendrier, sans quitter la page — la suppression est irréversible, contrairement à
   // "Annuler" (statut) déjà disponible depuis la fiche détaillée.
   const [actionMenuAppt, setActionMenuAppt] = useState<CalendarAppointment | null>(null)
+  const { brands: calendarBrands } = useBrands()
   // UI-POPOVER-2 — position capturée au clic (comme hoverPos ci-dessous), pour ancrer ce menu
   // près du RDV cliqué au lieu de l'ancienne Modal centrée à l'écran.
   const [actionMenuPos, setActionMenuPos] = useState<{ x: number; y: number } | null>(null)
@@ -1139,6 +1145,7 @@ export default function AgendaScreen() {
                 <AppointmentQuickPreview
                   appt={actionMenuAppt} colors={colors} styles={styles} t={t} getRoleLabel={getRoleLabel}
                   isFr={isFr} daysLong={daysLong} monthsFull={monthsFull}
+                  brand={actionMenuAppt.brand_id ? calendarBrands.find(b => b.id === actionMenuAppt.brand_id) ?? null : null}
                 />
 
                 {confirmingDelete ? (

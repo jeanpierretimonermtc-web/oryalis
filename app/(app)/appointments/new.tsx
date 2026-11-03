@@ -11,6 +11,9 @@ import { createAppointment, updateAppointment, fetchAppointmentById } from '@/fe
 import type { AppointmentType } from '@/features/appointments/appointmentTypes'
 import { getClient, searchClientsForPicker, type ClientPickerItem } from '@/features/clients/clientService'
 import { MeetingModeField } from '@/features/appointments/MeetingModeField'
+import { useBrands } from '@/features/brands/useBrands'
+import { BrandAvatar } from '@/features/brands/BrandPill'
+import { normalizeBrandName } from '@/features/brands/brandMatching'
 import { isoToLocalParts } from '@/shared/lib/dateFormat'
 import { RemoteTimeHint } from '@/features/clients/RemoteTimeHint'
 import { useAppConfig } from '@/features/settings/AppConfigProvider'
@@ -235,7 +238,17 @@ export default function NewAppointmentScreen() {
   const [location,      setLocation]      = useState('')
   const [meetingUrl,    setMeetingUrl]    = useState('')
   const [meetingMode,   setMeetingMode]   = useState<MeetingMode | null>(null)
+  const [brandId,       setBrandId]       = useState<string | null>(null)
+  const { brands } = useBrands()
   const { profile: businessProfile, saveMeetingDefaults } = useAppConfig()
+  // APPT-BRAND-1 — "Ma marque" : en multi-marques on choisit la marque du RDV ; avec une
+  // marque unique, elle est posée automatiquement ; en générique, aucune.
+  const isMultiBrand = businessProfile.activity_type === 'multi'
+  const singleBrandName = businessProfile.activity_type === 'custom'
+    ? businessProfile.custom_brand_name?.trim() || null
+    : ({ doterra: 'doTERRA', zinzino: 'Zinzino', herbalife: 'Herbalife' } as Record<string, string>)[businessProfile.activity_type] ?? null
+  const singleBrandId = singleBrandName ? brands.find(b => b.normalized_name === normalizeBrandName(singleBrandName))?.id ?? null : null
+  const resolvedBrandId = isMultiBrand ? brandId : (brandId ?? singleBrandId)
   const [clientNotes,   setClientNotes]   = useState('')
   const [internalNotes, setInternalNotes] = useState('')
 
@@ -268,6 +281,7 @@ export default function NewAppointmentScreen() {
       setLocation(appt.location ?? '')
       setMeetingUrl(appt.meeting_url ?? '')
       setMeetingMode(appt.meeting_mode ?? null)
+      setBrandId(appt.brand_id ?? null)
       if (appt.client_id) {
         await getClient(appt.client_id).then(setSelectedClient).catch(() => {})
       }
@@ -318,6 +332,7 @@ export default function NewAppointmentScreen() {
           end_at,
           // MEETING-MODE-1 — seul le complément du mode choisi est gardé.
           meeting_mode: meetingMode,
+          brand_id:     resolvedBrandId,
           location:     meetingMode === 'in_person' ? location.trim() || null : null,
           meeting_url:  meetingMode === 'video' ? meetingUrl.trim() || null : null,
         })
@@ -329,6 +344,7 @@ export default function NewAppointmentScreen() {
           end_at,
           client_id:   selectedClient?.id,
           meeting_mode: meetingMode ?? undefined,
+          brand_id:     resolvedBrandId ?? undefined,
           location:    meetingMode === 'in_person' ? location.trim() || undefined : undefined,
           meeting_url: meetingMode === 'video' ? meetingUrl.trim() || undefined : undefined,
           notes: (clientNotes.trim() || internalNotes.trim())
@@ -409,6 +425,29 @@ export default function NewAppointmentScreen() {
           <Field label={t('appointments.type_label')}>
             <SelectPill options={typeOptions} value={apptType} onChange={setApptType} colors={colors} wrap={isWide} />
           </Field>
+
+          {/* APPT-BRAND-1 — multi-marques : la marque du RDV, choisie dès la création. */}
+          {isMultiBrand && brands.length > 0 ? (
+            <Field label={t('appointments.brand_label')}>
+              <View style={styles.brandChips}>
+                {brands.map(b => {
+                  const active = brandId === b.id
+                  return (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={[styles.brandChip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primaryLight : colors.card }]}
+                      onPress={() => setBrandId(active ? null : b.id)}
+                      activeOpacity={0.75}
+                      accessibilityState={{ selected: active }}
+                    >
+                      <BrandAvatar brand={b} size={20} />
+                      <Text style={[styles.brandChipText, { color: active ? colors.primary : colors.text, fontFamily: active ? fonts.semibold : fonts.medium }]}>{b.name}</Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
+            </Field>
+          ) : null}
 
           <Field label={`${t('appointments.select_client')} (${t('common.optional')})`}>
             {selectedClient ? (
@@ -529,6 +568,9 @@ function makeStyles(colors: ThemeColors) {
   cardTitle:  { fontSize: 14, fontFamily: fonts.semibold, color: colors.text },
   cardBody:   { padding: 16, gap: 14 },
 
+  brandChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  brandChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
+  brandChipText: { fontSize: 14 },
   textField: {
     borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
     fontSize: 15, fontFamily: fonts.body, backgroundColor: colors.bg,

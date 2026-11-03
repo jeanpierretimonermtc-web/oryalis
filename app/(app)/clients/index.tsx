@@ -18,6 +18,7 @@ import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
 import { gravatarUrl } from '@/shared/lib/gravatar'
 import { fonts } from '@/shared/theme/fonts'
 import type { ClientListItem, ContactRole, PipelineStage } from '@/shared/lib/types'
+import { PIPELINE_STAGES } from '@/shared/lib/types'
 import { computeRelationshipHealth, type RelationshipHealthInput } from '@/features/clients/relationshipHealth'
 import { URGENCY_WINDOWS, isInUrgencyWindow, clientHasActionInWindow, type UrgencyWindow } from '@/features/clients/actionWindows'
 import { findDuplicates, type DuplicateReason } from '@/features/clients/duplicates'
@@ -265,17 +266,18 @@ function RolePill({ role }: { role: ContactRole }) {
 function RolePills({ client, brandRoles, linked }: { client: ClientListItem; brandRoles?: BrandRoleEntry[]; linked: boolean }) {
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const { getRoleLabel } = useAppConfig()
+  const { getRoleLabel, profile } = useAppConfig()
+  const showBrandName = profile.activity_type === 'multi'
   return (
     <>
       {client.contact_role
-        .filter(role => !linked || !PARTNER_ROLES.includes(role))
+        .filter(role => !linked || (role !== 'customer' && !PARTNER_ROLES.includes(role)))
         .map(role => <RolePill key={role} role={role} />)}
       {(brandRoles ?? []).map(({ brand, role }) => {
-        const rc = getRoleColors(role === 'leader' ? 'leader' : 'distributor', colors)
+        const rc = getRoleColors(role === 'leader' ? 'leader' : role === 'partner' ? 'distributor' : 'customer', colors)
         return (
           <View key={brand.id} style={[styles.pill, { backgroundColor: rc.bg }]}>
-            <Text style={[styles.pillText, { color: rc.text }]}>{brandRoleLabel(brand, role, getRoleLabel)} · {brand.name}</Text>
+            <Text style={[styles.pillText, { color: rc.text }]}>{brandRoleLabel(brand, role, getRoleLabel)}{showBrandName ? ` · ${brand.name}` : ''}</Text>
           </View>
         )
       })}
@@ -430,10 +432,13 @@ function ClientCard({
                 distributor — voir getPipelineStageLabel) : un libellé de contexte + un texte
                 simple, sans fond coloré, pour ne jamais se confondre visuellement avec un
                 badge de rôle (audit libellés/pipeline). */}
-            <View style={styles.pipelineContextRow}>
-              <Text style={styles.pipelineContextLabel}>{t('clients.fields.pipeline_stage')}</Text>
-              <Text style={styles.pipelineContextValue}>{getPipelineStageLabel(client.pipeline_stage)}</Text>
-            </View>
+            {client.pipeline_stage && (client.pipeline_stage === 'lost'
+              || PIPELINE_STAGES.indexOf(client.pipeline_stage) < PIPELINE_STAGES.indexOf('customer')) ? (
+              <View style={styles.pipelineContextRow}>
+                <Text style={styles.pipelineContextLabel}>{t('clients.fields.pipeline_stage')}</Text>
+                <Text style={styles.pipelineContextValue}>{getPipelineStageLabel(client.pipeline_stage)}</Text>
+              </View>
+            ) : null}
           </View>
           <TouchableOpacity
             style={styles.menuBtn}
@@ -741,9 +746,13 @@ export default function ClientsScreen() {
     return counts
   }, [baseDisplayed, actionMaps, teamInfo])
 
+  // BRAND-ROLES-1 — une marque choisie : les partenaires se lisent dans CETTE marque (rôle
+  // et vocabulaire de la marque), jamais via le rôle général du contact.
+  const selectedBrand = brandFilter && brandFilter !== 'none' ? myBrands.find(b => b.id === brandFilter) ?? null : null
+  const brandPartnerRoles: ContactRole[] = ['distributor', 'leader']
   const segmentFiltered = baseDisplayed
     .filter(c => inSegment(c, segment, teamInfo))
-    .filter(c => !partnerRole || c.contact_role.includes(partnerRole))
+    .filter(c => !partnerRole || !!selectedBrand || c.contact_role.includes(partnerRole))
   const pipelineFiltered = pipelineFilter ? segmentFiltered.filter(c => c.pipeline_stage === pipelineFilter) : segmentFiltered
   const brandCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -754,9 +763,18 @@ export default function ClientsScreen() {
     }
     return counts
   }, [pipelineFiltered, brandsByClient])
-  const displayed = !brandFilter ? pipelineFiltered
+  const brandFiltered = !brandFilter ? pipelineFiltered
     : brandFilter === 'none' ? pipelineFiltered.filter(c => !brandsByClient.get(c.id)?.length)
     : pipelineFiltered.filter(c => brandsByClient.get(c.id)?.some(b => b.id === brandFilter))
+  const displayed = selectedBrand && segment === 'partner'
+    ? brandFiltered.filter(c => {
+        const entry = brandRolesByClient.get(c.id)?.find(e => e.brand.id === selectedBrand.id)
+        if (!entry) return false
+        if (partnerRole === 'leader') return entry.role === 'leader'
+        if (partnerRole === 'distributor') return entry.role === 'partner'
+        return true
+      })
+    : brandFiltered
 
   const noActionContacts = useMemo(() => displayed.filter(c => !c.next_action_at), [displayed])
   const hotContacts = useMemo(() => displayed.filter(c => hotClientIds.has(c.id)), [displayed, hotClientIds])
@@ -984,7 +1002,7 @@ export default function ClientsScreen() {
 
         {segment === 'partner' && (
           <View style={styles.miniFilterRow}>
-            {[null, ...PARTNER_ROLES].map(r => {
+            {[null, ...(selectedBrand ? brandPartnerRoles : PARTNER_ROLES)].map(r => {
               const active = partnerRole === r
               // Même code couleur que les badges de rôle des cartes (getRoleColors) : chaque
               // sous-filtre se reconnaît à sa couleur, actif = contour plein de cette couleur.
@@ -1005,7 +1023,11 @@ export default function ClientsScreen() {
                     styles.miniFilterText,
                     rc ? { color: rc.text, fontFamily: active ? fonts.bold : fonts.semibold } : active && styles.miniFilterTextActive,
                   ]}>
-                    {r ? getRoleLabel(r) : t('clients.segment_partners_all')}
+                    {!r
+                      ? t('clients.segment_partners_all')
+                      : selectedBrand
+                        ? brandRoleLabel(selectedBrand, r === 'leader' ? 'leader' : 'partner', getRoleLabel)
+                        : getRoleLabel(r)}
                   </Text>
                 </TouchableOpacity>
               )
@@ -1054,7 +1076,8 @@ export default function ClientsScreen() {
                 <TouchableOpacity
                   key={b.id}
                   style={[styles.chip, { backgroundColor: active ? palette.bg : colors.card, borderColor: active ? palette.text : colors.border }]}
-                  onPress={() => setBrandFilter(active ? null : b.id)}
+                  // « Équipe » n'existe pas dans une marque : sous-filtre retiré en choisissant une marque.
+                  onPress={() => { setBrandFilter(active ? null : b.id); if (partnerRole === 'team_member') setPartnerRole(null) }}
                   activeOpacity={0.7}
                 >
                   <Text style={[styles.chipText, { color: palette.text, fontFamily: active ? fonts.bold : fonts.semibold }]}>{b.name} · {brandCounts.get(b.id) ?? 0}</Text>

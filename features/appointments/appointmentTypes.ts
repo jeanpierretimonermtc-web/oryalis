@@ -246,6 +246,8 @@ export interface Appointment {
   meeting_url: string | null
   // MEETING-MODE-1 — en personne / téléphone / visio / WhatsApp (null = non précisé).
   meeting_mode: MeetingMode | null
+  // APPT-BRAND-1 — marque du RDV (table brands), choisie à la création en multi-marques.
+  brand_id: string | null
   provider: string
   cancelled_at: string | null
   cancellation_reason: string | null
@@ -273,7 +275,7 @@ export interface AppointmentBusinessContext {
   brand_id: string | null
   catalog_id: string | null
   main_product_id: string | null
-  pipeline_stage: PipelineStage
+  pipeline_stage: PipelineStage | null
   prospect_temperature: ProspectTemperature | null
   commercial_intent: CommercialIntent[] | null
   // RDV-1 — précision texte quand commercial_intent contient 'other'. Distinct de
@@ -348,7 +350,7 @@ export interface AppointmentWithContext extends Appointment {
 // pipeline_stage et is_vip ne sont volontairement pas chargés ici, non nécessaires à l'accent.
 export interface CalendarAppointment extends Pick<Appointment,
   'id' | 'user_id' | 'client_id' | 'title' | 'appointment_type' | 'status' | 'start_at' | 'end_at' | 'provider' |
-  'meeting_mode' | 'location' | 'meeting_url'
+  'meeting_mode' | 'location' | 'meeting_url' | 'brand_id'
 > {
   client: { id: string; full_name: string; status: string; contact_role: ContactRole[]; phone?: string | null; timezone?: string | null } | null
 }
@@ -363,6 +365,7 @@ export interface CreateAppointmentPayload {
   location?: string
   meeting_url?: string
   meeting_mode?: MeetingMode
+  brand_id?: string
   // Lot 1.2 — RDV créé comme suite explicite d'un autre RDV.
   followup_of_appointment_id?: string
   notes?: {
@@ -394,6 +397,7 @@ export interface UpdateAppointmentPayload {
   location?: string | null
   meeting_url?: string | null
   meeting_mode?: MeetingMode | null
+  brand_id?: string | null
   cancelled_at?: string
   cancellation_reason?: string
   // Rattachement d'un contact à un RDV existant (créé initialement sans contact) — voir
@@ -415,7 +419,8 @@ export interface UpdateBusinessContextPayload {
   brand_id?: string
   catalog_id?: string
   main_product_id?: string
-  pipeline_stage?: PipelineStage
+  // null = "Pas de changement" (APPT-PIPELINE-1).
+  pipeline_stage?: PipelineStage | null
   prospect_temperature?: ProspectTemperature
   commercial_intent?: CommercialIntent[]
   commercial_intent_other_label?: string | null

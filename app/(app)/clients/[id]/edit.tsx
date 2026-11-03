@@ -24,9 +24,15 @@ import { useSponsorGraph } from '@/features/network/useNetwork'
 import { useClientBrands } from '@/features/brands/useBrands'
 import { downlineIds, NETWORK_ROLES } from '@/features/network/networkService'
 import { ContactPickerModal } from '@/features/network/ContactPickerModal'
+import { brandRoleLabel, BRAND_ROLES } from '@/features/brands/brandRoleLabels'
+import { updateClientBrandNetwork } from '@/features/brands/brandService'
+import { BrandAvatar } from '@/features/brands/BrandPill'
+import type { BrandNetworkRole } from '@/shared/lib/types'
 import { TIMEZONE_OPTIONS, timeZoneCity, timeZoneOffsetMinutes, formatUtcOffset } from '@/features/clients/timezones'
 
-const CONTACT_ROLES: ContactRole[] = ['prospect', 'customer', 'distributor', 'leader', 'team_member', 'inactive']
+// STATUS-1 — étapes de prospect, puis Client / Partenaire / Leader, ou Perdu.
+const PROSPECT_STEPS: PipelineStage[] = ['new_lead', 'contacted', 'presentation_scheduled', 'presentation_completed', 'follow_up']
+type StatusChoice = PipelineStage | 'leader'
 const NETWORK_POTENTIALS: NetworkPotential[] = ['low', 'medium', 'high']
 
 const SECTION_ACCENTS: Record<string, (colors: ThemeColors) => { fg: string; bg: string }> = {
@@ -105,6 +111,17 @@ export default function EditClientScreen() {
   const [sponsorPickerOpen, setSponsorPickerOpen] = useState(false)
   const showSponsor = isModuleActive('downline')
   const { links: brandLinks } = useClientBrands(id)
+  const [brandRoleDraft, setBrandRoleDraft] = useState<Record<string, BrandNetworkRole>>({})
+  const brandRoleOf = (l: { id: string; network_role: BrandNetworkRole }) => brandRoleDraft[l.id] ?? l.network_role
+  const brandPartnerLinks = brandLinks.filter(l => brandRoleOf(l) !== 'customer')
+  const currentStatus: StatusChoice = pipelineStage === 'distributor' && contactRole.includes('leader') ? 'leader' : pipelineStage
+  // Le rôle découle du statut (même règle que reconcile_contact_status en base).
+  function chooseStatus(choice: StatusChoice) {
+    if (choice === 'lost') { setPipelineStage('lost'); return }
+    if (choice === 'leader') { setPipelineStage('distributor'); setContactRole(['distributor', 'leader']); return }
+    setPipelineStage(choice)
+    setContactRole(choice === 'customer' ? ['customer'] : choice === 'distributor' ? ['distributor'] : ['prospect'])
+  }
   const { graph: sponsorGraph } = useSponsorGraph(showSponsor)
   // SPONSOR-1 — parrains possibles : membres du réseau, jamais le contact ni sa descendance.
   const sponsorOptions = useMemo(() => {
@@ -209,6 +226,11 @@ export default function EditClientScreen() {
         pipeline_stage: pipelineStage,
         ...(showSponsor && brandLinks.length === 0 && !(sponsorId && downlineIds(id, sponsorGraph).has(sponsorId)) ? { sponsor_id: sponsorId } : {}),
       })
+
+      for (const l of brandLinks) {
+        const role = brandRoleDraft[l.id]
+        if (role && role !== l.network_role) await updateClientBrandNetwork(l.id, { network_role: role })
+      }
 
       // Traçabilité (refonte) — ne doit jamais faire échouer l'enregistrement principal.
       if (session && client) {
@@ -371,41 +393,64 @@ export default function EditClientScreen() {
               {t('clients.tracking_consent_recorded_at', { date: formatDate(trackingConsentAt, locale) })}
             </Text>
           ) : null}
+          {/* STATUS-1 — un seul statut : étapes de prospect → Client → Partenaire, ou Perdu. Le
+              rôle en découle (synchronisé en base) ; avec des marques, Partenaire / Leader se
+              règlent marque par marque dans « Ses marques ». */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>{t('clients.contact_role.label')}</Text>
-            <View style={styles.chipRow}>
-              {CONTACT_ROLES.map(role => {
-                const active = contactRole.includes(role)
-                // BRAND-ROLES-1 — rôles réseau d'un contact avec marques : déduits de ses rôles
-                // par marque (synchronisation en base), jamais cochés à la main ici.
-                const lockedByBrand = brandLinks.length > 0 && (NETWORK_ROLES as readonly string[]).includes(role)
-                return (
-                  <TouchableOpacity
-                    key={role}
-                    style={[styles.smallChip, active && styles.smallChipActive, lockedByBrand && { opacity: 0.5 }]}
-                    disabled={lockedByBrand}
-                    onPress={() => {
-                      const next = contactRole.includes(role)
-                        ? (contactRole.length > 1 ? contactRole.filter(r => r !== role) : contactRole)
-                        : [...contactRole, role]
-                      setContactRole(next)
-                      // Le trigger sync_client_role_from_pipeline remet le rôle "distributor" tant que
-                      // l'étape vaut 'distributor' : sans rôle réseau, l'étape doit redescendre.
-                      const hasNetworkRole = next.some(r => (NETWORK_ROLES as readonly string[]).includes(r))
-                      if (!hasNetworkRole && pipelineStage === 'distributor') {
-                        setPipelineStage(next.includes('customer') ? 'customer' : 'follow_up')
-                      }
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>
-                      {getRoleLabel(role)}
-                    </Text>
-                  </TouchableOpacity>
-                )
-              })}
-            </View>
-            {brandLinks.length > 0 ? <Text style={styles.sponsorHint}>{t('brands.roles_by_brand_hint')}</Text> : null}
+            <Text style={styles.fieldLabel}>{t('clients.status_label')}</Text>
+            {brandPartnerLinks.length === 0 ? (
+              <>
+                <Text style={styles.statusGroupLabel}>{t('clients.status_prospect_group')}</Text>
+                <View style={styles.chipRow}>
+                  {PROSPECT_STEPS.map(step => (
+                    <TouchableOpacity key={step} style={[styles.smallChip, currentStatus === step && styles.smallChipActive]} onPress={() => chooseStatus(step)} activeOpacity={0.7}>
+                      <Text style={[styles.smallChipText, currentStatus === step && styles.smallChipTextActive]}>{getPipelineStageLabel(step)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.chipRow}>
+                  {(brandLinks.length > 0 ? ['customer', 'lost'] as StatusChoice[] : ['customer', 'distributor', 'leader', 'lost'] as StatusChoice[]).map(choice => (
+                    <TouchableOpacity key={choice} style={[styles.smallChip, currentStatus === choice && styles.smallChipActive]} onPress={() => chooseStatus(choice)} activeOpacity={0.7}>
+                      <Text style={[styles.smallChipText, currentStatus === choice && styles.smallChipTextActive]}>
+                        {choice === 'leader' ? getRoleLabel('leader') : choice === 'distributor' ? getRoleLabel('distributor') : getPipelineStageLabel(choice)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <View style={styles.chipRow}>
+                <TouchableOpacity style={[styles.smallChip, pipelineStage === 'lost' && styles.smallChipActive]} onPress={() => chooseStatus(pipelineStage === 'lost' ? 'distributor' : 'lost')} activeOpacity={0.7}>
+                  <Text style={[styles.smallChipText, pipelineStage === 'lost' && styles.smallChipTextActive]}>{getPipelineStageLabel('lost')}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Une ligne par marque, avec le vocabulaire de la marque (Mes libellés). */}
+            {brandLinks.map(l => (
+              <View key={l.id} style={styles.brandStatusRow}>
+                <View style={styles.brandStatusName}>
+                  <BrandAvatar brand={l.brand} size={20} />
+                  <Text style={styles.brandStatusText} numberOfLines={1}>{l.brand.name}</Text>
+                </View>
+                <View style={styles.chipRow}>
+                  {BRAND_ROLES.map(role => {
+                    const active = brandRoleOf(l) === role
+                    return (
+                      <TouchableOpacity
+                        key={role}
+                        style={[styles.smallChip, active && styles.smallChipActive]}
+                        onPress={() => setBrandRoleDraft(prev => ({ ...prev, [l.id]: role }))}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{brandRoleLabel(l.brand, role, getRoleLabel)}</Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+              </View>
+            ))}
+            {brandLinks.length > 0 ? <Text style={styles.sponsorHint}>{t('clients.status_brand_rows_hint')}</Text> : null}
           </View>
           {/* BRAND-NETWORK-1 — avec des marques, parrain et rôle se règlent marque par marque. */}
           {showSponsor && brandLinks.length > 0 ? (
@@ -471,19 +516,6 @@ export default function EditClientScreen() {
 
         {/* ── Parcours ───────────────────────────────────────────── */}
         <SectionCard icon="🗺" titleKey="clients.sections.development">
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>{t('clients.fields.pipeline_stage')}</Text>
-            <View style={styles.chipRow}>
-              {PIPELINE_STAGES.map(stage => {
-                const active = pipelineStage === stage
-                return (
-                  <TouchableOpacity key={stage} style={[styles.smallChip, active && styles.smallChipActive]} onPress={() => setPipelineStage(stage)} activeOpacity={0.7}>
-                    <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{getPipelineStageLabel(stage)}</Text>
-                  </TouchableOpacity>
-                )
-              })}
-            </View>
-          </View>
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>{t('clients.fields.network_potential')}</Text>
             <View style={styles.chipRow}>
@@ -633,6 +665,10 @@ function makeStyles(colors: ThemeColors) {
   sponsorBtnText: { fontSize: 14, fontFamily: fonts.medium, color: colors.text },
   sponsorBtnChevron: { fontSize: 18, color: colors.textTertiary },
   sponsorHint: { fontSize: 12, fontFamily: fonts.body, color: colors.textSecondary },
+  statusGroupLabel: { fontSize: 11.5, fontFamily: fonts.medium, color: colors.textSecondary },
+  brandStatusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 4 },
+  brandStatusName: { flexDirection: 'row', alignItems: 'center', gap: 6, width: 110 },
+  brandStatusText: { flexShrink: 1, fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
   smallChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
   smallChipActive:      { backgroundColor: colors.primaryLight, borderColor: colors.primary },
   smallChipIcon:        { fontSize: 13 },
