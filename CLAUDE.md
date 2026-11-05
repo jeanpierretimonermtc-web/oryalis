@@ -303,6 +303,11 @@ Ajouts du 2026-11-05 (exécutés en prod) :
 - `20261105_owner_search_users.sql` — `owner_search_users()` : liste paginée des comptes (recherche, filtre
   d'accès, tri, total) pour la console owner.
 
+Ajouts du 2026-11-06 (exécutés en prod) :
+- `20261106_owner_alert_details.sql` — `owner_list_alerts()` : alertes de l'owner avec compte concerné, auteur,
+  motif et appareil (IP jamais renvoyée, elle n'est stockée que hachée).
+- `20261106_login_alert_severity.sql` — "Nouvelle connexion détectée" passe de `critical` à `warning`.
+
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
 `solutions_proposed`, `recap_sent`, `next_appointment_date`, `native_event_id` : elles n'existent plus

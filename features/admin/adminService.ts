@@ -182,6 +182,20 @@ export async function listAdminAudit(limit = 100, offset = 0) {
   return (data ?? []) as AdminAuditEntry[]
 }
 
+export interface OwnerAlert extends SecurityNotification {
+  action?: string | null
+  reason?: string | null
+  subject?: { user_id: string; email: string; full_name: string | null; is_me: boolean } | null
+  actor?: { email: string; full_name: string | null; is_me: boolean } | null
+  device?: { platform: string | null; user_agent: string | null; sign_in_count: number; last_seen_at: string } | null
+}
+
+export async function listOwnerAlerts(limit = 200): Promise<OwnerAlert[]> {
+  const { data, error } = await supabase.rpc('owner_list_alerts', { p_limit: limit })
+  if (error) throw error
+  return (data ?? []) as OwnerAlert[]
+}
+
 export async function listSecurityNotifications(limit = 100) {
   const { data, error } = await supabase.rpc('list_my_security_notifications', { p_limit: limit })
   if (error) throw error
