@@ -7,13 +7,11 @@ import {
   getSupportSnapshot,
   listAdminAudit,
   listOwnerSupportAccessRequests,
-  listSecurityNotifications,
-  markSecurityNotificationsRead,
   type AdminAuditEntry,
-  type SecurityNotification,
   type SupportAccessRequest,
 } from '@/features/admin/adminService'
 import { MfaGate } from '@/features/admin/MfaGate'
+import { OwnerAlertsPanel } from '@/features/admin/OwnerAlertsPanel'
 import { OwnerDashboardPanel } from '@/features/admin/OwnerDashboardPanel'
 import { OwnerUsersPanel } from '@/features/admin/OwnerUsersPanel'
 import { Button } from '@/shared/components/ui/Button'
@@ -53,18 +51,15 @@ function OwnerConsole() {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const [tab, setTab] = useState<Tab>('dashboard')
   const [audit, setAudit] = useState<AdminAuditEntry[]>([])
-  const [alerts, setAlerts] = useState<SecurityNotification[]>([])
   const [support, setSupport] = useState<SupportAccessRequest[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
 
   const load = useCallback(async () => {
     setBusy(true); setError('')
     try {
       if (tab === 'audit') setAudit(await listAdminAudit())
-      if (tab === 'alerts') setAlerts(await listSecurityNotifications())
       if (tab === 'support') setSupport(await listOwnerSupportAccessRequests())
     } catch (e) {
       setError(e instanceof Error ? e.message : t('owner.load_error'))
@@ -72,13 +67,6 @@ function OwnerConsole() {
   }, [tab])
 
   useEffect(() => { void load() }, [tab])
-
-  const run = async (action: () => Promise<unknown>, message: string) => {
-    setBusy(true); setError(''); setNotice('')
-    try { await action(); setNotice(message); await load() }
-    catch (e) { setError(e instanceof Error ? e.message : t('owner.action_error')) }
-    finally { setBusy(false) }
-  }
 
   const TAB_LABELS: Record<Tab, string> = {
     dashboard: t('owner.tab_dashboard'), users: t('owner.tab_users'), audit: t('owner.tab_audit'), alerts: t('owner.tab_alerts'), support: t('owner.tab_support'),
@@ -97,7 +85,6 @@ function OwnerConsole() {
           </TouchableOpacity>
         ))}
       </View>
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {tab === 'dashboard' ? <OwnerDashboardPanel onOpenTab={setTab} /> : null}
@@ -108,12 +95,7 @@ function OwnerConsole() {
         <Card key={item.id} style={styles.card}><Text style={styles.cardTitle}>{item.action}</Text><Text style={styles.meta}>{formatDate(item.created_at)} · {t('owner.target_label')} : {item.target_user_id ?? '—'}</Text><Text style={styles.json}>{JSON.stringify(item.details)}</Text></Card>
       )) : null}
 
-      {tab === 'alerts' ? (
-        <View style={styles.section}>
-          <Button label={t('owner.mark_all_read')} variant="secondary" onPress={() => run(() => markSecurityNotificationsRead(), t('owner.notice_alerts_read'))} />
-          {alerts.map(item => <Card key={item.id} style={[styles.card, !item.read_at && styles.unread]}><Text style={styles.cardTitle}>{item.title}</Text><Text style={styles.meta}>{item.severity} · {formatDate(item.created_at)}</Text><Text style={styles.body}>{item.body}</Text></Card>)}
-        </View>
-      ) : null}
+      {tab === 'alerts' ? <OwnerAlertsPanel /> : null}
 
       {tab === 'support' ? (
         <View style={styles.section}>
@@ -128,7 +110,7 @@ function OwnerConsole() {
           {snapshot ? <Card style={styles.card}><Text style={styles.cardTitle}>{t('owner.snapshot_title')}</Text><Text selectable style={styles.json}>{JSON.stringify(snapshot, null, 2)}</Text><Button size="sm" variant="secondary" label={t('owner.close')} onPress={() => setSnapshot(null)} /></Card> : null}
         </View>
       ) : null}
-      {busy && tab !== 'users' && tab !== 'dashboard' ? <ActivityIndicator color={colors.primary} /> : null}
+      {busy && (tab === 'audit' || tab === 'support') ? <ActivityIndicator color={colors.primary} /> : null}
     </ScrollView>
   )
 }
@@ -151,8 +133,6 @@ function makeStyles(colors: ThemeColors) {
     body: { fontSize: 14, fontFamily: fonts.body, color: colors.text },
     actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     error: { color: colors.danger, fontFamily: fonts.medium },
-    notice: { color: colors.success, fontFamily: fonts.medium },
-    unread: { borderColor: colors.warning, borderWidth: 2 },
     json: { fontSize: 11, lineHeight: 16, fontFamily: fonts.body, color: colors.textSecondary },
   })
 }
