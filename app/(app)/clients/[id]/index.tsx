@@ -1009,6 +1009,13 @@ export default function ClientDetailScreen() {
   const nextActionAppt = client.next_action_source === 'appointment'
     ? appointments.find(a => a.id === client.next_action_source_id) ?? null
     : null
+  // refresh_client_activity remplit next_action_type par 'call' pour une relance sans type :
+  // pour une relance, seule la relance elle-même fait foi.
+  const nextActionFollowup = client.next_action_source === 'followup'
+    ? followups.find(f => f.id === client.next_action_source_id) ?? null
+    : null
+  const nextActionType = client.next_action_source === 'followup' ? nextActionFollowup?.action_type ?? null : client.next_action_type
+  const nextActionSubtitle = nextActionAppt?.title ?? nextActionFollowup?.title ?? null
   const appointmentPhase: 'before' | 'live' | 'after' | null = nextActionAppt
     ? (() => {
         const nowMs = Date.now()
@@ -1050,7 +1057,7 @@ export default function ClientDetailScreen() {
     })
   }
   const nextFollowup = followups
-    .filter(f => !f.done)
+    .filter(f => !f.done && !f.cancelled_at)
     .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())[0]
   if (nextFollowup && !isCurrentNextAction('followup', nextFollowup.id)) {
     upcomingItems.push({
@@ -1394,7 +1401,7 @@ export default function ClientDetailScreen() {
                 >
                   <View style={[styles.nextActionIconBox, { backgroundColor: nextActionUrgency === 'later' ? colors.primaryLight : colors.card, borderColor: nextActionColor.border + '55' }]}>
                     {(() => {
-                      const NextIcon = client.next_action_type ? NEXT_ACTION_ICON[client.next_action_type] : Clock
+                      const NextIcon = nextActionType ? NEXT_ACTION_ICON[nextActionType] : client.next_action_source === 'followup' ? Bell : Clock
                       return <NextIcon size={19} color={nextActionColor.fg} strokeWidth={2} />
                     })()}
                   </View>
@@ -1404,9 +1411,9 @@ export default function ClientDetailScreen() {
                         {t(NEXT_ACTION_LABEL_KEY[nextActionUrgency])}
                       </Text>
                     ) : null}
-                    <Text style={styles.nextActionMainText} numberOfLines={1}>
-                      {client.next_action_type ? t(`next_action_types.${client.next_action_type}`) : t(`clients.next_action_source_${client.next_action_source}`)}
-                      {nextActionAppt?.title ? <Text style={styles.nextActionSubTitle}> · {nextActionAppt.title}</Text> : null}
+                    <Text style={styles.nextActionMainText} numberOfLines={2}>
+                      {nextActionType ? t(`next_action_types.${nextActionType}`) : t(`clients.next_action_source_${client.next_action_source}`)}
+                      {nextActionSubtitle ? <Text style={styles.nextActionSubTitle}> · {nextActionSubtitle}</Text> : null}
                     </Text>
                     {client.next_action_at ? (
                       <Text style={styles.nextActionMeta}>

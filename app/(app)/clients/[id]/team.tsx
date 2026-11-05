@@ -8,6 +8,7 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import { getRoleColors, getPrimaryRole } from '@/shared/theme/roleColors'
+import { useClient } from '@/features/clients/useClient'
 
 function activityColor(updatedAt: string | null, colors: ThemeColors): string {
   if (!updatedAt) return colors.textTertiary
@@ -30,11 +31,12 @@ export default function ClientTeamScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { getRoleLabel } = useAppConfig()
   const { id } = useLocalSearchParams<{ id: string }>()
+  const { client: contactClient } = useClient(id)
   const { team, loading } = useDirectTeam(id)
 
   return (
     <>
-      <Stack.Screen options={{ title: t('clients.tab_team'), headerBackTitle: '' }} />
+      <Stack.Screen options={{ title: contactClient?.full_name ? t('clients.subpage_title', { section: t('clients.tab_team'), name: contactClient.full_name }) : t('clients.tab_team'), headerBackTitle: '' }} />
       {loading ? (
         <View style={styles.loader}><ActivityIndicator color={colors.primary} /></View>
       ) : team.length === 0 ? (

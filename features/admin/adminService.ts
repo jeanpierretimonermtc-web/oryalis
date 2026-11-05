@@ -62,6 +62,54 @@ export async function getMyAppRole(): Promise<AppRole | null> {
   return data as AppRole | null
 }
 
+export interface OwnerDashboard {
+  accounts_total: number
+  signups_7d: number
+  signups_30d: number
+  active_7d: number
+  active_30d: number
+  activated: number
+  paying: number
+  offered: number
+  free: number
+  deletions_pending: number
+  alerts_unread: number
+  support_pending: number
+  recent_signups: { full_name: string | null; email: string; created_at: string; access: 'paying' | 'offered' | 'free' }[]
+}
+
+export async function getOwnerDashboard(): Promise<OwnerDashboard> {
+  const { data, error } = await supabase.rpc('owner_get_dashboard')
+  if (error) throw error
+  return data as OwnerDashboard
+}
+
+export type OwnerAccessFilter = 'paying' | 'offered' | 'free' | 'inactive'
+export type OwnerUserSort = 'signup' | 'activity' | 'name'
+
+export interface OwnerUserRow {
+  user_id: string
+  email: string
+  full_name: string | null
+  app_role: AppRole | null
+  access: 'paying' | 'offered' | 'free'
+  created_at: string
+  last_active_at: string | null
+  current_period_end: string | null
+}
+
+export async function searchOwnerUsers(params: { search?: string; access?: OwnerAccessFilter | null; sort?: OwnerUserSort; limit?: number; offset?: number }) {
+  const { data, error } = await supabase.rpc('owner_search_users', {
+    p_search: params.search?.trim() || null,
+    p_access: params.access ?? null,
+    p_sort: params.sort ?? 'signup',
+    p_limit: params.limit ?? 25,
+    p_offset: params.offset ?? 0,
+  })
+  if (error) throw error
+  return data as { total: number; rows: OwnerUserRow[] }
+}
+
 export async function listOwnerUsers(search?: string, limit = 50, offset = 0) {
   const { data, error } = await supabase.rpc('owner_list_users', {
     p_search: search?.trim() || null,

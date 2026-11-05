@@ -107,6 +107,7 @@ export async function createFollowup(userId: string, input: FollowupInput) {
 }
 
 export interface FollowupUpdateInput {
+  product_context?: string | null
   title?: string | null
   content?: string | null
   action_type?: NextActionType | null

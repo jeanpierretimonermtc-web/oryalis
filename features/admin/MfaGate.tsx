@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
+import { useTranslation } from 'react-i18next'
 import { SvgXml } from 'react-native-svg'
 import { Button } from '@/shared/components/ui/Button'
 import { Card } from '@/shared/components/ui/Card'
@@ -20,6 +22,7 @@ export function qrXml(value?: string) {
 }
 
 export function MfaGate({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const [loading, setLoading] = useState(true)
@@ -28,6 +31,7 @@ export function MfaGate({ children }: { children: React.ReactNode }) {
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null)
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const refresh = async () => {
     setLoading(true)
@@ -50,6 +54,8 @@ export function MfaGate({ children }: { children: React.ReactNode }) {
       const data = await enrollTotp()
       setEnrollment(data)
       setFactorId(data.id)
+      setCode('')
+      setCopied(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Activation impossible.')
     }
@@ -72,6 +78,8 @@ export function MfaGate({ children }: { children: React.ReactNode }) {
   if (verified) return <>{children}</>
 
   const xml = qrXml(enrollment?.totp.qr_code)
+  const secret = enrollment?.totp.secret ?? ''
+  const copySecret = () => { void Clipboard.setStringAsync(secret).then(() => setCopied(true)) }
   return (
     <View style={styles.center}>
       <Card style={styles.card}>
@@ -82,8 +90,16 @@ export function MfaGate({ children }: { children: React.ReactNode }) {
         {!factorId ? <Button label="Configurer la MFA" onPress={startEnrollment} /> : null}
         {enrollment ? (
           <View style={styles.enrollment}>
-            {xml ? <View style={styles.qr}><SvgXml xml={xml} width={180} height={180} /></View> : null}
-            <Text selectable style={styles.secret}>Clé : {enrollment.totp.secret}</Text>
+            <Text style={styles.body}>{t('privacy.mfa_scan_in_app')}</Text>
+            {xml ? <View style={styles.qr}><SvgXml xml={xml} width={280} height={280} /></View> : null}
+            <Text style={styles.body}>{t('privacy.mfa_manual')}</Text>
+            <Text selectable style={styles.secret}>{secret.match(/.{1,4}/g)?.join(' ')}</Text>
+            <View style={styles.enrollmentActions}>
+              <Button size="sm" variant="secondary" label={t(copied ? 'privacy.mfa_key_copied' : 'privacy.mfa_copy_key')} onPress={copySecret} />
+              <TouchableOpacity onPress={startEnrollment} activeOpacity={0.7}>
+                <Text style={styles.link}>{t('privacy.mfa_new_key')}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ) : null}
         {factorId ? (
@@ -104,9 +120,12 @@ function makeStyles(colors: ThemeColors) {
     card: { width: '100%', maxWidth: 520, gap: 16 },
     title: { fontSize: 22, fontFamily: fonts.bold, color: colors.text },
     body: { fontSize: 14, lineHeight: 21, fontFamily: fonts.body, color: colors.textSecondary },
-    enrollment: { alignItems: 'center', gap: 10 },
-    qr: { padding: 10, borderRadius: 12, backgroundColor: '#fff' },
-    secret: { fontSize: 12, fontFamily: fonts.medium, color: colors.text, textAlign: 'center' },
+    enrollment: { alignItems: 'center', gap: 12 },
+    enrollmentActions: { flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'center' },
+    // Marge blanche : sans elle, certaines applications ne détectent pas le QR code.
+    qr: { padding: 20, borderRadius: 12, backgroundColor: '#fff' },
+    secret: { fontSize: 15, fontFamily: fonts.semibold, color: colors.text, textAlign: 'center', letterSpacing: 1 },
+    link: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
     error: { fontSize: 13, fontFamily: fonts.medium, color: colors.danger },
   })
 }

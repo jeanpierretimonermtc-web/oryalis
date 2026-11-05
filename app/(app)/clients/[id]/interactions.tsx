@@ -21,6 +21,7 @@ import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { InteractionType, InterestLevel, Interaction, InteractionOutcomeCode } from '@/shared/lib/types'
 import { formatDate } from '@/shared/lib/dateFormat'
+import { useClient } from '@/features/clients/useClient'
 
 const INTERACTION_TYPES: InteractionType[] = [
   'call', 'whatsapp', 'rdv', 'visio', 'sms', 'email', 'workshop', 'group_meeting', 'product_followup',
@@ -77,6 +78,7 @@ export default function ClientInteractionsScreen() {
   // CONTACT-4.2 — focus = id exact de l'interaction ciblée depuis "Autres actions" (fiche
   // Contact). Optionnel, absent pour toute navigation normale vers cette page.
   const { id, focus } = useLocalSearchParams<{ id: string; focus?: string }>()
+  const { client: contactClient } = useClient(id)
   const { session } = useAuth()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -119,7 +121,7 @@ export default function ClientInteractionsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: t('interactions.title'), headerRight: () => (
+      <Stack.Screen options={{ title: contactClient?.full_name ? t('clients.subpage_title', { section: t('interactions.title'), name: contactClient.full_name }) : t('interactions.title'), headerRight: () => (
         isDesktopWeb ? (
           <TouchableOpacity onPress={() => setShowModal(true)} style={styles.newActionBtn} activeOpacity={0.85}>
             <Text style={styles.newActionBtnText}>+ {t('interactions.add')}</Text>

@@ -18,9 +18,10 @@ import type { NextStepValue } from '@/features/interactions/NextStepSelector'
 // ACTION-OUTCOME-1 / P1 §24 — composant partagé unique entre la page Relances-contact
 // (clients/[id]/followups.tsx) et la page Relances-globale (followups/index.tsx) : une seule
 // logique de clôture professionnelle, jamais deux implémentations parallèles.
-const INTERACTION_TYPES: InteractionType[] = [
-  'call', 'whatsapp', 'rdv', 'visio', 'sms', 'email', 'workshop', 'group_meeting', 'product_followup',
-]
+// FOLLOWUP-CHANNELS-1 — on clôture une relance : seuls les canaux de contact ont du sens ici
+// (atelier, groupe, suivi produit restent dans l'onglet Échanges). 'rdv' : uniquement si la
+// relance est elle-même de ce type, pour que sa présélection reste visible.
+const EXCHANGE_CHANNELS: InteractionType[] = ['call', 'whatsapp', 'sms', 'email', 'visio']
 const TYPE_ICONS: Record<InteractionType, string> = {
   rdv: '📅', call: '📞', visio: '🎥', whatsapp: '💬', sms: '📱',
   email: '✉️', workshop: '🎪', group_meeting: '👥', product_followup: '📦',
@@ -39,6 +40,7 @@ export function FollowupCompletionModal({ followup, userId, onClose, onSaved }: 
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { height: screenH } = useWindowDimensions()
+  const channels = followup.action_type === 'rdv' ? [...EXCHANGE_CHANNELS, 'rdv' as const] : EXCHANGE_CHANNELS
 
   const [checkingExisting, setCheckingExisting] = useState(true)
   const [existingInteraction, setExistingInteraction] = useState<Interaction | null>(null)
@@ -219,7 +221,7 @@ export function FollowupCompletionModal({ followup, userId, onClose, onSaved }: 
                   <View style={{ gap: 8 }}>
                     <Text style={styles.fieldLabel}>{t('followups.exchange_type_label')}</Text>
                     <View style={styles.chipRow}>
-                      {INTERACTION_TYPES.map(typeOpt => {
+                      {channels.map(typeOpt => {
                         const active = interactionType === typeOpt
                         return (
                           <TouchableOpacity

@@ -224,7 +224,7 @@ export default function ClientOrdersScreen() {
   return (
     <>
       <Stack.Screen options={{
-        title: client?.full_name ? `${client.full_name} — ${t('orders.title')}` : t('orders.title'),
+        title: client?.full_name ? t('clients.subpage_title', { section: t('orders.title'), name: client.full_name }) : t('orders.title'),
         headerBackTitle: '',
       }} />
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

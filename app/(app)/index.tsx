@@ -48,6 +48,7 @@ import type { Appointment } from '@/features/appointments/appointmentTypes'
 import { formatDate } from '@/shared/lib/dateFormat'
 import { snoozeClientRisk, dismissClientRisk } from '@/features/clients/riskService'
 import { AnchoredMenu } from '@/shared/components/ui/AnchoredMenu'
+import { SetupResumeCard } from '@/features/onboarding/SetupResumeCard'
 
 function useLocale() {
   const { i18n } = useTranslation()
@@ -661,6 +662,8 @@ export default function DashboardScreen() {
             />
           </View>
         </View>
+
+        <SetupResumeCard />
 
         {/* WORLD-CLOCK-1 — mon heure + celle de mes contacts à l'étranger (contacts du jour en premier). */}
         <WorldClock priorityClientIds={todayClientIds} />

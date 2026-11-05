@@ -15,7 +15,7 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { Input } from '@/shared/components/ui/Input'
 import { TextArea } from '@/shared/components/ui/TextArea'
 import { Button } from '@/shared/components/ui/Button'
-import { ScreenHeader } from '@/shared/components/ui/ScreenHeader'
+import { AnchoredMenu, type AnchoredMenuItem } from '@/shared/components/ui/AnchoredMenu'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
@@ -62,6 +62,27 @@ function parseOptionalNumber(v: string): OptionalNumberResult {
   return { ok: true, value: n }
 }
 
+// CATALOG-PAGE-1 — sans prix / sans PV : toujours en fin de liste, quel que soit le sens.
+type SortKey = 'name' | 'price_asc' | 'price_desc' | 'pv_desc'
+const SORT_KEYS: SortKey[] = ['name', 'price_asc', 'price_desc', 'pv_desc']
+
+function compareNullable(a: number | null | undefined, b: number | null | undefined, direction: 1 | -1) {
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+  return (a - b) * direction
+}
+
+function sortProducts(list: CatalogProductListItem[], key: SortKey, locale: string) {
+  const byName = (a: CatalogProductListItem, b: CatalogProductListItem) => a.name.localeCompare(b.name, locale)
+  return [...list].sort((a, b) => {
+    if (key === 'price_asc') return compareNullable(a.retail_price_eur, b.retail_price_eur, 1) || byName(a, b)
+    if (key === 'price_desc') return compareNullable(a.retail_price_eur, b.retail_price_eur, -1) || byName(a, b)
+    if (key === 'pv_desc') return compareNullable(a.pv, b.pv, -1) || byName(a, b)
+    return byName(a, b)
+  })
+}
+
 interface RecommendState {
   product: CatalogProductListItem
   catalogColor: string
@@ -72,49 +93,37 @@ interface RecommendState {
 
 function ProductCard({
   product,
-  catalog,
   onDetail,
   onRecommend,
 }: {
   product: CatalogProductListItem
-  catalog: Catalog | null
   onDetail: (p: CatalogProductListItem) => void
   onRecommend: (p: CatalogProductListItem) => void
 }) {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
-  const accent  = categoryAccent(product.category, catalog?.color ?? colors.primaryAction)
   const catMeta = product.category ? CATEGORY_META[product.category] : null
+  const meta = [product.category, product.unit].filter(Boolean).join(' · ')
 
   return (
     <TouchableOpacity style={styles.card} onPress={() => onDetail(product)} activeOpacity={0.82}>
-      <View style={[styles.cardAccent, { backgroundColor: accent }]} />
-      <View style={styles.cardBody}>
-        <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
-        <View style={styles.cardMeta}>
-          {product.category ? (
-            <View style={[styles.catBadge, { backgroundColor: accent + '22' }]}>
-              {catMeta ? <Text style={styles.catBadgeEmoji}>{catMeta.emoji}</Text> : null}
-              <Text style={[styles.catBadgeText, { color: accent }]} numberOfLines={1}>{product.category}</Text>
-            </View>
-          ) : null}
-          {product.unit ? (
-            <View style={styles.unitBadge}>
-              <Text style={styles.unitText}>{product.unit}</Text>
-            </View>
-          ) : null}
+      <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
+      {meta ? <Text style={styles.cardMetaText} numberOfLines={1}>{catMeta ? `${catMeta.emoji} ` : ''}{meta}</Text> : null}
+      <View style={styles.cardFooter}>
+        <View style={styles.cardPrices}>
+          {product.retail_price_eur != null ? <Text style={styles.cardPrice}>{fmt(product.retail_price_eur)}</Text> : null}
+          {product.pv != null ? <Text style={styles.cardPv}>{product.pv} {t('catalog.pv')}</Text> : null}
         </View>
-        {product.retail_price_eur != null ? (
-          <Text style={styles.cardPrice}>{fmt(product.retail_price_eur)}</Text>
-        ) : null}
+        <TouchableOpacity
+          style={styles.recommendBtn}
+          onPress={() => onRecommend(product)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          activeOpacity={0.75}
+        >
+          <Text style={styles.recommendBtnText}>{t('catalog.recommend')}</Text>
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity
-        style={[styles.addBtn, { backgroundColor: accent }]}
-        onPress={() => onRecommend(product)}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Text style={styles.addBtnText}>+</Text>
-      </TouchableOpacity>
     </TouchableOpacity>
   )
 }
@@ -382,7 +391,8 @@ function ProductFormModal({ catalogId, initial, isWide, onClose, onSaved }: {
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 export default function CatalogScreen() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
   const { colors, statusColors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
   const { session } = useAuth()
@@ -399,6 +409,9 @@ export default function CatalogScreen() {
 
   const [searchQuery, setSearchQuery]           = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [sortKey, setSortKey]                   = useState<SortKey>('name')
+  const [sortMenuPos, setSortMenuPos]           = useState<{ x: number; y: number } | null>(null)
+  const [actionsMenuPos, setActionsMenuPos]     = useState<{ x: number; y: number } | null>(null)
 
   // Detail modal
   const [detailProduct, setDetailProduct] = useState<CatalogProductListItem | null>(null)
@@ -434,14 +447,14 @@ export default function CatalogScreen() {
     setConfirmDeleteCatalog(false)
   }, [selectedCatalogId])
 
-  const categories = useMemo(() => {
-    const seen = new Set<string>()
-    const result: string[] = []
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>()
     for (const p of products) {
-      if (p.category && !seen.has(p.category)) { seen.add(p.category); result.push(p.category) }
+      if (p.category) counts.set(p.category, (counts.get(p.category) ?? 0) + 1)
     }
-    return result.sort()
+    return counts
   }, [products])
+  const categories = useMemo(() => [...categoryCounts.keys()].sort(), [categoryCounts])
 
   const filteredProducts = useMemo(() => {
     let list = products
@@ -450,10 +463,18 @@ export default function CatalogScreen() {
       const q = searchQuery.toLowerCase()
       list = list.filter(p => p.name.toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q))
     }
-    return list
-  }, [products, selectedCategory, searchQuery])
+    return sortProducts(list, sortKey, locale)
+  }, [products, selectedCategory, searchQuery, sortKey, locale])
 
   const selectedCatalog = catalogs.find(c => c.id === selectedCatalogId) ?? null
+  const isCustomCatalog = selectedCatalog?.type === 'custom'
+  const actionItems: AnchoredMenuItem[] = [
+    { key: 'new_catalog', label: t('catalog.new_catalog_cta'), onPress: () => setShowNewCatalog(true) },
+    ...(selectedCatalog && isCustomCatalog ? [
+      { key: 'add_product', label: t('catalog.add_product_cta'), onPress: () => openProductForm(selectedCatalog.id, null) },
+      { key: 'delete_catalog', label: `🗑 ${t('catalog.delete_catalog_cta')}`, danger: true, onPress: () => { setDeleteCatalogError(null); setConfirmDeleteCatalog(true) } },
+    ] : []),
+  ]
 
   // Live client search
   useEffect(() => {
@@ -564,16 +585,26 @@ export default function CatalogScreen() {
     return <View style={styles.loader}><ActivityIndicator size="large" color={colors.primaryAction} /></View>
   }
 
-  const accent = selectedCatalog?.color ?? colors.primaryAction
-
   return (
     <View style={styles.container}>
 
       {/* ── Fixed header ─────────────────────────────────────────────────── */}
       <View style={[styles.headerOuter, isWide && styles.headerOuterWide]}>
-        <ScreenHeader flush eyebrow={t('catalog.header_eyebrow')} title={t('catalog.title')} subtitle={t('catalog.header_subtitle')} />
-        {catalogs.length > 1 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catalogTabsContent}>
+        <View style={styles.titleRow}>
+          <Text style={styles.pageTitle}>{t('catalog.title')}</Text>
+          <Text style={styles.pageCount}>{filteredProducts.length} {t('catalog.products_count')}</Text>
+          <TouchableOpacity
+            style={styles.moreBtn}
+            onPress={(e) => setActionsMenuPos({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={t('common.more_options')}
+          >
+            <Text style={styles.moreBtnText}>⋮</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.catalogRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexShrink: 1 }} contentContainerStyle={styles.catalogTabsContent}>
             {catalogs.map(cat => {
               const active = cat.id === selectedCatalogId
               return (
@@ -591,60 +622,19 @@ export default function CatalogScreen() {
               )
             })}
           </ScrollView>
-        )}
-
-        {catalogs.length === 1 && selectedCatalog && (
-          <View style={[styles.catalogHero, { backgroundColor: accent + '14', borderColor: accent + '30' }]}>
-            <Text style={styles.catalogHeroIcon}>{selectedCatalog.icon}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.catalogHeroName, { color: accent }]}>{selectedCatalog.name}</Text>
-              <Text style={styles.catalogHeroCount}>{products.length} {t('catalog.products_count')}</Text>
-            </View>
-          </View>
-        )}
-
-        {/* Protocols shortcut */}
-        <TouchableOpacity
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.successLight, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8, alignSelf: 'flex-start' }}
-          onPress={() => {
+          <TouchableOpacity
+            style={styles.protocolsLink}
+            onPress={() => {
               const slug = selectedCatalog?.slug ?? null
               const path = slug
                 ? `/(app)/catalog/protocols?catalog=${slug}`
                 : '/(app)/catalog/protocols'
               router.push(path as any)
             }}
-          activeOpacity={0.8}
-        >
-          <Text style={{ fontSize: 16 }}>🌿</Text>
-          <Text style={{ fontSize: 13, fontFamily: fonts.semibold, color: colors.success }}>{t('catalog.protocols')}</Text>
-          <Text style={{ fontSize: 11, color: colors.success, opacity: 0.7 }}>→</Text>
-        </TouchableOpacity>
-
-        {/* RDV-PRODUCTS-1 / Lot E — création de catalogue toujours disponible ; ajout de produit
-            réservé aux catalogues personnels (les officiels restent protégés par la RLS, cf.
-            catalogService.updateCatalogProduct). */}
-        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          <TouchableOpacity style={styles.catalogActionPill} onPress={() => setShowNewCatalog(true)} activeOpacity={0.8}>
-            <Text style={styles.catalogActionPillText}>{t('catalog.new_catalog_cta')}</Text>
+            activeOpacity={0.8}
+          >
+            <Text style={styles.protocolsLinkText} numberOfLines={1}>🌿 {t('catalog.protocols')} →</Text>
           </TouchableOpacity>
-          {selectedCatalog?.type === 'custom' ? (
-            <TouchableOpacity
-              style={styles.catalogActionPill}
-              onPress={() => openProductForm(selectedCatalog.id, null)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.catalogActionPillText}>{t('catalog.add_product_cta')}</Text>
-            </TouchableOpacity>
-          ) : null}
-          {selectedCatalog?.type === 'custom' && !confirmDeleteCatalog ? (
-            <TouchableOpacity
-              style={[styles.catalogActionPill, { backgroundColor: colors.dangerLight }]}
-              onPress={() => { setDeleteCatalogError(null); setConfirmDeleteCatalog(true) }}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.catalogActionPillText, { color: colors.danger }]}>🗑 {t('catalog.delete_catalog_cta')}</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
 
         {/* CATALOG-DELETE-1 — confirmation obligatoire (clic par erreur), jamais de suppression
@@ -681,7 +671,20 @@ export default function CatalogScreen() {
           </View>
         ) : null}
 
-        <Input label="" value={searchQuery} onChangeText={setSearchQuery} placeholder={t('catalog.search_placeholder')} />
+        <View style={styles.searchRow}>
+          <View style={{ flex: 1 }}>
+            <Input label="" value={searchQuery} onChangeText={setSearchQuery} placeholder={t('catalog.search_placeholder')} />
+          </View>
+          <TouchableOpacity
+            style={styles.sortBtn}
+            onPress={(e) => setSortMenuPos({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.sortBtnLabel}>{t('catalog.sort_label')}</Text>
+            <Text style={styles.sortBtnValue} numberOfLines={1}>{t(`catalog.sort_${sortKey}`)}</Text>
+            <Text style={styles.sortBtnChevron}>▾</Text>
+          </TouchableOpacity>
+        </View>
 
         {categories.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryChips}>
@@ -690,7 +693,7 @@ export default function CatalogScreen() {
               onPress={() => setSelectedCategory(null)}
             >
               <Text style={[styles.categoryChipText, !selectedCategory && styles.categoryChipTextActive]}>
-                {t('catalog.all_categories')}
+                {t('catalog.all_categories')} · {products.length}
               </Text>
             </TouchableOpacity>
             {categories.map(cat => {
@@ -704,7 +707,7 @@ export default function CatalogScreen() {
                   onPress={() => setSelectedCategory(active ? null : cat)}
                 >
                   {meta ? <Text style={styles.categoryChipEmoji}>{meta.emoji}</Text> : null}
-                  <Text style={[styles.categoryChipText, active && { color: chipColor, fontFamily: fonts.semibold }]}>{cat}</Text>
+                  <Text style={[styles.categoryChipText, active && { color: chipColor, fontFamily: fonts.semibold }]}>{cat} · {categoryCounts.get(cat)}</Text>
                 </TouchableOpacity>
               )
             })}
@@ -724,7 +727,6 @@ export default function CatalogScreen() {
           <View style={[styles.cardWrap, isWide && styles.cardWrapWide]}>
             <ProductCard
               product={item}
-              catalog={selectedCatalog}
               onDetail={openDetail}
               onRecommend={openRecommend}
             />
@@ -737,6 +739,20 @@ export default function CatalogScreen() {
                 {searchQuery || selectedCategory ? t('catalog.empty_search') : t('catalog.empty_products')}
               </Text>
         }
+      />
+
+      <AnchoredMenu visible={!!actionsMenuPos} onClose={() => setActionsMenuPos(null)} anchor={actionsMenuPos} items={actionItems} />
+      <AnchoredMenu
+        visible={!!sortMenuPos}
+        onClose={() => setSortMenuPos(null)}
+        anchor={sortMenuPos}
+        width={220}
+        title={t('catalog.sort_label')}
+        items={SORT_KEYS.map(key => ({
+          key,
+          label: `${key === sortKey ? '✓ ' : ''}${t(`catalog.sort_${key}`)}`,
+          onPress: () => setSortKey(key),
+        }))}
       />
 
       {/* ── Detail modal ─────────────────────────────────────────────────── */}
@@ -883,10 +899,23 @@ function makeStyles(colors: ThemeColors) {
   loader:     { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listLoader: { marginTop: 48 },
   list:       { paddingBottom: 80 },
-  listWide:   { paddingHorizontal: 0 },
+  listWide:   { paddingHorizontal: 0, maxWidth: 1100, alignSelf: 'center', width: '100%' },
 
   // ── Header ──────────────────────────────────────────────────────────────────
-  headerOuter:     { padding: 16, gap: 12 },
+  headerOuter:     { padding: 16, gap: 10 },
+  titleRow:        { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  pageTitle:       { fontSize: 26, fontFamily: fonts.display, color: colors.text, letterSpacing: -0.4 },
+  pageCount:       { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary, marginTop: 4 },
+  moreBtn:         { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  moreBtnText:     { fontSize: 18, lineHeight: 22, color: colors.textSecondary },
+  catalogRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  protocolsLink:   { flexShrink: 0, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.successLight },
+  protocolsLinkText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.success },
+  searchRow:       { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sortBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 46, maxWidth: 210, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  sortBtnLabel:    { fontSize: 12.5, fontFamily: fonts.body, color: colors.textSecondary },
+  sortBtnValue:    { flexShrink: 1, fontSize: 13, fontFamily: fonts.semibold, color: colors.text },
+  sortBtnChevron:  { fontSize: 11, color: colors.textTertiary },
   headerOuterWide: { maxWidth: 1100, alignSelf: 'center', width: '100%', paddingHorizontal: 20 },
 
   catalogTabsContent: { gap: 8, paddingBottom: 2 },
@@ -898,20 +927,6 @@ function makeStyles(colors: ThemeColors) {
   },
   catalogTabIcon: { fontSize: 16 },
   catalogTabText: { fontSize: 14, fontFamily: fonts.medium, color: colors.textSecondary },
-
-  catalogHero: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    padding: 16, borderRadius: 14, borderWidth: 1,
-  },
-  catalogActionPill: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.primaryLight, borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 10,
-  },
-  catalogActionPillText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
-  catalogHeroIcon:  { fontSize: 30 },
-  catalogHeroName:  { fontSize: 18, fontFamily: fonts.bold },
-  catalogHeroCount: { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary, marginTop: 2 },
 
   categoryChips:          { gap: 8, paddingBottom: 2 },
   categoryChip: {
@@ -931,25 +946,24 @@ function makeStyles(colors: ThemeColors) {
   cardWrapWide:  { flex: 1, marginHorizontal: 0, marginBottom: 12 },
 
   card: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.card, borderRadius: 14,
-    borderWidth: 1, borderColor: colors.cardBorder, overflow: 'hidden',
+    flexGrow: 1, backgroundColor: colors.card, borderRadius: 14, padding: 14, gap: 4,
+    borderWidth: 1, borderColor: colors.cardBorder,
     boxShadow: [{ offsetX: 0, offsetY: 1, blurRadius: 2, color: 'rgba(27, 36, 51, 0.05)' }, { offsetX: 0, offsetY: 6, blurRadius: 18, color: 'rgba(27, 36, 51, 0.06)' }], elevation: 2,
   },
-  cardAccent:  { width: 4, alignSelf: 'stretch' },
-  cardBody:    { flex: 1, padding: 12, gap: 5 },
-  productName: { fontSize: 14, fontFamily: fonts.semibold, color: colors.text, lineHeight: 20 },
-  cardPrice:   { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
+  productName:  { fontSize: 14.5, fontFamily: fonts.semibold, color: colors.text, lineHeight: 20 },
+  cardMetaText: { fontSize: 12.5, fontFamily: fonts.body, color: colors.textSecondary },
+  cardFooter:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 'auto', paddingTop: 8 },
+  cardPrices:   { flexDirection: 'row', alignItems: 'baseline', gap: 10, flexShrink: 1 },
+  cardPrice:    { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
+  cardPv:       { fontSize: 12.5, fontFamily: fonts.semibold, color: colors.primary },
+  recommendBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: colors.primaryLight },
+  recommendBtnText: { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
 
-  cardMeta:      { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   catBadge:      { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
   catBadgeEmoji: { fontSize: 10 },
   catBadgeText:  { fontSize: 11, fontFamily: fonts.semibold },
   unitBadge:     { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.surfaceContainerHigh },
   unitText:      { fontSize: 11, fontFamily: fonts.medium, color: colors.textSecondary },
-
-  addBtn:     { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  addBtnText: { fontSize: 22, color: '#fff', lineHeight: 26 },
 
   empty: { textAlign: 'center', color: colors.textSecondary, fontFamily: fonts.body, fontSize: 15, marginTop: 56 },
 

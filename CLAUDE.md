@@ -295,6 +295,14 @@ Ajouts du 2026-11-03 (exécutés en prod) :
 - `20261103_client_risk_dismissed.sql` — `clients.risk_dismissed_at` : "Ne plus signaler" un client à risque
   sur l'accueil, valable tant que `last_interaction_at` n'est pas plus récent.
 
+Ajouts du 2026-11-05 (exécutés en prod) :
+- `20261105_next_action_ignores_cancelled.sql` — `refresh_client_activity` ignore les relances annulées.
+- `20261105_owner_dashboard.sql` — `owner_get_dashboard()` : chiffres sur les comptes pour la console owner
+  (`is_app_owner` + double authentification), jamais le contenu CRM d'un utilisateur. Aucun montant en base :
+  pas de revenu calculé.
+- `20261105_owner_search_users.sql` — `owner_search_users()` : liste paginée des comptes (recherche, filtre
+  d'accès, tri, total) pour la console owner.
+
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
 `solutions_proposed`, `recap_sent`, `next_appointment_date`, `native_event_id` : elles n'existent plus

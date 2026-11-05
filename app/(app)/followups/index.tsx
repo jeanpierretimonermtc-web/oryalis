@@ -15,6 +15,9 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { FollowupWithClient } from '@/shared/lib/types'
+import { FollowupOriginLine } from '@/features/followups/FollowupOriginLine'
+import { useFollowupOrigins } from '@/features/followups/useFollowupOrigins'
+import type { FollowupOrigin } from '@/features/followups/followupOriginService'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -53,7 +56,8 @@ function getTabConfig(colors: ThemeColors): Record<Tab, { labelKey: string; acce
 
 // ── FollowupCard ──────────────────────────────────────────────────────────────
 
-function FollowupCard({ f, today, onRequestDone }: {
+function FollowupCard({ f, today, onRequestDone, origin }: {
+  origin?: FollowupOrigin
   f: FollowupWithClient & { _score: number }
   today: string
   onRequestDone: () => void
@@ -179,6 +183,9 @@ function FollowupCard({ f, today, onRequestDone }: {
           <OpenActionLink label={t('common.open')} interactive={false} style={styles.openLink} />
         </View>
       </TouchableOpacity>
+      <View style={styles.originRow}>
+        <FollowupOriginLine origin={origin} returnTo="/(app)/followups" />
+      </View>
     </View>
   )
 }
@@ -192,6 +199,7 @@ export default function FollowupsScreen() {
   const TAB_CONFIG = useMemo(() => getTabConfig(colors), [colors])
   const { session } = useAuth()
   const { followups, loading, refresh } = usePendingFollowups()
+  const origins = useFollowupOrigins(followups)
   const [activeTab, setActiveTab] = useState<Tab>('overdue')
   const { width } = useWindowDimensions()
   const isWide = width >= 768
@@ -271,6 +279,7 @@ export default function FollowupsScreen() {
                   <FollowupCard
                     f={item}
                     today={today}
+                    origin={origins.get(item.id)}
                     onRequestDone={() => setCompletingFollowup(item)}
                   />
                 )}
@@ -354,6 +363,7 @@ function makeStyles(colors: ThemeColors) {
 
 
   taskTitle:  { fontSize: 13, fontFamily: fonts.body, color: colors.textSecondary, lineHeight: 18, paddingLeft: 50 },
+  originRow:  { paddingLeft: 50 },
   productRow: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 50 },
   productIcon:{ fontSize: 12 },
   productText:{ fontSize: 12, fontFamily: fonts.medium, color: colors.textSecondary, flex: 1 },

@@ -70,7 +70,7 @@ export default function ClientAppointmentsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: t('appointments.title'), headerBackTitle: '' }} />
+      <Stack.Screen options={{ title: contactClient?.full_name ? t('clients.subpage_title', { section: t('appointments.title'), name: contactClient.full_name }) : t('appointments.title'), headerBackTitle: '' }} />
       <View style={styles.container}>
         <TouchableOpacity onPress={goToNew} activeOpacity={0.85} style={styles.newBtnWrap}>
           <LinearGradient

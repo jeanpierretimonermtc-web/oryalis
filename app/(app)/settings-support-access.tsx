@@ -125,8 +125,8 @@ export default function PrivacySettingsScreen() {
           </View>
           {enrollment ? (
             <View style={styles.subBox}>
-              <Text style={styles.rowDesc}>{t('privacy.mfa_scan')}</Text>
-              {qr ? <View style={styles.qr}><SvgXml xml={qr} width={170} height={170} /></View> : null}
+              <Text style={styles.rowDesc}>{t('privacy.mfa_scan_in_app')}</Text>
+              {qr ? <View style={styles.qr}><SvgXml xml={qr} width={280} height={280} /></View> : null}
               <Text selectable style={styles.secret}>{t('privacy.mfa_key')} {enrollment.totp.secret}</Text>
               <TextInput style={styles.input} value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6} placeholder={t('privacy.mfa_code')} placeholderTextColor={colors.textTertiary} autoComplete="one-time-code" />
               <View style={styles.actions}>
@@ -300,7 +300,7 @@ function makeStyles(colors: ThemeColors) {
     badge: { fontSize: 11, fontFamily: fonts.bold, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, overflow: 'hidden' },
     badgeOn: { color: colors.success, backgroundColor: colors.successLight },
     badgeOff: { color: colors.textSecondary, backgroundColor: colors.bgDim },
-    qr: { alignSelf: 'center', padding: 10, borderRadius: 12, backgroundColor: '#fff' },
+    qr: { alignSelf: 'center', padding: 20, borderRadius: 12, backgroundColor: '#fff' },
     secret: { fontSize: 12, fontFamily: fonts.medium, color: colors.text, textAlign: 'center' },
     deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
     deviceIcon: { fontSize: 20 },

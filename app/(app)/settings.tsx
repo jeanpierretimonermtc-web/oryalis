@@ -294,6 +294,8 @@ export default function SettingsMenuScreen() {
 
             <View style={styles.group}>
               <GroupLabel label={t('settings.nav_crm')} styles={styles} dotColor={colors.tertiary} />
+              <NavRow icon="activity" title={t('onboarding.settings_row')} desc={t('onboarding.settings_row_desc')} onPress={() => router.replace('/(auth)/onboarding?resume=1' as any)} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
+              <View style={styles.sep} />
               <NavRow icon="activity" title={t('settings.section_activity')} desc={t('settings.activity_desc')} onPress={nav('/(app)/settings-activity')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />
               <View style={styles.sep} />
               <NavRow icon="modules" title={t('settings.section_modules')} desc={t('settings.modules_desc')} meta={String(activeModulesCount)} onPress={nav('/(app)/settings-modules')} styles={styles} colors={colors} accent={{ fg: colors.tertiary, bg: colors.tertiaryLight }} />

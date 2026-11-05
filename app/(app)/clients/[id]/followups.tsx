@@ -26,6 +26,10 @@ import { fonts } from '@/shared/theme/fonts'
 import { PIPELINE_STAGES } from '@/shared/lib/types'
 import type { Followup, Interaction, NextActionType, PipelineStage } from '@/shared/lib/types'
 import { formatDate } from '@/shared/lib/dateFormat'
+import { CatalogProductPicker } from '@/features/catalogs/CatalogProductPicker'
+import { FollowupOriginLine } from '@/features/followups/FollowupOriginLine'
+import { useFollowupOrigins } from '@/features/followups/useFollowupOrigins'
+import type { FollowupOrigin } from '@/features/followups/followupOriginService'
 
 const ACTION_TYPES: NextActionType[] = ['call', 'whatsapp', 'sms', 'email', 'rdv']
 const ACTION_ICONS: Record<NextActionType, string> = {
@@ -56,11 +60,12 @@ type UnifiedAction = {
 
 // CONTACT-4.2 — même logique de jour calendaire que urgencyOf() dans
 // clients/[id]/index.tsx (dupliquée localement, convention déjà en place dans ce fichier
-// pour daysUntil/relativeDayLabel-like helpers) : sert uniquement à colorer la carte ciblée
-// par ?focus=<id>, jamais une surbrillance générale de la liste (hors périmètre CONTACT-4.2).
+// pour daysUntil/relativeDayLabel-like helpers) : colore chaque action selon son échéance.
+// Une date seule (AAAA-MM-JJ) est lue en heure locale : lue en UTC, elle tomberait la veille
+// dans les fuseaux à l'ouest de Greenwich.
 type FocusUrgency = 'overdue' | 'today' | null
 function focusUrgency(dateStr: string): FocusUrgency {
-  const target = new Date(dateStr)
+  const target = new Date(dateStr.length === 10 ? `${dateStr}T00:00:00` : dateStr)
   const startOfTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate())
   const now = new Date()
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -120,6 +125,8 @@ export default function ClientFollowupsScreen() {
   // §14 — un seul positionnement automatique par ouverture, jamais reboucler sur des
   // re-renders suivants (ex. après un toggle/suppression dans la liste).
   const hasAutoScrolledRef = useRef(false)
+  const origins = useFollowupOrigins(followups)
+  const selfRoute = `/(app)/clients/${id}/followups`
 
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
 
@@ -294,7 +301,7 @@ export default function ClientFollowupsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: t('followups.title'),
+      <Stack.Screen options={{ title: client?.full_name ? t('clients.subpage_title', { section: t('followups.title'), name: client.full_name }) : t('followups.title'),
         // Ouverte depuis la page Relances : le retour y ramène (pas vers le contact).
         ...(returnTo ? { headerLeft: () => (
           <View style={{ paddingLeft: 12, paddingRight: 8 }}>
@@ -334,16 +341,13 @@ export default function ClientFollowupsScreen() {
                     </TouchableOpacity>
                   )
                 }
-                // CONTACT-4.2 §8/§9 — mise en évidence réservée à LA carte exactement ciblée par
-                // ?focus=<id> (jamais toute la liste, hors périmètre de ce lot) : couleur selon
-                // l'échéance propre de cette ressource, bordure renforcée pour la distinguer
-                // d'une simple urgence ("c'est celle sur laquelle vous avez cliqué").
+                // Couleur selon l'échéance sur toutes les cartes (rouge = en retard, orange = du
+                // jour) ; la carte ciblée par ?focus=<id> a en plus une bordure renforcée.
                 const isFocused = item.id === focus
-                const urgency = isFocused && !item.done ? focusUrgency(item.dueDate) : null
-                const focusStyle = !isFocused ? null
-                  : urgency === 'overdue' ? styles.cardFocusedOverdue
-                  : urgency === 'today' ? styles.cardFocusedToday
-                  : styles.cardFocused
+                const urgency = !item.done ? focusUrgency(item.dueDate) : null
+                const focusStyle = isFocused
+                  ? (urgency === 'overdue' ? styles.cardFocusedOverdue : urgency === 'today' ? styles.cardFocusedToday : styles.cardFocused)
+                  : (urgency === 'overdue' ? styles.cardOverdue : urgency === 'today' ? styles.cardToday : null)
                 // UI-AFFORDANCE-1.1 §3 — une tâche RDV n'a de destination réelle que si son
                 // appointment_id a bien été résolu (toujours le cas en pratique, cf. audit).
                 const contentIsNavigable = item.source === 'interaction' || (item.source === 'task' && !!item.appointmentId)
@@ -373,7 +377,7 @@ export default function ClientFollowupsScreen() {
                           </Text>
                         </View>
                       ) : null}
-                      {isFocused && urgency ? (
+                      {urgency ? (
                         <View style={styles.focusUrgencyBadge}>
                           <Text style={[styles.focusUrgencyBadgeText, { color: urgency === 'overdue' ? colors.danger : colors.warning }]}>
                             {t(urgency === 'overdue' ? 'followups.overdue_badge' : 'followups.today_badge')}
@@ -386,6 +390,10 @@ export default function ClientFollowupsScreen() {
                       <Text style={[styles.content, item.done && styles.doneText]} numberOfLines={2}>{item.subtitle}</Text>
                     ) : null}
                     <Text style={styles.date}>{formatDate(item.dueDate, locale)}</Text>
+                    {item.source === 'followup' && item.followup?.product_context ? (
+                      <Text style={styles.productContext} numberOfLines={1}>📦 {item.followup.product_context}</Text>
+                    ) : null}
+                    {item.source === 'followup' ? <FollowupOriginLine origin={origins.get(item.id)} returnTo={selfRoute} /> : null}
                     {/* FOLLOWUP-HISTORY-1 §4/§5/§8/§9/§10 — synthèse compacte de l'échange
                         (résultat · extrait du compte-rendu), 1-2 lignes maximum, jamais le texte
                         intégral recopié. "Clôturée simplement" seulement une fois la recherche
@@ -522,6 +530,8 @@ export default function ClientFollowupsScreen() {
           clientId={id}
           userId={session?.user.id ?? ''}
           currentPipeline={client?.pipeline_stage ?? 'new_lead'}
+          contactName={client?.full_name}
+          returnTo={selfRoute}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); refresh() }}
         />
@@ -535,6 +545,9 @@ export default function ClientFollowupsScreen() {
           userId={session?.user.id ?? ''}
           currentPipeline={client?.pipeline_stage ?? 'new_lead'}
           editingFollowup={editingFollowup}
+          contactName={client?.full_name}
+          origin={origins.get(editingFollowup.id)}
+          returnTo={selfRoute}
           onClose={() => setEditingFollowup(null)}
           onSaved={() => { setEditingFollowup(null); refresh() }}
         />
@@ -551,8 +564,9 @@ export default function ClientFollowupsScreen() {
   )
 }
 
-function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, onClose, onSaved }: {
-  clientId: string; userId: string; currentPipeline: PipelineStage; editingFollowup?: Followup; onClose: () => void; onSaved: () => void
+function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, contactName, origin, returnTo, onClose, onSaved }: {
+  clientId: string; userId: string; currentPipeline: PipelineStage; editingFollowup?: Followup
+  contactName?: string; origin?: FollowupOrigin; returnTo: string; onClose: () => void; onSaved: () => void
 }) {
   const { t, i18n } = useTranslation()
   const locale = i18n.language === 'fr' ? 'fr-FR' : 'en-US'
@@ -565,6 +579,8 @@ function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, onC
   const [title, setTitle] = useState(editingFollowup?.title ?? '')
   const [content, setContent] = useState(editingFollowup?.content ?? '')
   const [dueDate, setDueDate] = useState(editingFollowup?.due_date ?? new Date().toISOString().split('T')[0])
+  const [productContext, setProductContext] = useState(editingFollowup?.product_context ?? '')
+  const [showProductPicker, setShowProductPicker] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [showDueCal, setShowDueCal] = useState(false)
@@ -599,6 +615,7 @@ function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, onC
           content: content.trim() || null,
           due_date: dueDate,
           action_type: actionType,
+          product_context: productContext.trim() || null,
         })
       } else {
         await createFollowup(userId, {
@@ -609,6 +626,7 @@ function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, onC
           done: false,
           action_type: actionType,
           pipeline_stage: pipelineStage,
+          product_context: productContext.trim() || null,
         })
       }
       onSaved()
@@ -624,10 +642,19 @@ function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, onC
     <Modal animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.modalHeader}>
         <TouchableOpacity onPress={onClose}><Text style={styles.modalCancel}>{t('common.cancel')}</Text></TouchableOpacity>
-        <Text style={styles.modalTitle}>{isEditing ? t('followups.edit_title') : t('followups.add')}</Text>
+        <View style={styles.modalTitleBlock}>
+          <Text style={styles.modalTitle}>{isEditing ? t('followups.edit_title') : t('followups.add')}</Text>
+          {contactName ? <Text style={styles.modalContact} numberOfLines={1}>{contactName}</Text> : null}
+        </View>
         <Button label={t('common.save')} size="sm" onPress={handleSave} loading={loading} />
       </View>
       <ScrollView style={{ padding: 16 }} contentContainerStyle={{ gap: 12 }}>
+        {origin ? (
+          <View style={styles.originBox}>
+            <Text style={styles.fieldLabel}>{t('followups.origin_label')}</Text>
+            <FollowupOriginLine origin={origin} returnTo={returnTo} onNavigate={onClose} />
+          </View>
+        ) : null}
         {/* UI-AFFORDANCE-1.1 §2 — édition volontairement limitée à titre/contenu/type/échéance ;
             pipeline_stage n'est jamais montré ni modifié depuis cette Modal en mode édition. */}
         {!isEditing ? (
@@ -662,6 +689,12 @@ function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, onC
         </View>
         <Input label={t('followups.title_label')} value={title} onChangeText={setTitle} />
         <Input label={`${t('followups.description')} (${t('common.optional')})`} value={content} onChangeText={setContent} />
+        <View style={{ gap: 6 }}>
+          <Input label={`${t('followups.product_label')} (${t('common.optional')})`} value={productContext} onChangeText={setProductContext} />
+          <TouchableOpacity onPress={() => setShowProductPicker(true)} activeOpacity={0.7} style={{ alignSelf: 'flex-start' }}>
+            <Text style={styles.productPickLink}>{t('followups.product_from_catalog')} ›</Text>
+          </TouchableOpacity>
+        </View>
         <View style={{ gap: 8 }}>
           <Text style={styles.fieldLabel}>{t('followups.due_date')}</Text>
           <TouchableOpacity style={styles.dueDateBtn} onPress={() => setShowDueCal(true)} activeOpacity={0.75}>
@@ -678,6 +711,12 @@ function FollowupModal({ clientId, userId, currentPipeline, editingFollowup, onC
         onClose={() => setShowDueCal(false)}
         onConfirm={setDueDate}
       />
+      {showProductPicker ? (
+        <CatalogProductPicker
+          onSelect={(product) => { setProductContext(product.productName); setShowProductPicker(false) }}
+          onClose={() => setShowProductPicker(false)}
+        />
+      ) : null}
     </Modal>
   )
 }
@@ -698,6 +737,13 @@ function makeStyles(colors: ThemeColors) {
   cardFocused:        { borderWidth: 2, borderColor: colors.primary, backgroundColor: colors.primaryLight },
   doneToggle:         { paddingVertical: 10, paddingHorizontal: 4 },
   doneToggleText:     { fontSize: 13.5, fontFamily: fonts.semibold, color: colors.textSecondary },
+  productContext:     { fontSize: 12.5, fontFamily: fonts.medium, color: colors.textSecondary },
+  modalTitleBlock:    { flex: 1, alignItems: 'center', gap: 1 },
+  modalContact:       { fontSize: 13, fontFamily: fonts.medium, color: colors.textSecondary },
+  originBox:          { gap: 6, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  productPickLink:    { fontSize: 13, fontFamily: fonts.semibold, color: colors.primary },
+  cardOverdue:        { borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.dangerLight },
+  cardToday:          { borderWidth: 1, borderColor: colors.warning },
   cardFocusedOverdue: { borderWidth: 2, borderColor: colors.danger, backgroundColor: colors.dangerLight },
   cardFocusedToday:   { borderWidth: 2, borderColor: colors.warning, backgroundColor: colors.warningLight },
   focusUrgencyBadge:     { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999, backgroundColor: colors.card },

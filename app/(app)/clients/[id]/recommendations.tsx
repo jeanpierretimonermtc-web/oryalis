@@ -14,10 +14,12 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 import type { Recommendation } from '@/shared/lib/types'
+import { useClient } from '@/features/clients/useClient'
 
 export default function ClientRecommendationsScreen() {
   const { t } = useTranslation()
   const { id } = useLocalSearchParams<{ id: string }>()
+  const { client: contactClient } = useClient(id)
   const { session } = useAuth()
   const { colors } = useTheme()
   const styles = useMemo(() => makeStyles(colors), [colors])
@@ -96,7 +98,7 @@ export default function ClientRecommendationsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: t('recommendations.title'), headerRight: () => (
+      <Stack.Screen options={{ title: contactClient?.full_name ? t('clients.subpage_title', { section: t('recommendations.title'), name: contactClient.full_name }) : t('recommendations.title'), headerRight: () => (
         isDesktopWeb ? (
           <TouchableOpacity onPress={() => setShowModal(true)} style={styles.newActionBtn} activeOpacity={0.85}>
             <Text style={styles.newActionBtnText}>+ {t('recommendations.add')}</Text>
