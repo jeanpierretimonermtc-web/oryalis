@@ -13,6 +13,7 @@ import {
 import { MfaGate } from '@/features/admin/MfaGate'
 import { OwnerAlertsPanel } from '@/features/admin/OwnerAlertsPanel'
 import { OwnerDashboardPanel } from '@/features/admin/OwnerDashboardPanel'
+import { OwnerDeletionsPanel } from '@/features/admin/OwnerDeletionsPanel'
 import { OwnerUsersPanel } from '@/features/admin/OwnerUsersPanel'
 import { Button } from '@/shared/components/ui/Button'
 import { Card } from '@/shared/components/ui/Card'
@@ -21,7 +22,7 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import type { ThemeColors } from '@/shared/theme/colors'
 import { fonts } from '@/shared/theme/fonts'
 
-type Tab = 'dashboard' | 'users' | 'audit' | 'alerts' | 'support'
+type Tab = 'dashboard' | 'users' | 'audit' | 'alerts' | 'support' | 'deletions'
 
 function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString('fr-FR') : '—'
@@ -69,7 +70,7 @@ function OwnerConsole() {
   useEffect(() => { void load() }, [tab])
 
   const TAB_LABELS: Record<Tab, string> = {
-    dashboard: t('owner.tab_dashboard'), users: t('owner.tab_users'), audit: t('owner.tab_audit'), alerts: t('owner.tab_alerts'), support: t('owner.tab_support'),
+    dashboard: t('owner.tab_dashboard'), users: t('owner.tab_users'), audit: t('owner.tab_audit'), alerts: t('owner.tab_alerts'), support: t('owner.tab_support'), deletions: t('owner.tab_deletions'),
   }
 
   return (
@@ -77,7 +78,7 @@ function OwnerConsole() {
       <Text style={styles.title}>{t('owner.console_title')}</Text>
       <Text style={styles.subtitle}>{t('owner.console_subtitle')}</Text>
       <View style={styles.tabs}>
-        {(['dashboard', 'users', 'audit', 'alerts', 'support'] as Tab[]).map(value => (
+        {(['dashboard', 'users', 'audit', 'alerts', 'support', 'deletions'] as Tab[]).map(value => (
           <TouchableOpacity key={value} onPress={() => setTab(value)} style={[styles.tab, tab === value && styles.tabActive]}>
             <Text style={[styles.tabText, tab === value && styles.tabTextActive]}>
               {TAB_LABELS[value]}
@@ -96,6 +97,8 @@ function OwnerConsole() {
       )) : null}
 
       {tab === 'alerts' ? <OwnerAlertsPanel /> : null}
+
+      {tab === 'deletions' ? <OwnerDeletionsPanel /> : null}
 
       {tab === 'support' ? (
         <View style={styles.section}>

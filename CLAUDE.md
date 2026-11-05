@@ -307,6 +307,13 @@ Ajouts du 2026-11-06 (exécutés en prod) :
 - `20261106_owner_alert_details.sql` — `owner_list_alerts()` : alertes de l'owner avec compte concerné, auteur,
   motif et appareil (IP jamais renvoyée, elle n'est stockée que hachée).
 - `20261106_login_alert_severity.sql` — "Nouvelle connexion détectée" passe de `critical` à `warning`.
+- `20261106_revoke_internal_functions.sql` — `owner_*` retirées de `anon` ; `create_security_notification`
+  réservée aux fonctions internes (⚠️ Supabase accorde EXECUTE à `anon` par défaut : révoquer à chaque
+  nouvelle fonction sensible ; ~43 fonctions SECURITY DEFINER restent à passer en revue).
+- `20261106_owner_deletion_requests.sql` — `owner_list_deletion_requests()`, `owner_delete_account()` (efface
+  le compte par cascade : demande en cours, 30 jours écoulés, pas d'owner, pas d'abonnement payant actif,
+  e-mail retapé). `enforce_advisor_mutation` laisse passer ces suppressions via `app.owner_account_deletion`.
+  Les fichiers `storage.objects` (avatars) ne sont pas effacés.
 
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,

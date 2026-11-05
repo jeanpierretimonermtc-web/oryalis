@@ -8,7 +8,7 @@ import { formatDate } from '@/shared/lib/dateFormat'
 import { SOFT_CARD_SHADOW } from '@/shared/theme/elevation'
 import { useOwnerDashboard } from './useOwnerDashboard'
 
-export type OwnerAttentionTab = 'alerts' | 'support'
+export type OwnerAttentionTab = 'alerts' | 'support' | 'deletions'
 
 // OWNER-DASHBOARD-1 — page d'ouverture de la console : chiffres sur les comptes uniquement.
 export function OwnerDashboardPanel({ onOpenTab }: { onOpenTab: (tab: OwnerAttentionTab) => void }) {
@@ -24,7 +24,7 @@ export function OwnerDashboardPanel({ onOpenTab }: { onOpenTab: (tab: OwnerAtten
   const attention = [
     { key: 'alerts', count: d.alerts_unread, label: t('owner.attention_alerts', { count: d.alerts_unread }), tab: 'alerts' as const },
     { key: 'support', count: d.support_pending, label: t('owner.attention_support', { count: d.support_pending }), tab: 'support' as const },
-    { key: 'deletions', count: d.deletions_pending, label: t('owner.attention_deletions', { count: d.deletions_pending }), tab: null },
+    { key: 'deletions', count: d.deletions_pending, label: t('owner.attention_deletions', { count: d.deletions_pending }), tab: 'deletions' as const },
   ].filter(item => item.count > 0)
 
   const stats = [
@@ -38,15 +38,11 @@ export function OwnerDashboardPanel({ onOpenTab }: { onOpenTab: (tab: OwnerAtten
     <View style={styles.section}>
       {attention.length > 0 ? (
         <View style={styles.attention}>
-          {attention.map(item => item.tab ? (
-            <TouchableOpacity key={item.key} style={styles.attentionRow} onPress={() => onOpenTab(item.tab!)} activeOpacity={0.75}>
+          {attention.map(item => (
+            <TouchableOpacity key={item.key} style={styles.attentionRow} onPress={() => onOpenTab(item.tab)} activeOpacity={0.75}>
               <Text style={styles.attentionText}>{item.label}</Text>
               <Text style={styles.attentionCta}>{t('owner.attention_open')} ›</Text>
             </TouchableOpacity>
-          ) : (
-            <View key={item.key} style={styles.attentionRow}>
-              <Text style={styles.attentionText}>{item.label}</Text>
-            </View>
           ))}
         </View>
       ) : null}

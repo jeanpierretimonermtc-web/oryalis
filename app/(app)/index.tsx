@@ -530,7 +530,7 @@ export default function DashboardScreen() {
   const { byStage, refresh: refreshPipeline } = usePipelineStats()
   const { amount: monthRevenue, refresh: refreshRevenue } = useMonthlyRevenue()
   const { reload: refreshAlerts } = useAlerts()
-  const { goals } = useGoals()
+  const { goals, reload: refreshGoals } = useGoals()
   const { metrics: mlmMetrics, loading: mlmLoading, reload: refreshMlm } = useMlmTrackingSummary(session?.user.id)
   const { isModuleActive } = useAppConfig()
   const { items: dailyActions, personalEvents, loading: dailyLoading, refresh: refreshDaily } = useDailyActions()
@@ -567,6 +567,7 @@ export default function DashboardScreen() {
         : t('dashboard.greeting_evening')
 
   function refreshAll() {
+    refreshGoals()
     refreshStats()
     refreshAppts()
     refreshFu()
@@ -716,6 +717,57 @@ export default function DashboardScreen() {
         {/* ── Priorités du jour (condensé, dédupliqué) ──── */}
         <TopPriorities top={topPriorities} rest={remainingActions} loading={dailyLoading} riskOverflow={riskOverflow} onRiskChanged={refreshDaily} />
 
+        {/* ── Objectifs du mois ─────────────────────────── */}
+        {isModuleActive('goals') && goals.length > 0 && (
+          <View style={styles.section}>
+            <SectionHeader
+              title={t('goals.section_title')}
+              onMore={() => router.push('/(app)/goals' as any)}
+            />
+
+            <View style={styles.listCard}>
+              {goals.map((g, i) => {
+                const accent =
+                  g.pct >= 100
+                    ? colors.success
+                    : g.pct >= 60
+                      ? colors.primary
+                      : g.pct >= 30
+                        ? colors.warning
+                        : colors.danger
+
+                return (
+                  <View key={g.id}>
+                    {i > 0 && <View style={styles.divider} />}
+
+                    <View style={styles.goalRow}>
+                      <View style={styles.goalHeader}>
+                        <Text style={styles.goalTitle}>{t(`goals.metrics.${g.metric}`)}</Text>
+                        <Text style={[styles.goalValue, { color: accent }]}>
+                          {g.current} / {g.target}
+                        </Text>
+                      </View>
+
+                      <View style={styles.goalTrack}>
+                        <View
+                          style={[
+                            styles.goalProgress,
+                            {
+                              width: `${Math.min(g.pct, 100)}%`,
+                              backgroundColor: accent,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                )
+              })}
+            </View>
+          </View>
+        )}
+
+
         {/* ── DASH/CAL-2 — Agenda personnel (jamais mêlé aux actions CRM) ─── */}
         <PersonalAgendaBlock events={personalEvents} loading={dailyLoading} />
 
@@ -818,56 +870,6 @@ export default function DashboardScreen() {
                   <Text style={styles.mlmMoreText}>{t('dashboard.mlm_tracking_more', { count: mlmMetricsMoreCount })}</Text>
                 </>
               ) : null}
-            </View>
-          </View>
-        )}
-
-        {/* ── Objectifs du mois ─────────────────────────── */}
-        {isModuleActive('goals') && goals.length > 0 && (
-          <View style={styles.section}>
-            <SectionHeader
-              title={t('goals.section_title')}
-              onMore={() => router.push('/(app)/goals' as any)}
-            />
-
-            <View style={styles.listCard}>
-              {goals.map((g, i) => {
-                const accent =
-                  g.pct >= 100
-                    ? colors.success
-                    : g.pct >= 60
-                      ? colors.primary
-                      : g.pct >= 30
-                        ? colors.warning
-                        : colors.danger
-
-                return (
-                  <View key={g.id}>
-                    {i > 0 && <View style={styles.divider} />}
-
-                    <View style={styles.goalRow}>
-                      <View style={styles.goalHeader}>
-                        <Text style={styles.goalTitle}>{t(`goals.metrics.${g.metric}`)}</Text>
-                        <Text style={[styles.goalValue, { color: accent }]}>
-                          {g.current} / {g.target}
-                        </Text>
-                      </View>
-
-                      <View style={styles.goalTrack}>
-                        <View
-                          style={[
-                            styles.goalProgress,
-                            {
-                              width: `${Math.min(g.pct, 100)}%`,
-                              backgroundColor: accent,
-                            },
-                          ]}
-                        />
-                      </View>
-                    </View>
-                  </View>
-                )
-              })}
             </View>
           </View>
         )}

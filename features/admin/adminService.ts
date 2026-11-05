@@ -110,6 +110,29 @@ export async function searchOwnerUsers(params: { search?: string; access?: Owner
   return data as { total: number; rows: OwnerUserRow[] }
 }
 
+export interface OwnerDeletionRequest {
+  user_id: string
+  email: string
+  full_name: string | null
+  requested_at: string
+  scheduled_for: string
+  reason: string | null
+  due: boolean
+  paying: boolean
+  contacts_count: number
+}
+
+export async function listOwnerDeletionRequests(): Promise<OwnerDeletionRequest[]> {
+  const { data, error } = await supabase.rpc('owner_list_deletion_requests')
+  if (error) throw error
+  return (data ?? []) as OwnerDeletionRequest[]
+}
+
+export async function deleteOwnerAccount(userId: string, confirmEmail: string): Promise<void> {
+  const { error } = await supabase.rpc('owner_delete_account', { p_target_user_id: userId, p_confirm_email: confirmEmail })
+  if (error) throw new Error(error.message)
+}
+
 export async function listOwnerUsers(search?: string, limit = 50, offset = 0) {
   const { data, error } = await supabase.rpc('owner_list_users', {
     p_search: search?.trim() || null,
