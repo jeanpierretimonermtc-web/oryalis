@@ -16,6 +16,7 @@ import { useNotes } from '@/features/notes/useNotes'
 import { createNote, deleteNote } from '@/features/notes/noteService'
 import { useClientFollowups } from '@/features/followups/useFollowups'
 import { FollowupCompletionModal } from '@/features/followups/FollowupCompletionModal'
+import { FollowupActionFlow, awaitingReplyLabel, followupActionKind, followupActionLabel } from '@/features/followups/FollowupActionFlow'
 import { useCareJourney } from '@/features/care/useCareJourney'
 import { CareJourneyCard } from '@/features/care/CareJourneyCard'
 import { ContactSynthesis } from '@/features/clients/ContactSynthesis'
@@ -446,6 +447,7 @@ export default function ClientDetailScreen() {
   // ouvre le même FollowupCompletionModal que les pages Relances (contact/globale), jamais un
   // second chemin de clôture direct pour cette action.
   const [completingFollowup, setCompletingFollowup] = useState<Followup | null>(null)
+  const [actingFollowup, setActingFollowup] = useState<Followup | null>(null)
   const [showRescheduleCal, setShowRescheduleCal]   = useState(false)
   const [rescheduleBusyDays, setRescheduleBusyDays] = useState<CalendarBusyAppointment[]>([])
   const [rescheduleDuration, setRescheduleDuration] = useState(60)
@@ -989,6 +991,9 @@ export default function ClientDetailScreen() {
     : null
   const nextActionType = client.next_action_source === 'followup' ? nextActionFollowup?.action_type ?? null : client.next_action_type
   const nextActionSubtitle = nextActionAppt?.title ?? nextActionFollowup?.title ?? null
+  const contactFirstName = client.first_name ?? client.full_name
+  const nextFollowupKind = nextActionFollowup ? followupActionKind(nextActionFollowup) : null
+  const nextFollowupAwaiting = nextActionFollowup ? awaitingReplyLabel(nextActionFollowup, contactFirstName, t) : null
   const appointmentPhase: 'before' | 'live' | 'after' | null = nextActionAppt
     ? (() => {
         const nowMs = Date.now()
@@ -1472,10 +1477,29 @@ export default function ClientDetailScreen() {
                     </TouchableOpacity>
                   </>
                 ) : (
+                <>
+                {nextFollowupAwaiting ? <Text style={styles.nextActionMeta}>{nextFollowupAwaiting}</Text> : null}
+                {nextActionFollowup && nextFollowupKind ? (
+                  <View style={styles.nextActionBtnRow}>
+                    <TouchableOpacity
+                      disabled={actionBusy}
+                      style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionBtnColor }, actionBusy && { opacity: 0.6 }]}
+                      onPress={() => setActingFollowup(nextActionFollowup)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.nextActionBtnPrimaryText}>{followupActionLabel(nextActionFollowup, t)}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
                 <View style={styles.nextActionBtnRow}>
+                  {nextFollowupKind !== 'reply' ? (
                   <TouchableOpacity
                     disabled={actionBusy}
-                    style={[styles.nextActionBtnPrimary, { backgroundColor: nextActionBtnColor }, actionBusy && { opacity: 0.6 }]}
+                    style={[
+                      nextFollowupKind ? styles.nextActionBtnSecondary : styles.nextActionBtnPrimary,
+                      nextFollowupKind ? { borderColor: nextActionBtnColor } : { backgroundColor: nextActionBtnColor },
+                      actionBusy && { opacity: 0.6 },
+                    ]}
                     onPress={() => {
                       // ACTION-OUTCOME-1 / P1.1 — une action prioritaire "relance" ouvre
                       // désormais le même FollowupCompletionModal que les pages Relances
@@ -1509,10 +1533,11 @@ export default function ClientDetailScreen() {
                   >
                     {actionBusy
                       ? <ActivityIndicator size="small" color="#fff" />
-                      : <Text style={styles.nextActionBtnPrimaryText}>
+                      : <Text style={nextFollowupKind ? [styles.nextActionBtnSecondaryText, { color: nextActionBtnColor }] : styles.nextActionBtnPrimaryText}>
                           {client.next_action_source === 'appointment' ? t('clients.finish_action_debrief') : t('clients.finish_action')}
                         </Text>}
                   </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity
                     disabled={actionBusy}
                     style={[styles.nextActionBtnSecondary, { borderColor: nextActionBtnColor }]}
@@ -1522,6 +1547,7 @@ export default function ClientDetailScreen() {
                     <Text style={[styles.nextActionBtnSecondaryText, { color: nextActionBtnColor }]}>{t('clients.postpone_action')}</Text>
                   </TouchableOpacity>
                 </View>
+                </>
                 )}
               </View>
             ) : (
@@ -2356,6 +2382,7 @@ export default function ClientDetailScreen() {
                             <View style={styles.listCardLeft}>
                               <Text style={styles.listCardDate}>{fmtShort(f.due_date, locale)}</Text>
                               <Text style={styles.listCardSub} numberOfLines={2}>{f.title ?? f.content}</Text>
+                              {f.awaiting_reply_since ? <Text style={styles.listCardSub} numberOfLines={1}>{awaitingReplyLabel(f, contactFirstName, t)}</Text> : null}
                             </View>
                             {followupUrgency ? (
                               <View style={styles.urgencyBadge}>
@@ -3016,6 +3043,17 @@ export default function ClientDetailScreen() {
           userId={session?.user.id ?? ''}
           onClose={() => setCompletingFollowup(null)}
           onSaved={() => { setCompletingFollowup(null); refresh(); refreshFollowups(); refreshCare() }}
+        />
+      )}
+
+      {actingFollowup && (
+        <FollowupActionFlow
+          followup={actingFollowup}
+          client={client}
+          userId={session?.user.id ?? ''}
+          advisorName={session?.user?.user_metadata?.full_name ?? session?.user?.email ?? ''}
+          onClose={() => setActingFollowup(null)}
+          onSaved={() => { setActingFollowup(null); refresh(); refreshFollowups(); refreshCare() }}
         />
       )}
     </>

@@ -102,6 +102,8 @@ export async function refreshGcAccessToken(refreshToken: string): Promise<{ acce
 
 // ── Google Calendar API helpers ───────────────────────────────────────────────
 
+const GC_NOT_FOUND = 'gc_not_found'
+
 async function gcFetch(path: string, accessToken: string, options?: RequestInit) {
   let response: Response
   try {
@@ -117,6 +119,7 @@ async function gcFetch(path: string, accessToken: string, options?: RequestInit)
     throw new Error(`gc_network_error: ${e instanceof Error ? e.message : String(e)}`)
   }
   if (response.status === 401) throw new Error('gc_token_expired')
+  if (response.status === 404 || response.status === 410) throw new Error(GC_NOT_FOUND)
   if (!response.ok) {
     const body = await response.text()
     throw new Error(`Google Calendar ${response.status}: ${body}`)
@@ -280,13 +283,19 @@ function appointmentToGcEvent(appt: Appointment): GcEvent {
   }
 }
 
+async function removeEventLink(userId: string, appointmentId: string): Promise<void> {
+  const { error } = await supabase.from('google_calendar_events').delete()
+    .eq('user_id', userId).eq('appointment_id', appointmentId)
+  if (error) throw new Error(error.message)
+}
+
 // Push one Oryalis appointment → Google Calendar
 export async function pushAppointmentToGoogle(
   userId: string,
   appt: Appointment,
   accessToken: string,
   targetCalendarId: string
-): Promise<string> {
+): Promise<string | null> {
   // Check if already synced
   const { data: existing } = await supabase
     .from('google_calendar_events')
@@ -298,18 +307,24 @@ export async function pushAppointmentToGoogle(
   const gcEvent = appointmentToGcEvent(appt)
 
   if (existing?.google_event_id) {
-    // Update existing
-    if (appt.status === 'cancelled') {
-      await deleteGcEvent(accessToken, existing.calendar_id, existing.google_event_id)
-      await supabase.from('google_calendar_events').delete()
+    try {
+      if (appt.status === 'cancelled') {
+        await deleteGcEvent(accessToken, existing.calendar_id, existing.google_event_id)
+        await removeEventLink(userId, appt.id)
+        return existing.google_event_id
+      }
+      await updateGcEvent(accessToken, existing.calendar_id, existing.google_event_id, gcEvent)
+      await supabase.from('google_calendar_events').update({ last_synced_at: new Date().toISOString() })
         .eq('user_id', userId).eq('appointment_id', appt.id)
       return existing.google_event_id
+    } catch (e) {
+      // Événement supprimé chez Google, ou connexion passée à un autre compte : on repart de zéro.
+      if (!(e instanceof Error) || e.message !== GC_NOT_FOUND) throw e
+      await removeEventLink(userId, appt.id)
     }
-    await updateGcEvent(accessToken, existing.calendar_id, existing.google_event_id, gcEvent)
-    await supabase.from('google_calendar_events').update({ last_synced_at: new Date().toISOString() })
-      .eq('user_id', userId).eq('appointment_id', appt.id)
-    return existing.google_event_id
   }
+
+  if (appt.status === 'cancelled') return null
 
   // Create new
   const created = await createGcEvent(accessToken, targetCalendarId, gcEvent)

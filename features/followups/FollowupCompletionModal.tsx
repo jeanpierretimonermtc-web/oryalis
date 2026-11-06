@@ -29,9 +29,10 @@ const TYPE_ICONS: Record<InteractionType, string> = {
 
 type Choice = 'simple' | 'record'
 
-export function FollowupCompletionModal({ followup, userId, onClose, onSaved }: {
+export function FollowupCompletionModal({ followup, userId, initialChoice = null, onClose, onSaved }: {
   followup: Followup
   userId: string
+  initialChoice?: Choice | null
   onClose: () => void
   onSaved: () => void
 }) {
@@ -44,7 +45,7 @@ export function FollowupCompletionModal({ followup, userId, onClose, onSaved }: 
 
   const [checkingExisting, setCheckingExisting] = useState(true)
   const [existingInteraction, setExistingInteraction] = useState<Interaction | null>(null)
-  const [choice, setChoice] = useState<Choice | null>(null)
+  const [choice, setChoice] = useState<Choice | null>(initialChoice)
   // ACTION-OUTCOME-1 / P1.2 §19/§20 — même sélecteur "Suite" que la clôture d'interaction P0,
   // appliqué ici à l'interaction historique créée par "Enregistrer l'échange".
   const [nextStep, setNextStep] = useState<NextStepValue>(() => defaultNextStepValue())

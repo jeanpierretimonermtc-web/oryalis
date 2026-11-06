@@ -1,10 +1,10 @@
 import { supabase } from '@/shared/lib/supabase'
-import type { Followup, FollowupWithClient, Interaction, NextActionType } from '@/shared/lib/types'
-import { createInteraction, getInteractionBySourceFollowup } from '@/features/interactions/interactionService'
+import type { Followup, FollowupWithClient, Interaction, InteractionType, NextActionType } from '@/shared/lib/types'
+import { createInteraction, getInteractionBySourceFollowup, updateInteraction } from '@/features/interactions/interactionService'
 import type { InteractionInput } from '@/features/interactions/interactionService'
 
 export type FollowupInput =
-  Omit<Followup, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'auto_generated' | 'priority_score' | 'pipeline_stage' | 'prospect_temperature' | 'product_context' | 'appointment_id' | 'automation_rule_id' | 'cancelled_at' | 'closure_action_key' | 'order_id' | 'source_interaction_id' | 'care_journey_id' | 'care_step_key' | 'message_body'>
+  Omit<Followup, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'awaiting_reply_since' | 'auto_generated' | 'priority_score' | 'pipeline_stage' | 'prospect_temperature' | 'product_context' | 'appointment_id' | 'automation_rule_id' | 'cancelled_at' | 'closure_action_key' | 'order_id' | 'source_interaction_id' | 'care_journey_id' | 'care_step_key' | 'message_body'>
   & {
     auto_generated?: boolean
     priority_score?: number | null
@@ -42,7 +42,7 @@ export async function getFollowupsByClient(clientId: string) {
 export async function getPendingFollowups(userId: string) {
   const { data, error } = await supabase
     .from('followups')
-    .select('*, client:clients(id, full_name, contact_role, pipeline_stage, is_vip)')
+    .select('*, client:clients(id, full_name, first_name, phone, email, next_lrp_date, timezone, contact_role, pipeline_stage, is_vip)')
     .eq('user_id', userId)
     .eq('done', false)
     .is('cancelled_at', null)
@@ -170,6 +170,70 @@ export async function completeFollowupWithInteraction(
     }
   }
   await toggleFollowupDone(followup.id, true)
+  return interaction
+}
+
+const AWAITING_REPLY_DAYS = 3
+
+function localDateIn(days: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// L'échange s'écrit dès l'envoi pour que le contact ne paraisse pas sans suivi pendant l'attente ;
+// la relance reste ouverte et revient dans les tâches à la date de rappel.
+export async function markFollowupSent(
+  followup: Followup,
+  userId: string,
+  channel: InteractionType,
+  message: string | null
+): Promise<void> {
+  const now = new Date().toISOString()
+  const exchange = {
+    interaction_type: channel,
+    scheduled_at: now,
+    completed_at: now,
+    subject: followup.title ?? followup.content ?? null,
+    summary: message,
+    completion_result: 'sent' as const,
+  }
+  const existing = await getInteractionBySourceFollowup(followup.id)
+  if (existing) await updateInteraction(existing.id, exchange)
+  else await createInteraction(userId, { ...exchange, client_id: followup.client_id, source_followup_id: followup.id })
+
+  const { error } = await supabase
+    .from('followups')
+    .update({ awaiting_reply_since: now, due_date: localDateIn(AWAITING_REPLY_DAYS), updated_at: now })
+    .eq('id', followup.id)
+  if (error) throw error
+}
+
+// Complète l'échange écrit à l'envoi : une seule ligne dans l'historique.
+export async function recordFollowupReply(
+  followup: Followup,
+  userId: string,
+  result: 'replied' | 'no_response',
+  reply: string | null
+): Promise<Interaction> {
+  const existing = await getInteractionBySourceFollowup(followup.id)
+  const interaction: Interaction = existing
+    ? await updateInteraction(existing.id, { completion_result: result, notes_brutes: reply })
+    : await createInteraction(userId, {
+        client_id: followup.client_id,
+        source_followup_id: followup.id,
+        interaction_type: followup.action_type ?? 'whatsapp',
+        completed_at: followup.awaiting_reply_since,
+        scheduled_at: followup.awaiting_reply_since,
+        subject: followup.title ?? followup.content ?? null,
+        completion_result: result,
+        notes_brutes: reply,
+      })
+  const { error } = await supabase
+    .from('followups')
+    .update({ done: true, awaiting_reply_since: null, updated_at: new Date().toISOString() })
+    .eq('id', followup.id)
+  if (error) throw error
   return interaction
 }
 

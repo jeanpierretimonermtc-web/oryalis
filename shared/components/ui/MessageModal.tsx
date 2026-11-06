@@ -429,7 +429,7 @@ export function MessageModal({ visible, onClose, client, advisorName, lastProduc
 
               {/* MSG-UI-1 — après un partage : clôture proposée par l'appelant. */}
               {doneAction && shared ? (
-                <TouchableOpacity style={styles.doneBtn} onPress={() => { handleClose(); doneAction.onPress() }} activeOpacity={0.85}>
+                <TouchableOpacity style={styles.doneBtn} onPress={() => { doneAction.onPress(); handleClose() }} activeOpacity={0.85}>
                   <Text style={styles.doneBtnText}>✓ {doneAction.label}</Text>
                 </TouchableOpacity>
               ) : null}

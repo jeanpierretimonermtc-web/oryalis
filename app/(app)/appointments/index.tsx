@@ -1,3 +1,4 @@
+import type { ViewStyle } from 'react-native'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, Pressable,
@@ -96,6 +97,14 @@ function apptAccent(appt: CalendarAppointment, colors: ThemeColors): string {
   if (appt.calendar_color) return appt.calendar_color
   if (!appt.client) return colors.textTertiary
   return getRoleColors(getPrimaryRole(appt.client.contact_role), colors).text
+}
+
+// RDV Oryalis en plein, événement d'agenda personnel en contour : la différence se lit sans le texte.
+function apptCardLook(appt: CalendarAppointment, accent: string, colors: ThemeColors, outline = 2): ViewStyle {
+  if (appt.provider === 'google') {
+    return { backgroundColor: colors.card, borderStyle: 'dashed', borderWidth: outline, borderLeftWidth: outline, borderColor: accent }
+  }
+  return { backgroundColor: `${accent}1F`, borderLeftColor: accent }
 }
 
 // Constante partagée pour l'atténuation de carte (completed/cancelled) — reprend telle quelle
@@ -662,7 +671,8 @@ export default function AgendaScreen() {
                         {events.slice(0, maxChips).map(appt => {
                           const accent = apptAccent(appt, colors)
                           const sp = statusPresentation(appt.status, t)
-                          return <View key={appt.id} style={[styles.monthDot, { backgroundColor: accent, opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1 }]} />
+                          const dotLook = appt.provider === 'google' ? { borderWidth: 1, borderColor: accent } : { backgroundColor: accent }
+                          return <View key={appt.id} style={[styles.monthDot, dotLook, { opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1 }]} />
                         })}
                         {events.length > maxChips && <Text style={styles.monthMoreText}>+{events.length - maxChips}</Text>}
                       </View>
@@ -694,11 +704,12 @@ export default function AgendaScreen() {
                               accessibilityLabel={t('appointments.view_detail_hint')}
                               style={[
                                 styles.monthEventChip,
-                                { backgroundColor: colors.bgDim, borderLeftColor: accent, opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1 },
+                                apptCardLook(appt, accent, colors, 1.5),
+                                { opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1 },
                                 isHovered && { borderColor: colors.borderStrong },
                               ]}
                             >
-                              <Text style={[styles.monthEventText, { color: colors.text }, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                              <Text style={[styles.monthEventText, { color: colors.text }, isPersonal && styles.personalText, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                                 {prefix}{formatTime(new Date(appt.start_at))} {appt.client ? firstWord(appt.client.full_name) : appt.title}
                               </Text>
                               <RemoteTimeBadge at={new Date(appt.start_at)} contactTz={appt.client?.timezone} size="xs" />
@@ -784,8 +795,7 @@ export default function AgendaScreen() {
                 // Collisions calculées jour par jour (§10) : les RDV du mercredi ne partagent
                 // jamais de lane avec ceux du jeudi.
                 return layoutCalendarAppointments(appts).map(({ appointment: appt, laneIndex, laneCount }) => {
-                  // CAL-4.5 : accent = couleur du rôle principal du contact (même source que
-                  // Contacts) — fond neutre inchangé (colors.card).
+                  // CAL-4.5 : accent = couleur du rôle principal du contact (même source que Contacts).
                   const accent = apptAccent(appt, colors)
                   const topPx  = apptTopPx(appt, WEEK_HOUR_H)
                   const hPx    = apptHeightPx(appt, WEEK_HOUR_H, 24)
@@ -824,7 +834,8 @@ export default function AgendaScreen() {
                       key={appt.id}
                       style={[
                         styles.weekApptBlock,
-                        { left, width: laneW, top: topPx + 2, height: hPx, backgroundColor: colors.card, borderLeftColor: accent, opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1 },
+                        apptCardLook(appt, accent, colors),
+                        { left, width: laneW, top: topPx + 2, height: hPx, opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1 },
                         isHovered && { borderColor: colors.borderStrong },
                       ]}
                       onPress={(e) => openApptMenu(appt, e)}
@@ -838,7 +849,7 @@ export default function AgendaScreen() {
                           <RemoteTimeBadge at={d} contactTz={appt.client?.timezone} size="xs" />
                         </View>
                       )}
-                      <Text style={[styles.weekApptName, { color: colors.text }, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                      <Text style={[styles.weekApptName, { color: colors.text }, isPersonal && styles.personalText, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                         {namePrefix}{appt.client ? firstWord(appt.client.full_name) : appt.title}
                       </Text>
                       {thirdLine && (
@@ -934,7 +945,8 @@ export default function AgendaScreen() {
                 key={appt.id}
                 style={[
                   styles.dayApptBlock,
-                  { left, width: laneW, top: topPx, height: hPx, backgroundColor: colors.card, borderLeftColor: accent, opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1, zIndex: 1 },
+                  apptCardLook(appt, accent, colors),
+                  { left, width: laneW, top: topPx, height: hPx, opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1, zIndex: 1 },
                   isHovered && { borderColor: colors.borderStrong },
                 ]}
                 onPress={(e) => openApptMenu(appt, e)}
@@ -951,7 +963,7 @@ export default function AgendaScreen() {
                   </Text>
                   <RemoteTimeBadge at={d} contactTz={appt.client?.timezone} showCity size="xs" />
                 </View>
-                <Text style={[styles.dayApptClient, { color: colors.text }, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                <Text style={[styles.dayApptClient, { color: colors.text }, isPersonal && styles.personalText, sp.strikeName && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                   {isPersonal ? '🗓 ' : ''}{appt.client ? appt.client.full_name : appt.title}
                 </Text>
                 {thirdLine ? (
@@ -1321,6 +1333,7 @@ function makeStyles(colors: ThemeColors) {
   // où card/bgDim sont plus proches), radius/padding légèrement augmentés (plus "fini") — pas
   // d'ombre ici (cartes nombreuses et petites, un flou par carte alourdirait la vue).
   weekApptBlock: { position: 'absolute', borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderLeftWidth: 2.5, paddingHorizontal: 4, paddingVertical: 3, overflow: 'hidden', zIndex: 2 },
+  personalText:  { fontFamily: fonts.medium, color: colors.textSecondary },
   weekApptTime:  { fontSize: 9, fontFamily: fonts.medium, opacity: 0.85 },
   weekApptTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 3, flexWrap: 'wrap' },
   weekApptName:  { fontSize: 11, fontFamily: fonts.bold },

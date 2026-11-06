@@ -9,6 +9,7 @@ import { useClientFollowups } from '@/features/followups/useFollowups'
 import { useClient } from '@/features/clients/useClient'
 import { createFollowup, updateFollowup, toggleFollowupDone, deleteFollowup } from '@/features/followups/followupService'
 import { FollowupCompletionModal } from '@/features/followups/FollowupCompletionModal'
+import { FollowupActionFlow, FollowupActionRow } from '@/features/followups/FollowupActionFlow'
 import { OpenActionLink } from '@/shared/components/ui/OpenActionLink'
 import { CompleteToggle } from '@/shared/components/ui/CompleteToggle'
 import { getInteractionsBySourceFollowupIds } from '@/features/interactions/interactionService'
@@ -108,6 +109,7 @@ export default function ClientFollowupsScreen() {
   // `confirmId` (confirmation de suppression, inchangée) et n'affecte jamais le focus/scroll
   // CONTACT-4.2 ci-dessous (état totalement indépendant).
   const [completingFollowup, setCompletingFollowup] = useState<Followup | null>(null)
+  const [actingFollowup, setActingFollowup] = useState<Followup | null>(null)
   // UI-AFFORDANCE-1.1 — relance en cours d'édition (titre/contenu/type/échéance), distincte de
   // `completingFollowup` (clôture P1) et de `confirmId` (suppression) : trois états indépendants.
   const [editingFollowup, setEditingFollowup] = useState<Followup | null>(null)
@@ -257,7 +259,8 @@ export default function ClientFollowupsScreen() {
       if (!item.followup.done) {
         // ACTION-OUTCOME-1 / P1 §22 — clôture (false→true) : passe désormais toujours par la
         // modale de clôture professionnelle, jamais un basculement instantané.
-        setCompletingFollowup(item.followup)
+        if (item.followup.awaiting_reply_since) setActingFollowup(item.followup)
+        else setCompletingFollowup(item.followup)
         return
       }
       // §27 — réouverture (true→false) : comportement existant inchangé, jamais interceptée
@@ -516,6 +519,13 @@ export default function ClientFollowupsScreen() {
                       ) : null}
                     </View>
                   </View>
+                  {item.source === 'followup' && item.followup ? (
+                    <FollowupActionRow
+                      followup={item.followup}
+                      name={client?.first_name ?? client?.full_name ?? ''}
+                      onPress={() => setActingFollowup(item.followup!)}
+                    />
+                  ) : null}
                 </Card>
                 )
               }}
@@ -558,6 +568,16 @@ export default function ClientFollowupsScreen() {
           userId={session?.user.id ?? ''}
           onClose={() => setCompletingFollowup(null)}
           onSaved={() => { setCompletingFollowup(null); refresh() }}
+        />
+      )}
+      {actingFollowup && (
+        <FollowupActionFlow
+          followup={actingFollowup}
+          client={client}
+          userId={session?.user.id ?? ''}
+          advisorName={session?.user?.user_metadata?.full_name ?? session?.user?.email ?? ''}
+          onClose={() => setActingFollowup(null)}
+          onSaved={() => { setActingFollowup(null); refresh() }}
         />
       )}
     </>

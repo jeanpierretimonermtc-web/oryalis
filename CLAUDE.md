@@ -324,6 +324,10 @@ Ajouts du 2026-11-06 (exécutés en prod) :
   (`is_visible`) et calendrier unique recevant les RDV (`is_target`). Le principal garde l'id `primary` ;
   `appointments.external_calendar_id` indique le calendrier d'origine d'un événement importé.
 
+- `20261106_followup_awaiting_reply.sql` — `followups.awaiting_reply_since` : relance envoyée, en attente de la
+  réponse du client (`due_date` = date de rappel, J+3 par défaut). L'échange lié est écrit dès l'envoi
+  (`completion_result = 'sent'`), puis complété avec la réponse (`features/followups/FollowupActionFlow.tsx`).
+
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
 `solutions_proposed`, `recap_sent`, `next_appointment_date`, `native_event_id` : elles n'existent plus

@@ -473,6 +473,9 @@ export interface Followup {
   due_date: string
   done: boolean
   action_type: NextActionType | null
+  // Date d'envoi du message quand la relance attend la réponse du client ; due_date porte alors
+  // la date de rappel.
+  awaiting_reply_since: string | null
   // ── Relance intelligente (migrate17) ──────────────────────────────────────
   prospect_temperature: ProspectTemperature | null
   pipeline_stage: string | null
@@ -831,7 +834,7 @@ export interface NetworkNode extends Pick<Client,
 }
 
 export interface FollowupWithClient extends Followup {
-  client: Pick<Client, 'id' | 'full_name' | 'contact_role' | 'pipeline_stage' | 'is_vip'>
+  client: Pick<Client, 'id' | 'full_name' | 'first_name' | 'phone' | 'email' | 'next_lrp_date' | 'timezone' | 'contact_role' | 'pipeline_stage' | 'is_vip'>
 }
 
 export interface InteractionWithClient extends Interaction {

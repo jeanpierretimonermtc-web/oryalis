@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { usePendingFollowups } from '@/features/followups/useFollowups'
 import { computeFollowupPriority } from '@/features/followups/followupService'
 import { FollowupCompletionModal } from '@/features/followups/FollowupCompletionModal'
+import { FollowupActionFlow, FollowupActionRow } from '@/features/followups/FollowupActionFlow'
 import { OpenActionLink } from '@/shared/components/ui/OpenActionLink'
 import { CompleteToggle } from '@/shared/components/ui/CompleteToggle'
 import { useFollowupBadge } from '@/features/notifications/useNotifications'
@@ -56,11 +57,12 @@ function getTabConfig(colors: ThemeColors): Record<Tab, { labelKey: string; acce
 
 // ── FollowupCard ──────────────────────────────────────────────────────────────
 
-function FollowupCard({ f, today, onRequestDone, origin }: {
+function FollowupCard({ f, today, onRequestDone, onRequestAction, origin }: {
   origin?: FollowupOrigin
   f: FollowupWithClient & { _score: number }
   today: string
   onRequestDone: () => void
+  onRequestAction: () => void
 }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
@@ -138,7 +140,7 @@ function FollowupCard({ f, today, onRequestDone, origin }: {
             toujours l'état "Terminer", jamais "Terminée" ici. */}
         <CompleteToggle
           done={false}
-          onPress={onRequestDone}
+          onPress={f.awaiting_reply_since ? onRequestAction : onRequestDone}
           activeLabel={t('clients.finish_action')}
           doneLabel={t('followups.done')}
           accentColor={isOverdue ? colors.danger : colors.primary}
@@ -186,6 +188,7 @@ function FollowupCard({ f, today, onRequestDone, origin }: {
       <View style={styles.originRow}>
         <FollowupOriginLine origin={origin} returnTo="/(app)/followups" />
       </View>
+      <FollowupActionRow followup={f} name={f.client?.first_name ?? f.client?.full_name ?? ''} onPress={onRequestAction} />
     </View>
   )
 }
@@ -234,6 +237,7 @@ export default function FollowupsScreen() {
   // modale partagée que la page Relances-contact : un seul comportement de clôture, quelle que
   // soit la page d'entrée.
   const [completingFollowup, setCompletingFollowup] = useState<(FollowupWithClient & { _score: number }) | null>(null)
+  const [actingFollowup, setActingFollowup] = useState<(FollowupWithClient & { _score: number }) | null>(null)
 
   return (
     <>
@@ -281,6 +285,7 @@ export default function FollowupsScreen() {
                     today={today}
                     origin={origins.get(item.id)}
                     onRequestDone={() => setCompletingFollowup(item)}
+                    onRequestAction={() => setActingFollowup(item)}
                   />
                 )}
                 ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
@@ -307,6 +312,16 @@ export default function FollowupsScreen() {
           userId={session?.user.id ?? ''}
           onClose={() => setCompletingFollowup(null)}
           onSaved={() => { setCompletingFollowup(null); refresh() }}
+        />
+      )}
+      {actingFollowup && (
+        <FollowupActionFlow
+          followup={actingFollowup}
+          client={actingFollowup.client}
+          userId={session?.user.id ?? ''}
+          advisorName={session?.user?.user_metadata?.full_name ?? session?.user?.email ?? ''}
+          onClose={() => setActingFollowup(null)}
+          onSaved={() => { setActingFollowup(null); refresh() }}
         />
       )}
     </>
