@@ -6,9 +6,10 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import {
   saveGcToken, loadGcToken, deleteGcToken, exchangeGcCode, refreshGcAccessToken,
   pushAppointmentToGoogle, pullFromGoogle,
+  refreshGcCalendars, setGcCalendarVisible, setGcTargetCalendar, loadGcSyncCalendars,
 } from './googleCalendarService'
 import { fetchAppointments } from './appointmentService'
-import type { GcToken } from './googleCalendarService'
+import type { GcCalendar, GcToken } from './googleCalendarService'
 
 // Complete auth session on web/mobile after redirect
 WebBrowser.maybeCompleteAuthSession()
@@ -36,7 +37,7 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function useGoogleCalendar() {
+export function useGoogleCalendar({ withCalendars = false }: { withCalendars?: boolean } = {}) {
   const { session } = useAuth()
   const userId = session?.user?.id
 
@@ -45,6 +46,10 @@ export function useGoogleCalendar() {
   const [syncing, setSyncing]     = useState(false)
   const [syncResult, setSyncResult] = useState<{ pushed: number; pulled: number } | null>(null)
   const [error, setError]         = useState<string | null>(null)
+  const [accountEmail, setAccountEmail] = useState<string | null>(null)
+  const [calendars, setCalendars] = useState<GcCalendar[]>([])
+  const [calendarsLoading, setCalendarsLoading] = useState(false)
+  const [calendarError, setCalendarError] = useState(false)
 
   const isConfigured = Boolean(getClientId())
   const isConnected  = Boolean(token?.access_token)
@@ -143,6 +148,57 @@ export function useGoogleCalendar() {
     }
   }, [userId, token])
 
+  const reloadCalendars = useCallback(async () => {
+    if (!userId) return
+    const fresh = await ensureFreshToken()
+    if (!fresh) return
+    const result = await refreshGcCalendars(userId, fresh)
+    setCalendars(result.calendars)
+    setAccountEmail(result.accountEmail)
+  }, [userId, ensureFreshToken])
+
+  const accessToken = token?.access_token
+  useEffect(() => {
+    if (!withCalendars || !accessToken) { setCalendars([]); setAccountEmail(null); return }
+    setCalendarsLoading(true)
+    reloadCalendars()
+      .catch(e => { console.error('[googleCalendars]', e); setCalendarError(true) })
+      .finally(() => setCalendarsLoading(false))
+  }, [withCalendars, accessToken, reloadCalendars])
+
+  // ── Calendar selection ─────────────────────────────────────────────────────
+  const toggleCalendar = useCallback(async (calendarId: string, visible: boolean) => {
+    if (!userId) return
+    setCalendarError(false)
+    setCalendars(list => list.map(c => (c.calendar_id === calendarId ? { ...c, is_visible: visible } : c)))
+    try {
+      await setGcCalendarVisible(userId, calendarId, visible)
+      if (!visible) return
+      const fresh = await ensureFreshToken()
+      if (!fresh) return
+      const { created } = await pullFromGoogle(userId, fresh, [calendarId])
+      setSyncResult({ pushed: 0, pulled: created })
+    } catch (e) {
+      console.error('[toggleCalendar]', e)
+      setCalendarError(true)
+      setCalendars(list => list.map(c => (c.calendar_id === calendarId ? { ...c, is_visible: !visible } : c)))
+    }
+  }, [userId, ensureFreshToken])
+
+  const chooseTargetCalendar = useCallback(async (calendarId: string) => {
+    if (!userId) return
+    setCalendarError(false)
+    const previous = calendars
+    setCalendars(list => list.map(c => ({ ...c, is_target: c.calendar_id === calendarId })))
+    try {
+      await setGcTargetCalendar(userId, calendarId)
+    } catch (e) {
+      console.error('[chooseTargetCalendar]', e)
+      setCalendarError(true)
+      setCalendars(previous)
+    }
+  }, [userId, calendars])
+
   // ── Sync ───────────────────────────────────────────────────────────────────
   const syncAll = useCallback(async () => {
     if (!userId || !token?.access_token) return
@@ -151,6 +207,7 @@ export function useGoogleCalendar() {
     try {
       const accessToken = await ensureFreshToken()
       if (!accessToken) return
+      const { visible, target } = await loadGcSyncCalendars(userId)
 
       // Push Oryalis → Google (next 30 days + past 7 days)
       const from = new Date(Date.now() - 7 * 86400000).toISOString()
@@ -160,7 +217,7 @@ export function useGoogleCalendar() {
       for (const appt of appointments) {
         if (!appt.client_id) continue
         try {
-          await pushAppointmentToGoogle(userId, appt, accessToken)
+          await pushAppointmentToGoogle(userId, appt, accessToken, target)
           pushed++
         } catch (e: any) {
           if (e.message === 'gc_token_expired') { setError('Token expiré — reconnectez Google Agenda'); break }
@@ -169,7 +226,7 @@ export function useGoogleCalendar() {
       }
 
       // Pull Google → Oryalis
-      const { created: pulled } = await pullFromGoogle(userId, accessToken)
+      const { created: pulled } = await pullFromGoogle(userId, accessToken, visible)
 
       setSyncResult({ pushed, pulled })
       setTimeout(() => setSyncResult(null), 8000)
@@ -185,6 +242,12 @@ export function useGoogleCalendar() {
   return {
     isConfigured,
     isConnected,
+    accountEmail,
+    calendars,
+    calendarsLoading,
+    calendarError,
+    toggleCalendar,
+    chooseTargetCalendar,
     loading,
     syncing,
     syncResult,

@@ -92,9 +92,10 @@ function firstWord(s: string | null | undefined) {
 // qui laisserait croire à tort qu'un contact "Client" est rattaché à ce RDV.
 // contact_role vide MAIS client existant : délégué tel quel à getPrimaryRole, qui retombe déjà
 // sur 'customer' (son propre fallback existant, non dupliqué ici).
-function apptAccent(client: CalendarAppointment['client'], colors: ThemeColors): string {
-  if (!client) return colors.textTertiary
-  return getRoleColors(getPrimaryRole(client.contact_role), colors).text
+function apptAccent(appt: CalendarAppointment, colors: ThemeColors): string {
+  if (appt.calendar_color) return appt.calendar_color
+  if (!appt.client) return colors.textTertiary
+  return getRoleColors(getPrimaryRole(appt.client.contact_role), colors).text
 }
 
 // Constante partagée pour l'atténuation de carte (completed/cancelled) — reprend telle quelle
@@ -189,7 +190,7 @@ function AppointmentPreviewContent({
   monthsFull: string[]
   compact: boolean
 }) {
-  const accent = apptAccent(appt.client, colors)
+  const accent = apptAccent(appt, colors)
   const sp = statusPresentation(appt.status, t)
   const contactName = appt.client ? appt.client.full_name : appt.title
   // Rôles réels (pas seulement le rôle principal de la barre colorée) — même liste que les
@@ -258,7 +259,7 @@ function AppointmentQuickPreview({
   daysLong: string[]
   monthsFull: string[]
 }) {
-  const accent = apptAccent(appt.client, colors)
+  const accent = apptAccent(appt, colors)
   const sp = statusPresentation(appt.status, t)
   const isPersonal = appt.provider === 'google'
   const contactName = appt.client ? appt.client.full_name : appt.title
@@ -659,7 +660,7 @@ export default function AgendaScreen() {
                       // de symbole, un point n'a pas la place d'en porter un (§31).
                       <View style={styles.monthDotsRow}>
                         {events.slice(0, maxChips).map(appt => {
-                          const accent = apptAccent(appt.client, colors)
+                          const accent = apptAccent(appt, colors)
                           const sp = statusPresentation(appt.status, t)
                           return <View key={appt.id} style={[styles.monthDot, { backgroundColor: accent, opacity: sp.mutedCard ? MUTED_CARD_OPACITY : 1 }]} />
                         })}
@@ -668,7 +669,7 @@ export default function AgendaScreen() {
                     ) : (
                       <View style={styles.monthEvents}>
                         {events.slice(0, maxChips).map(appt => {
-                          const accent = apptAccent(appt.client, colors)
+                          const accent = apptAccent(appt, colors)
                           // Une seule ligne conservée (§25) : préfixe symbole optionnel avant
                           // l'heure (rescheduled/completed/no_show), légère atténuation +
                           // texte barré pour cancelled — jamais de deuxième ligne, jamais de
@@ -785,7 +786,7 @@ export default function AgendaScreen() {
                 return layoutCalendarAppointments(appts).map(({ appointment: appt, laneIndex, laneCount }) => {
                   // CAL-4.5 : accent = couleur du rôle principal du contact (même source que
                   // Contacts) — fond neutre inchangé (colors.card).
-                  const accent = apptAccent(appt.client, colors)
+                  const accent = apptAccent(appt, colors)
                   const topPx  = apptTopPx(appt, WEEK_HOUR_H)
                   const hPx    = apptHeightPx(appt, WEEK_HOUR_H, 24)
                   const d      = new Date(appt.start_at)
@@ -897,7 +898,7 @@ export default function AgendaScreen() {
             const hPx    = apptHeightPx(appt, DAY_HOUR_H, 56)
             // CAL-4.5 : accent = couleur du rôle principal du contact (même source que
             // Contacts) — fond neutre inchangé (colors.card).
-            const accent = apptAccent(appt.client, colors)
+            const accent = apptAccent(appt, colors)
             const laneGap = laneCount > 1 ? 4 : 0
             const rawLaneW = (dayColW - laneGap * (laneCount - 1)) / laneCount
             // CAL-4.4 : uniquement pour laneCount === 1 (un RDV seul), plafonne la largeur pour

@@ -2,7 +2,8 @@ import { supabase } from '@/shared/lib/supabase'
 import type { Appointment } from './appointmentTypes'
 
 const GC_API = 'https://www.googleapis.com/calendar/v3'
-const CALENDAR_ID = 'primary'
+// Identifiant du calendrier principal dans Oryalis, quel que soit le compte Google.
+export const PRIMARY_CALENDAR_ID = 'primary'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,16 @@ export interface GcEvent {
   start: { dateTime: string; timeZone?: string }
   end:   { dateTime: string; timeZone?: string }
   status?: 'confirmed' | 'tentative' | 'cancelled'
+}
+
+export interface GcCalendar {
+  calendar_id: string
+  name: string
+  color: string | null
+  is_primary: boolean
+  can_write: boolean
+  is_visible: boolean
+  is_target: boolean
 }
 
 // ── Token storage ─────────────────────────────────────────────────────────────
@@ -114,34 +125,145 @@ async function gcFetch(path: string, accessToken: string, options?: RequestInit)
   return response.json()
 }
 
+const calendarPath = (calendarId: string) => `/calendars/${encodeURIComponent(calendarId)}/events`
+
 export async function listGcEvents(
   accessToken: string,
+  calendarId: string,
   timeMin: string,
   timeMax: string
 ): Promise<GcEvent[]> {
   const params = new URLSearchParams({
     timeMin, timeMax, singleEvents: 'true', orderBy: 'startTime', maxResults: '250',
   })
-  const data = await gcFetch(`/calendars/${CALENDAR_ID}/events?${params}`, accessToken)
+  const data = await gcFetch(`${calendarPath(calendarId)}?${params}`, accessToken)
   return data?.items ?? []
 }
 
-export async function createGcEvent(accessToken: string, event: GcEvent): Promise<GcEvent> {
-  return gcFetch(`/calendars/${CALENDAR_ID}/events`, accessToken, {
+export async function createGcEvent(accessToken: string, calendarId: string, event: GcEvent): Promise<GcEvent> {
+  return gcFetch(calendarPath(calendarId), accessToken, {
     method: 'POST',
     body: JSON.stringify(event),
   })
 }
 
-export async function updateGcEvent(accessToken: string, eventId: string, event: Partial<GcEvent>): Promise<GcEvent> {
-  return gcFetch(`/calendars/${CALENDAR_ID}/events/${eventId}`, accessToken, {
+export async function updateGcEvent(accessToken: string, calendarId: string, eventId: string, event: Partial<GcEvent>): Promise<GcEvent> {
+  return gcFetch(`${calendarPath(calendarId)}/${eventId}`, accessToken, {
     method: 'PATCH',
     body: JSON.stringify(event),
   })
 }
 
-export async function deleteGcEvent(accessToken: string, eventId: string): Promise<void> {
-  await gcFetch(`/calendars/${CALENDAR_ID}/events/${eventId}`, accessToken, { method: 'DELETE' })
+export async function deleteGcEvent(accessToken: string, calendarId: string, eventId: string): Promise<void> {
+  await gcFetch(`${calendarPath(calendarId)}/${eventId}`, accessToken, { method: 'DELETE' })
+}
+
+// ── Calendar selection ────────────────────────────────────────────────────────
+
+const GC_CALENDAR_COLS = 'calendar_id, name, color, is_primary, can_write, is_visible, is_target'
+
+interface GcCalendarListItem {
+  id: string
+  summary?: string
+  summaryOverride?: string
+  backgroundColor?: string
+  accessRole?: string
+  primary?: boolean
+}
+
+async function removeImportedEvents(userId: string, calendarId: string): Promise<void> {
+  const { error } = await supabase.from('appointments').delete()
+    .eq('user_id', userId).eq('provider', 'google').eq('external_calendar_id', calendarId)
+  if (error) throw new Error(error.message)
+}
+
+// Met à jour la liste depuis Google en conservant les choix déjà faits. Le premier passage
+// reprend le comportement historique : calendrier principal seul.
+export async function refreshGcCalendars(
+  userId: string,
+  accessToken: string
+): Promise<{ calendars: GcCalendar[]; accountEmail: string | null }> {
+  const data = await gcFetch('/users/me/calendarList?maxResults=250', accessToken)
+  // Google ne donne pas les titres des calendriers "disponibilités seulement".
+  const remote = ((data?.items ?? []) as GcCalendarListItem[]).filter(c => c.accessRole !== 'freeBusyReader')
+
+  const { data: stored, error } = await supabase
+    .from('google_calendars').select(GC_CALENDAR_COLS).eq('user_id', userId)
+  if (error) throw new Error(error.message)
+  const known = new Map(((stored ?? []) as GcCalendar[]).map(c => [c.calendar_id, c]))
+
+  const rows: GcCalendar[] = remote.map(c => {
+    const calendarId = c.primary ? PRIMARY_CALENDAR_ID : c.id
+    const previous = known.get(calendarId)
+    const canWrite = c.accessRole === 'owner' || c.accessRole === 'writer'
+    return {
+      calendar_id: calendarId,
+      name: c.summaryOverride ?? c.summary ?? c.id,
+      color: c.backgroundColor ?? null,
+      is_primary: Boolean(c.primary),
+      can_write: canWrite,
+      is_visible: previous ? previous.is_visible : (known.size === 0 && Boolean(c.primary)),
+      is_target: Boolean(previous?.is_target) && canWrite,
+    }
+  })
+  if (!rows.some(c => c.is_target)) {
+    const primary = rows.find(c => c.is_primary)
+    if (primary) primary.is_target = true
+  }
+
+  if (rows.length > 0) {
+    const { error: saveError } = await supabase.from('google_calendars').upsert(
+      rows.map(c => ({ ...c, user_id: userId, updated_at: new Date().toISOString() })),
+      { onConflict: 'user_id,calendar_id' }
+    )
+    if (saveError) throw new Error(saveError.message)
+  }
+
+  const remoteIds = new Set(rows.map(c => c.calendar_id))
+  for (const calendarId of known.keys()) {
+    if (remoteIds.has(calendarId)) continue
+    await removeImportedEvents(userId, calendarId)
+    const { error: deleteError } = await supabase.from('google_calendars').delete()
+      .eq('user_id', userId).eq('calendar_id', calendarId)
+    if (deleteError) throw new Error(deleteError.message)
+  }
+
+  const sorted = [...rows].sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.name.localeCompare(b.name))
+  return { calendars: sorted, accountEmail: remote.find(c => c.primary)?.id ?? null }
+}
+
+// Décocher retire les copies d'Oryalis ; rien n'est supprimé chez Google.
+export async function setGcCalendarVisible(userId: string, calendarId: string, visible: boolean): Promise<void> {
+  const { error } = await supabase.from('google_calendars')
+    .update({ is_visible: visible, updated_at: new Date().toISOString() })
+    .eq('user_id', userId).eq('calendar_id', calendarId)
+  if (error) throw new Error(error.message)
+  if (!visible) await removeImportedEvents(userId, calendarId)
+}
+
+// Dans cet ordre : la base n'accepte qu'un seul calendrier cible à la fois.
+export async function setGcTargetCalendar(userId: string, calendarId: string): Promise<void> {
+  const updatedAt = new Date().toISOString()
+  const { error: clearError } = await supabase.from('google_calendars')
+    .update({ is_target: false, updated_at: updatedAt })
+    .eq('user_id', userId).eq('is_target', true)
+  if (clearError) throw new Error(clearError.message)
+  const { error } = await supabase.from('google_calendars')
+    .update({ is_target: true, updated_at: updatedAt })
+    .eq('user_id', userId).eq('calendar_id', calendarId)
+  if (error) throw new Error(error.message)
+}
+
+export async function loadGcSyncCalendars(userId: string): Promise<{ visible: string[]; target: string }> {
+  const { data, error } = await supabase
+    .from('google_calendars').select('calendar_id, is_visible, is_target').eq('user_id', userId)
+  if (error) throw new Error(error.message)
+  const rows = data ?? []
+  if (rows.length === 0) return { visible: [PRIMARY_CALENDAR_ID], target: PRIMARY_CALENDAR_ID }
+  return {
+    visible: rows.filter(c => c.is_visible).map(c => c.calendar_id),
+    target: rows.find(c => c.is_target)?.calendar_id ?? PRIMARY_CALENDAR_ID,
+  }
 }
 
 // ── Sync helpers ──────────────────────────────────────────────────────────────
@@ -162,12 +284,13 @@ function appointmentToGcEvent(appt: Appointment): GcEvent {
 export async function pushAppointmentToGoogle(
   userId: string,
   appt: Appointment,
-  accessToken: string
+  accessToken: string,
+  targetCalendarId: string
 ): Promise<string> {
   // Check if already synced
   const { data: existing } = await supabase
     .from('google_calendar_events')
-    .select('google_event_id')
+    .select('google_event_id, calendar_id')
     .eq('user_id', userId)
     .eq('appointment_id', appt.id)
     .single()
@@ -177,22 +300,22 @@ export async function pushAppointmentToGoogle(
   if (existing?.google_event_id) {
     // Update existing
     if (appt.status === 'cancelled') {
-      await deleteGcEvent(accessToken, existing.google_event_id)
+      await deleteGcEvent(accessToken, existing.calendar_id, existing.google_event_id)
       await supabase.from('google_calendar_events').delete()
         .eq('user_id', userId).eq('appointment_id', appt.id)
       return existing.google_event_id
     }
-    await updateGcEvent(accessToken, existing.google_event_id, gcEvent)
+    await updateGcEvent(accessToken, existing.calendar_id, existing.google_event_id, gcEvent)
     await supabase.from('google_calendar_events').update({ last_synced_at: new Date().toISOString() })
       .eq('user_id', userId).eq('appointment_id', appt.id)
     return existing.google_event_id
   }
 
   // Create new
-  const created = await createGcEvent(accessToken, gcEvent)
+  const created = await createGcEvent(accessToken, targetCalendarId, gcEvent)
   await supabase.from('google_calendar_events').insert({
     user_id: userId, appointment_id: appt.id,
-    google_event_id: created.id!, calendar_id: CALENDAR_ID,
+    google_event_id: created.id!, calendar_id: targetCalendarId,
   })
   return created.id!
 }
@@ -200,12 +323,34 @@ export async function pushAppointmentToGoogle(
 // Pull Google Calendar events → Oryalis appointments (next 30 days)
 export async function pullFromGoogle(
   userId: string,
-  accessToken: string
+  accessToken: string,
+  calendarIds: string[]
+): Promise<{ created: number; skipped: number }> {
+  let created = 0, skipped = 0
+  for (const calendarId of calendarIds) {
+    try {
+      const result = await pullCalendar(userId, accessToken, calendarId)
+      created += result.created
+      skipped += result.skipped
+    } catch (e) {
+      // Un calendrier devenu inaccessible ne doit pas bloquer les autres.
+      if (e instanceof Error && e.message === 'gc_token_expired') throw e
+      console.error('[pullFromGoogle]', calendarId, e)
+    }
+  }
+  return { created, skipped }
+}
+
+async function pullCalendar(
+  userId: string,
+  accessToken: string,
+  calendarId: string
 ): Promise<{ created: number; skipped: number }> {
   const now = new Date()
   const future = new Date(now.getTime() + 30 * 86400000)
   const events = await listGcEvents(
     accessToken,
+    calendarId,
     now.toISOString(),
     future.toISOString()
   )
@@ -238,6 +383,7 @@ export async function pullFromGoogle(
         location:         event.location ?? null,
         meeting_mode:     event.location ? 'in_person' : null,
         provider:         'google',
+        external_calendar_id: calendarId,
       })
       .select('id')
       .single()
@@ -246,7 +392,7 @@ export async function pullFromGoogle(
 
     await supabase.from('google_calendar_events').insert({
       user_id: userId, appointment_id: appt.id,
-      google_event_id: event.id, calendar_id: CALENDAR_ID,
+      google_event_id: event.id, calendar_id: calendarId,
     })
     created++
   }

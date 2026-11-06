@@ -355,6 +355,9 @@ export interface CalendarAppointment extends Pick<Appointment,
   'meeting_mode' | 'location' | 'meeting_url' | 'brand_id'
 > {
   client: { id: string; full_name: string; status: string; contact_role: ContactRole[]; phone?: string | null; timezone?: string | null } | null
+  external_calendar_id?: string | null
+  // Couleur du calendrier Google d'un événement importé.
+  calendar_color?: string | null
 }
 
 export interface CreateAppointmentPayload {

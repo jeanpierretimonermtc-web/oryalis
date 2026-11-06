@@ -320,6 +320,10 @@ Ajouts du 2026-11-06 (exécutés en prod) :
 - `20261106_avatars_per_account.sql` — bucket `avatars` : écriture limitée au dossier `<user_id>/`
   (`profile.jpg`, `clients/<id>.jpg`, `brands/<id>.jpg`), JPEG/PNG/WebP uniquement. Lecture publique inchangée.
 
+- `20261106_google_calendars.sql` — table `google_calendars` : calendriers Google affichés dans Oryalis
+  (`is_visible`) et calendrier unique recevant les RDV (`is_target`). Le principal garde l'id `primary` ;
+  `appointments.external_calendar_id` indique le calendrier d'origine d'un événement importé.
+
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
 `solutions_proposed`, `recap_sent`, `next_appointment_date`, `native_event_id` : elles n'existent plus

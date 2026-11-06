@@ -78,7 +78,7 @@ export async function fetchActiveAppointmentsByUser(userId: string): Promise<{ i
 // (getPrimaryRole/getRoleColors) au lieu d'une couleur propre au type de RDV.
 // DASH/CAL-2 — provider ajouté à la même jointure existante (aucun fetch supplémentaire) :
 // permet au calendrier de distinguer un RDV Oryalis d'un événement externe importé.
-const CALENDAR_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, provider, meeting_mode, location, meeting_url, brand_id, client:clients(id, full_name, status, contact_role, phone, timezone)'
+const CALENDAR_COLS = 'id, user_id, client_id, title, appointment_type, status, start_at, end_at, provider, external_calendar_id, meeting_mode, location, meeting_url, brand_id, client:clients(id, full_name, status, contact_role, phone, timezone)'
 
 // RDV d'une plage [rangeStart, rangeEnd[ (borne haute exclusive), avec jointure client
 // minimale pour l'affichage calendrier (Mois/Semaine/Jour). Distincte de fetchAppointments :
@@ -102,7 +102,18 @@ export async function fetchCalendarAppointments(rangeStart: string, rangeEnd: st
   // La jointure clients(...) est inférée en tableau par le client Supabase (relation à N
   // côté générateur de types), alors qu'il s'agit d'une relation à 1 (client_id est une FK
   // simple) — cast déjà utilisé tel quel par l'ancien code écran avant ce refactor.
-  return (data ?? []) as unknown as CalendarAppointment[]
+  const appointments = (data ?? []) as unknown as CalendarAppointment[]
+  if (!appointments.some(a => a.provider === 'google')) return appointments
+
+  const { data: calendars, error: calendarsError } = await supabase
+    .from('google_calendars').select('calendar_id, color').eq('user_id', userId)
+  if (calendarsError) throw new Error(calendarsError.message)
+  const colorById = new Map((calendars ?? []).map(c => [c.calendar_id, c.color as string | null]))
+  return appointments.map(a => (
+    a.provider === 'google' && a.external_calendar_id
+      ? { ...a, calendar_color: colorById.get(a.external_calendar_id) ?? null }
+      : a
+  ))
 }
 
 // Prochain RDV à venir, indépendamment de toute période affichée (ex. bandeau "Prochain RDV"
