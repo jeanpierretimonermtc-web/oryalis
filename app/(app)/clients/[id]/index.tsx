@@ -866,8 +866,9 @@ export default function ClientDetailScreen() {
     setUploadingAvatar(true)
     setActionError(null)
     try {
+      if (!session) return
       const blob = await (await fetch(uri)).blob()
-      const path = `client-${id}.jpg`
+      const path = `${session.user.id}/clients/${id}.jpg`
       const { error: uploadError } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
       if (uploadError) throw uploadError
       const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)

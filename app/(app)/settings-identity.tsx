@@ -39,9 +39,9 @@ export default function IdentitySettingsScreen() {
     setErrorMsg(null)
     try {
       const blob = await (await fetch(uri)).blob()
-      const { error } = await supabase.storage.from('avatars').upload(`${session.user.id}.jpg`, blob, { upsert: true, contentType: 'image/jpeg' })
+      const { error } = await supabase.storage.from('avatars').upload(`${session.user.id}/profile.jpg`, blob, { upsert: true, contentType: 'image/jpeg' })
       if (error) throw error
-      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(`${session.user.id}.jpg`)
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(`${session.user.id}/profile.jpg`)
       await save({ avatar_url: publicUrl })
     } catch (e) { console.error(e); setErrorMsg(t('settings.avatar_upload_error')) }
     finally { setUploading(false) }

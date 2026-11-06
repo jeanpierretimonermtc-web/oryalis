@@ -62,10 +62,10 @@ export async function updateBrand(id: string, patch: Partial<Pick<Brand, 'name' 
 }
 
 // Logo privé : bucket "avatars" existant (même mécanisme que les photos de contact), dossier
-// dédié brand-logos/<userId>/ ; ?t= force le rechargement quand l'image est remplacée.
+// dédié <userId>/brands/ ; ?t= force le rechargement quand l'image est remplacée.
 export async function uploadBrandLogo(userId: string, brandId: string, uri: string): Promise<string> {
   const blob = await (await fetch(uri)).blob()
-  const path = `brand-logos/${userId}/${brandId}.jpg`
+  const path = `${userId}/brands/${brandId}.jpg`
   const { error } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: blob.type || 'image/jpeg' })
   if (error) throw error
   const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
