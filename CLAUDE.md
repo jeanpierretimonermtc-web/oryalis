@@ -317,6 +317,8 @@ Ajouts du 2026-11-06 (exécutés en prod) :
 - `20261106_revoke_unchecked_functions.sql` — 7 fonctions sans contrôle de l'appelant retirées de `anon` et
   `authenticated` (`record_security_login_event` reste à `service_role` pour la fonction serveur). Audit du 2026-11-05 :
   les autres fonctions exposées sont utilitaires, contrôlent l'appelant, ou sont publiques (page prospect).
+- `20261106_avatars_per_account.sql` — bucket `avatars` : écriture limitée au dossier `<user_id>/`
+  (`profile.jpg`, `clients/<id>.jpg`, `brands/<id>.jpg`), JPEG/PNG/WebP uniquement. Lecture publique inchangée.
 
 Source de vérité TypeScript des rendez-vous : `features/appointments/appointmentTypes.ts`.
 Ne pas se fier à d'anciennes colonnes type `appointment_number`, `appointment_date`, `themes_discussed`,
