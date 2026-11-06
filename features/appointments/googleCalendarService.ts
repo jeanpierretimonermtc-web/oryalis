@@ -54,24 +54,35 @@ export async function deleteGcToken(userId: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
-export async function refreshGcAccessToken(
-  refreshToken: string,
-  clientId: string,
-  clientSecret: string
-): Promise<{ access_token: string; expires_at: string | null }> {
-  const params = new URLSearchParams({
-    refresh_token:  refreshToken,
-    client_id:      clientId,
-    client_secret:  clientSecret,
-    grant_type:     'refresh_token',
+// La clé secrète Google reste côté serveur (api/google-token.js).
+const GOOGLE_TOKEN_URL = `${process.env.EXPO_PUBLIC_APP_URL ?? 'https://oryalis.vercel.app'}/api/google-token`
+
+async function requestGoogleToken(payload: Record<string, string>) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+    body: JSON.stringify(payload),
   })
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body:    params.toString(),
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(`gc_token_failed: ${data.error ?? res.status}`)
+  return data as { access_token: string; refresh_token: string | null; expires_in: number | null }
+}
+
+export async function exchangeGcCode(code: string, redirectUri: string, codeVerifier?: string): Promise<GcToken> {
+  const data = await requestGoogleToken({
+    grant_type: 'authorization_code', code, redirect_uri: redirectUri,
+    ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
   })
-  if (!res.ok) throw new Error(`gc_refresh_failed: ${res.status}`)
-  const data = await res.json()
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token ?? null,
+    expires_at: data.expires_in ? new Date(Date.now() + data.expires_in * 1000).toISOString() : null,
+  }
+}
+
+export async function refreshGcAccessToken(refreshToken: string): Promise<{ access_token: string; expires_at: string | null }> {
+  const data = await requestGoogleToken({ grant_type: 'refresh_token', refresh_token: refreshToken })
   return {
     access_token: data.access_token,
     expires_at:   data.expires_in ? new Date(Date.now() + data.expires_in * 1000).toISOString() : null,

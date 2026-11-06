@@ -4,7 +4,7 @@ import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import { useAuth } from '@/features/auth/AuthProvider'
 import {
-  saveGcToken, loadGcToken, deleteGcToken, refreshGcAccessToken,
+  saveGcToken, loadGcToken, deleteGcToken, exchangeGcCode, refreshGcAccessToken,
   pushAppointmentToGoogle, pullFromGoogle,
 } from './googleCalendarService'
 import { fetchAppointments } from './appointmentService'
@@ -20,7 +20,6 @@ WebBrowser.maybeCompleteAuthSession()
 
 const CLIENT_ID_WEB     = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? ''
 const CLIENT_ID_IOS     = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS ?? CLIENT_ID_WEB
-const CLIENT_SECRET_WEB = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_SECRET ?? ''
 
 function getClientId() {
   if (Platform.OS === 'ios') return CLIENT_ID_IOS
@@ -91,28 +90,7 @@ export function useGoogleCalendar() {
   async function exchangeCode(code: string) {
     if (!userId) return
     try {
-      const params = new URLSearchParams({
-        code,
-        client_id:     getClientId(),
-        client_secret: CLIENT_SECRET_WEB,
-        redirect_uri:  redirectUri,
-        grant_type:    'authorization_code',
-        code_verifier: request?.codeVerifier ?? '',
-      })
-      const res = await fetch(DISCOVERY.tokenEndpoint, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body:    params.toString(),
-      })
-      if (!res.ok) throw new Error(`Token exchange failed: ${res.status}`)
-      const data = await res.json()
-      const gcToken: GcToken = {
-        access_token:  data.access_token,
-        refresh_token: data.refresh_token ?? null,
-        expires_at:    data.expires_in
-          ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-          : null,
-      }
+      const gcToken = await exchangeGcCode(code, redirectUri, request?.codeVerifier)
       await saveGcToken(userId, gcToken)
       setToken(gcToken)
     } catch (e) {
@@ -152,7 +130,7 @@ export function useGoogleCalendar() {
       return null
     }
     try {
-      const refreshed = await refreshGcAccessToken(token.refresh_token, getClientId(), CLIENT_SECRET_WEB)
+      const refreshed = await refreshGcAccessToken(token.refresh_token)
       const newToken: GcToken = { access_token: refreshed.access_token, refresh_token: token.refresh_token, expires_at: refreshed.expires_at }
       await saveGcToken(userId, newToken)
       setToken(newToken)

@@ -334,6 +334,8 @@ dans le schéma live (ancien modèle, retiré).
 - `appointments` reste la source de vérité métier des rendez-vous Oryalis.
 - `google_calendar_events` sert de table de correspondance (mapping `appointment_id` ↔ `google_event_id`).
 - `google_calendar_tokens` stocke la connexion OAuth Google (access/refresh token) par utilisateur.
+- Échange OAuth côté serveur : `api/google-token.js` (fonction Vercel, variables `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`).
+  Retour Google : `app/oauth/google.tsx`. Ne jamais remettre la clé secrète dans une variable `EXPO_PUBLIC_`.
 - Google Calendar est une copie externe synchronisée : il ne stocke jamais de données CRM internes
   (pipeline, notes internes, objections, tâches, débrief, intention commerciale).
 
