@@ -866,34 +866,6 @@ export default function ClientDetailScreen() {
     setUploadingAvatar(true)
     setActionError(null)
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-      let jwtRole = 'no-session'
-      if (token) {
-        try {
-          jwtRole = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role ?? 'unknown'
-        } catch { jwtRole = 'decode-failed' }
-      }
-      // DIAGNOSTIC TEMPORAIRE — à retirer une fois le bug RLS storage identifié.
-      console.error(`[uploadAvatarImage] session=${!!sessionData.session} role=${jwtRole}`)
-      if (token) {
-        try {
-          const rawResp = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/storage/v1/object/avatars/debug-raw-test.txt`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-              'Content-Type': 'text/plain',
-              'x-upsert': 'true',
-            },
-            body: 'debug',
-          })
-          const rawText = await rawResp.text()
-          console.error(`[uploadAvatarImage] raw fetch status=${rawResp.status} body=${rawText}`)
-        } catch (rawErr) {
-          console.error('[uploadAvatarImage] raw fetch threw', rawErr instanceof Error ? rawErr.message : String(rawErr))
-        }
-      }
       const blob = await (await fetch(uri)).blob()
       const path = `client-${id}.jpg`
       const { error: uploadError } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
